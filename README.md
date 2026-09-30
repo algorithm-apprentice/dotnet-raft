@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M1 Foundations
 - **Current milestone:** M2 Log substrate
-- **Completed nodes:** D00-D11
-- **Next node:** D12 Core state-machine shell
+- **Completed nodes:** D00-D12
+- **Next node:** D13 Leader election
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -31,6 +31,7 @@ following the validated graph in strict topological order.
 - [D09 progress tracker design](docs/design/d09-progress-tracker.md)
 - [D10 configuration changes design](docs/design/d10-configuration-changes.md)
 - [D11 read-only tracker design](docs/design/d11-read-only-tracker.md)
+- [D12 core state-machine shell design](docs/design/d12-core-state-machine-shell.md)
 
 ## Development principles
 

@@ -60,6 +60,23 @@ internal sealed class Progress
             _ => throw UnknownState(),
         };
 
+    internal void Reset(ulong match, ulong next)
+    {
+        if (next == 0 || next <= match)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(next),
+                next,
+                $"Next index must be greater than match index {match}.");
+        }
+
+        Match = match;
+        Next = next;
+        LastSentCommit = 0;
+        RecentActive = false;
+        ResetState(ProgressState.Probe);
+    }
+
     internal void BecomeProbe()
     {
         ulong matchNext = IncrementIndex(
