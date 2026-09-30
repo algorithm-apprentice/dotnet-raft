@@ -165,7 +165,7 @@ public sealed class RaftCoreReplicationTests
     }
 
     [Fact]
-    public void LeaderProposalClonesEntriesAndBroadcastsUnlimitedBatch()
+    public void LeaderProposalClonesEntriesAndHonorsMessageLimit()
     {
         RaftCore core = NewLeader(
             voters: [1, 2, 3],
@@ -203,7 +203,7 @@ public sealed class RaftCoreReplicationTests
         Assert.Equal(EntryType.EntryConfChange, appended[1].Type);
         Assert.Equal("first", appended[0].Data.ToStringUtf8());
         Assert.Equal("second", appended[1].Data.ToStringUtf8());
-        Assert.Equal(0UL, core.UncommittedSize);
+        Assert.Equal(11UL, core.UncommittedSize);
 
         Message selfAck = Assert.Single(
             core.TakeMessagesAfterAppend());
@@ -217,9 +217,8 @@ public sealed class RaftCoreReplicationTests
             Assert.Equal(1UL, message.Index);
             Assert.Equal(1UL, message.LogTerm);
             Assert.Equal(0UL, message.Commit);
-            Assert.Equal(3, message.Entries.Count);
             Assert.Equal(
-                [2UL, 3UL, 4UL],
+                [2UL],
                 message.Entries.Select(entry => entry.Index));
         });
 
@@ -494,7 +493,9 @@ public sealed class RaftCoreReplicationTests
             core,
             from: 2,
             index: 3,
-            reject: true));
+            reject: true,
+            rejectHint: 2,
+            logTerm: 1));
 
         Assert.Equal(3UL, remote.Next);
         Message retry = Assert.Single(core.TakeMessages());
@@ -507,7 +508,9 @@ public sealed class RaftCoreReplicationTests
             core,
             from: 2,
             index: 3,
-            reject: true));
+            reject: true,
+            rejectHint: 2,
+            logTerm: 1));
         Assert.Equal(3UL, remote.Next);
         Assert.Empty(core.TakeMessages());
 
@@ -515,7 +518,9 @@ public sealed class RaftCoreReplicationTests
             core,
             from: 2,
             index: 0,
-            reject: true));
+            reject: true,
+            rejectHint: 0,
+            logTerm: 0));
         Assert.Equal(3UL, remote.Next);
         Assert.Empty(core.TakeMessages());
     }
@@ -791,7 +796,9 @@ public sealed class RaftCoreReplicationTests
         RaftCore core,
         ulong from,
         ulong index,
-        bool reject = false)
+        bool reject = false,
+        ulong rejectHint = 0,
+        ulong logTerm = 0)
     {
         return new Message
         {
@@ -801,6 +808,8 @@ public sealed class RaftCoreReplicationTests
             Type = MessageType.MsgAppResp,
             Index = index,
             Reject = reject,
+            RejectHint = rejectHint,
+            LogTerm = logTerm,
         };
     }
 }

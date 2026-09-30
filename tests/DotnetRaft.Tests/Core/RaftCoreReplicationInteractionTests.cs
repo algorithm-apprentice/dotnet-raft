@@ -1,5 +1,6 @@
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
+using DotnetRaft.Tracker;
 
 using Google.Protobuf;
 
@@ -41,7 +42,7 @@ public sealed class RaftCoreReplicationInteractionTests
     }
 
     [Fact]
-    public void NaiveOneIndexRetriesRepairDivergentFollowerSuffix()
+    public void TermAwareRetriesRepairDivergentFollowerSuffix()
     {
         RaftCore leader = Create(
             id: 1,
@@ -77,10 +78,100 @@ public sealed class RaftCoreReplicationInteractionTests
             follower.Log.GetAllEntries());
         Assert.Equal(4UL, leader.Log.Committed);
         Assert.Equal(4UL, follower.Log.Committed);
-        Assert.True(network.RejectedAppendCount >= 2);
+        Assert.Equal(2, network.RejectedAppendCount);
+    }
+
+    [Fact]
+    public void TermAwareHintsSkipLongDivergentSuffixInTwoRejections()
+    {
+        var leaderEntries = new List<Entry>
+        {
+            EntryAt(1, 1),
+        };
+        var followerEntries = new List<Entry>
+        {
+            EntryAt(1, 1),
+        };
+        for (ulong index = 2; index <= 101; index++)
+        {
+            leaderEntries.Add(EntryAt(index, 2));
+            followerEntries.Add(EntryAt(index, 3));
+        }
+
+        leaderEntries.Add(EntryAt(102, 5));
+        RaftCore leader = Create(
+            id: 1,
+            voters: [1, 2],
+            entries: leaderEntries,
+            term: 5).Core;
+        RaftCore follower = Create(
+            id: 2,
+            voters: [1, 2],
+            entries: followerEntries,
+            term: 5).Core;
+        var network = new DeterministicNetwork(leader, follower);
+
+        network.Deliver(Hup(1));
+
+        Assert.Equal(RaftRole.Leader, leader.Role);
+        Assert.Equal(2, network.RejectedAppendCount);
+        Assert.Equal(103UL, leader.Log.LastIndex);
+        Assert.Equal(103UL, follower.Log.LastIndex);
+        Assert.Equal(
+            leader.Log.GetAllEntries(),
+            follower.Log.GetAllEntries());
+        Assert.Equal(103UL, leader.Log.Committed);
+        Assert.Equal(103UL, follower.Log.Committed);
+    }
+
+    [Fact]
+    public void BoundedPipelineReplicatesAndCommitsMultiEntryProposal()
+    {
+        var network = new DeterministicNetwork(
+            Create(
+                voters: [1, 2],
+                id: 1,
+                maxSizePerMessage: 0,
+                maxInflightMessages: 2).Core,
+            Create(
+                voters: [1, 2],
+                id: 2,
+                maxSizePerMessage: 0,
+                maxInflightMessages: 2).Core);
+
+        network.Deliver(Hup(1));
+        network.Deliver(Proposal(
+            1,
+            "one",
+            "two",
+            "three",
+            "four",
+            "five"));
+
+        Assert.All(network.Nodes, core =>
+        {
+            Assert.Equal(6UL, core.Log.LastIndex);
+            Assert.Equal(6UL, core.Log.Committed);
+            Assert.Equal(
+                ["one", "two", "three", "four", "five"],
+                core.Log.GetEntries(2)
+                    .Select(entry => entry.Data.ToStringUtf8()));
+        });
+        Progress remote = network[1].Tracker.Progress[2];
+        Assert.Equal(ProgressState.Replicate, remote.State);
+        Assert.Equal(6UL, remote.Match);
+        Assert.Equal(7UL, remote.Next);
+        Assert.Equal(0, remote.Inflights.Count);
     }
 
     private static Message Proposal(ulong id, string data)
+    {
+        return Proposal(id, [data]);
+    }
+
+    private static Message Proposal(
+        ulong id,
+        params string[] entries)
     {
         var message = new Message
         {
@@ -88,10 +179,14 @@ public sealed class RaftCoreReplicationInteractionTests
             To = id,
             Type = MessageType.MsgProp,
         };
-        message.Entries.Add(new Entry
+        foreach (string data in entries)
         {
-            Data = ByteString.CopyFromUtf8(data),
-        });
+            message.Entries.Add(new Entry
+            {
+                Data = ByteString.CopyFromUtf8(data),
+            });
+        }
+
         return message;
     }
 

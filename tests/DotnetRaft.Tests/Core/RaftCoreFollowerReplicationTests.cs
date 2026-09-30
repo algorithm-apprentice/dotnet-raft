@@ -148,8 +148,8 @@ public sealed class RaftCoreFollowerReplicationTests
             core.TakeMessagesAfterAppend());
         Assert.True(response.Reject);
         Assert.Equal(2UL, response.Index);
-        Assert.Equal(0UL, response.RejectHint);
-        Assert.Equal(0UL, response.LogTerm);
+        Assert.Equal(2UL, response.RejectHint);
+        Assert.Equal(2UL, response.LogTerm);
     }
 
     [Fact]

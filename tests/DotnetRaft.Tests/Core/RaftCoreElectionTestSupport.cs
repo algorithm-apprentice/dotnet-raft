@@ -33,6 +33,8 @@ internal static class RaftCoreElectionTestSupport
         ulong maxCommittedSizePerReady = 0,
         ulong maxSizePerMessage = ulong.MaxValue,
         ulong maxUncommittedEntriesSize = 0,
+        int maxInflightMessages = 256,
+        ulong maxInflightBytes = 0,
         bool checkQuorum = false,
         bool disableProposalForwarding = false,
         Func<int, int>? randomOffset = null)
@@ -77,6 +79,8 @@ internal static class RaftCoreElectionTestSupport
                 MaxSizePerMessage = maxSizePerMessage,
                 MaxUncommittedEntriesSize =
                     maxUncommittedEntriesSize,
+                MaxInflightMessages = maxInflightMessages,
+                MaxInflightBytes = maxInflightBytes,
                 CheckQuorum = checkQuorum,
                 DisableProposalForwarding =
                     disableProposalForwarding,

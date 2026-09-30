@@ -15,10 +15,10 @@ state machine remain application responsibilities.
 The architecture and implementation DAG are complete. Implementation is
 following the validated graph in strict topological order.
 
-- **Completed milestone:** M3 Election model
-- **Current milestone:** M4 Replicated log
-- **Completed nodes:** D00-D14
-- **Next node:** D15 Replication flow control
+- **Completed milestone:** M4 Replicated log
+- **Current milestone:** M5 Full core semantics
+- **Completed nodes:** D00-D15
+- **Next node:** D16 Snapshots
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -34,6 +34,7 @@ following the validated graph in strict topological order.
 - [D12 core state-machine shell design](docs/design/d12-core-state-machine-shell.md)
 - [D13 leader election design](docs/design/d13-leader-election.md)
 - [D14 basic log replication design](docs/design/d14-basic-log-replication.md)
+- [D15 replication flow control design](docs/design/d15-replication-flow-control.md)
 
 ## Development principles
 

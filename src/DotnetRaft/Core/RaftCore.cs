@@ -262,7 +262,12 @@ internal sealed class RaftCore
         localProgress.BecomeReplicate();
         localProgress.RecentActive = true;
         PendingConfigurationIndex = lastIndex;
-        AppendLeaderEntries([new Entry()]);
+        if (!AppendLeaderEntries([new Entry()]))
+        {
+            throw new RaftInvariantException(
+                "The leader no-op cannot be rejected by the uncommitted-size quota.");
+        }
+
         LogInformation(
             $"{Id:x} became leader at term {Term}.");
     }
@@ -476,6 +481,13 @@ internal sealed class RaftCore
         return Take(messagesAfterAppend);
     }
 
+    internal void ReduceUncommittedSize(ulong payloadSize)
+    {
+        UncommittedSize = payloadSize >= UncommittedSize
+            ? 0
+            : UncommittedSize - payloadSize;
+    }
+
     private static bool IsEmpty(HardState? state)
     {
         return state is null
@@ -652,6 +664,13 @@ internal sealed class RaftCore
                 }
 
                 return;
+            case MessageType.MsgUnreachable:
+                if (Role == RaftRole.Leader)
+                {
+                    HandleUnreachable(message);
+                }
+
+                return;
             case MessageType.MsgApp:
             case MessageType.MsgHeartbeat:
             case MessageType.MsgSnap:
@@ -736,7 +755,12 @@ internal sealed class RaftCore
                         "The leader has no local replication progress.");
                 }
 
-                AppendLeaderEntries(message.Entries);
+                if (!AppendLeaderEntries(message.Entries))
+                {
+                    throw new ProposalDroppedException(
+                        "The proposal exceeds the uncommitted entry size limit.");
+                }
+
                 BroadcastAppend();
                 return;
             case RaftRole.Follower:
@@ -766,7 +790,7 @@ internal sealed class RaftCore
         }
     }
 
-    private void AppendLeaderEntries(
+    private bool AppendLeaderEntries(
         IEnumerable<Entry> entries)
     {
         Entry[] appended = ProtocolCloning.CloneEntries(entries);
@@ -791,6 +815,40 @@ internal sealed class RaftCore
                 $"Appending {appended.Length} entries after index {lastIndex} would leave no representable successor.");
         }
 
+        ulong payloadSize;
+        try
+        {
+            payloadSize = EntrySizing.PayloadSize(appended);
+        }
+        catch (OverflowException exception)
+        {
+            throw new RaftInvariantException(
+                $"Proposal payload size overflowed: {exception.Message}");
+        }
+
+        ulong nextUncommittedSize = UncommittedSize;
+        if (UncommittedSize > 0 && payloadSize > 0)
+        {
+            if (payloadSize > ulong.MaxValue - UncommittedSize)
+            {
+                return false;
+            }
+
+            nextUncommittedSize =
+                UncommittedSize + payloadSize;
+            if (nextUncommittedSize >
+                MaxUncommittedEntriesSize)
+            {
+                return false;
+            }
+        }
+        else
+        {
+            nextUncommittedSize = payloadSize == 0
+                ? UncommittedSize
+                : payloadSize;
+        }
+
         for (var offset = 0; offset < appended.Length; offset++)
         {
             Entry entry = appended[offset];
@@ -800,12 +858,14 @@ internal sealed class RaftCore
         }
 
         ulong newLastIndex = Log.Append(appended);
+        UncommittedSize = nextUncommittedSize;
         Send(new Message
         {
             To = Id,
             Type = MessageType.MsgAppResp,
             Index = newLastIndex,
         });
+        return true;
     }
 
     private void BroadcastAppend()
@@ -814,25 +874,58 @@ internal sealed class RaftCore
         {
             if (id != Id)
             {
-                SendAppend(id, progress);
+                MaybeSendAppend(
+                    id,
+                    progress,
+                    sendIfEmpty: true);
             }
         });
     }
 
-    private bool SendAppend(ulong to, Progress progress)
+    private bool MaybeSendAppend(
+        ulong to,
+        Progress progress,
+        bool sendIfEmpty)
     {
+        if (progress.IsPaused)
+        {
+            return false;
+        }
+
         ulong previousIndex = progress.Next - 1;
         ulong previousTerm;
         IReadOnlyList<Entry> entries;
         try
         {
             previousTerm = Log.GetTerm(previousIndex);
-            entries = Log.GetEntries(progress.Next);
+            entries =
+                progress.State == ProgressState.Replicate
+                && progress.Inflights.IsFull
+                    ? []
+                    : Log.GetEntries(
+                        progress.Next,
+                        MaxMessageSize);
         }
         catch (StorageException exception)
             when (exception.Error == StorageError.Compacted)
         {
             return false;
+        }
+
+        if (entries.Count == 0 && !sendIfEmpty)
+        {
+            return false;
+        }
+
+        ulong payloadSize;
+        try
+        {
+            payloadSize = EntrySizing.PayloadSize(entries);
+        }
+        catch (OverflowException exception)
+        {
+            throw new RaftInvariantException(
+                $"Append payload size overflowed: {exception.Message}");
         }
 
         var message = new Message
@@ -845,6 +938,8 @@ internal sealed class RaftCore
         };
         message.Entries.Add(entries);
         Send(message);
+        progress.SentEntries(entries.Count, payloadSize);
+        progress.RecordSentCommit(Log.Committed);
         return true;
     }
 
@@ -881,12 +976,20 @@ internal sealed class RaftCore
             return;
         }
 
+        ulong hintIndex = Math.Min(
+            message.Index,
+            Log.LastIndex);
+        EntryId hint = Log.FindConflictByTerm(
+            hintIndex,
+            message.LogTerm);
         Send(new Message
         {
             To = message.From,
             Type = MessageType.MsgAppResp,
             Index = message.Index,
             Reject = true,
+            RejectHint = hint.Index,
+            LogTerm = hint.Term,
         });
     }
 
@@ -907,11 +1010,28 @@ internal sealed class RaftCore
                 return;
             }
 
+            ulong nextProbeIndex = message.RejectHint;
+            if (message.LogTerm > 0)
+            {
+                nextProbeIndex = Log.FindConflictByTerm(
+                    message.RejectHint,
+                    message.LogTerm).Index;
+            }
+
             if (progress.MaybeDecrementTo(
                     message.Index,
-                    message.Index - 1))
+                    nextProbeIndex))
             {
-                SendAppend(message.From, progress);
+                if (progress.State ==
+                    ProgressState.Replicate)
+                {
+                    progress.BecomeProbe();
+                }
+
+                MaybeSendAppend(
+                    message.From,
+                    progress,
+                    sendIfEmpty: true);
             }
 
             return;
@@ -924,9 +1044,29 @@ internal sealed class RaftCore
         }
 
         progress.RecentActive = true;
-        if (!progress.MaybeUpdate(message.Index))
+        bool updated = progress.MaybeUpdate(
+            message.Index);
+        if (!updated
+            && !(progress.State == ProgressState.Probe
+                 && progress.Match == message.Index))
         {
             return;
+        }
+
+        switch (progress.State)
+        {
+            case ProgressState.Probe:
+                progress.BecomeReplicate();
+                break;
+            case ProgressState.Replicate:
+                progress.Inflights.FreeThrough(
+                    message.Index);
+                break;
+            case ProgressState.Snapshot:
+                break;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown progress state {progress.State}.");
         }
 
         if (MaybeCommit())
@@ -934,9 +1074,23 @@ internal sealed class RaftCore
             BroadcastAppend();
         }
         else if (message.From != Id
-                 && progress.Match < Log.LastIndex)
+                 && progress.CanBumpCommit(
+                     Log.Committed))
         {
-            SendAppend(message.From, progress);
+            MaybeSendAppend(
+                message.From,
+                progress,
+                sendIfEmpty: true);
+        }
+
+        if (message.From != Id)
+        {
+            while (MaybeSendAppend(
+                       message.From,
+                       progress,
+                       sendIfEmpty: false))
+            {
+            }
         }
     }
 
@@ -960,10 +1114,10 @@ internal sealed class RaftCore
             {
                 To = id,
                 Type = MessageType.MsgHeartbeat,
-                Commit = Math.Min(
-                    progress.Match,
-                    Log.Committed),
+                Commit = Math.Min(progress.Match, Log.Committed),
             });
+            progress.RecordSentCommit(
+                Math.Min(progress.Match, Log.Committed));
         });
     }
 
@@ -988,9 +1142,29 @@ internal sealed class RaftCore
         }
 
         progress.RecentActive = true;
-        if (progress.Match < Log.LastIndex)
+        progress.AppendFlowPaused = false;
+        if (progress.Match < Log.LastIndex
+            || progress.State == ProgressState.Probe)
         {
-            SendAppend(message.From, progress);
+            MaybeSendAppend(
+                message.From,
+                progress,
+                sendIfEmpty: true);
+        }
+    }
+
+    private void HandleUnreachable(Message message)
+    {
+        if (!Tracker.Progress.TryGetValue(
+                message.From,
+                out Progress? progress))
+        {
+            return;
+        }
+
+        if (progress.State == ProgressState.Replicate)
+        {
+            progress.BecomeProbe();
         }
     }
 
