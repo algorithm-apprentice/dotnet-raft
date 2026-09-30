@@ -6,13 +6,29 @@ public static class ProtocolDefaults
 {
     public static ConfState EnsureConfState(ConfState? state)
     {
-        return state ?? new ConfState();
+        state ??= new ConfState();
+        if (!state.HasAutoLeave)
+        {
+            state.AutoLeave = false;
+        }
+
+        return state;
     }
 
     public static SnapshotMetadata EnsureSnapshotMetadata(SnapshotMetadata? metadata)
     {
         metadata ??= new SnapshotMetadata();
-        metadata.ConfState ??= new ConfState();
+        metadata.ConfState = EnsureConfState(metadata.ConfState);
+        if (!metadata.HasIndex)
+        {
+            metadata.Index = 0;
+        }
+
+        if (!metadata.HasTerm)
+        {
+            metadata.Term = 0;
+        }
+
         return metadata;
     }
 

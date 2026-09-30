@@ -16,12 +16,14 @@ The architecture and implementation DAG are complete. Implementation is
 following the validated graph in strict topological order.
 
 - **Completed milestone:** M1 Foundations
-- **Completed nodes:** D00-D03
-- **Next node:** D04 Stable storage
+- **Current milestone:** M2 Log substrate
+- **Completed nodes:** D00-D04
+- **Next node:** D05 Unstable log buffer
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
 - [ADR 0001: Porting strategy and architectural boundary](docs/adr/0001-porting-strategy.md)
+- [D04 stable storage design](docs/design/d04-stable-storage.md)
 
 ## Development principles
 

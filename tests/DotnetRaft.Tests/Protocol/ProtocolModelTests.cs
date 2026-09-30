@@ -80,12 +80,15 @@ public sealed class ProtocolModelTests
     }
 
     [Fact]
-    public void EnsureSnapshotPopulatesNestedMessages()
+    public void EnsureSnapshotPopulatesNestedMessagesAndDefaultPresence()
     {
         var snapshot = ProtocolDefaults.EnsureSnapshot(null);
 
         Assert.NotNull(snapshot.Metadata);
         Assert.NotNull(snapshot.Metadata.ConfState);
+        Assert.True(snapshot.Metadata.HasIndex);
+        Assert.True(snapshot.Metadata.HasTerm);
+        Assert.True(snapshot.Metadata.ConfState.HasAutoLeave);
     }
 
     [Fact]
