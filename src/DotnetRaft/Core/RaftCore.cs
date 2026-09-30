@@ -5,6 +5,7 @@ using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Quorum;
 using DotnetRaft.Read;
+using DotnetRaft.Storage;
 using DotnetRaft.Tracker;
 
 namespace DotnetRaft.Core;
@@ -247,13 +248,21 @@ internal sealed class RaftCore
                 $"Cannot become leader without local progress for {Id:x}.");
         }
 
+        ulong lastIndex = Log.LastIndex;
+        if (lastIndex >= ulong.MaxValue - 1)
+        {
+            throw new RaftInvariantException(
+                $"Cannot append a leader no-op after index {lastIndex} with a representable successor.");
+        }
+
         Reset(Term);
         LeaderId = Id;
         Role = RaftRole.Leader;
 
         localProgress.BecomeReplicate();
         localProgress.RecentActive = true;
-        PendingConfigurationIndex = Log.LastIndex;
+        PendingConfigurationIndex = lastIndex;
+        AppendLeaderEntries([new Entry()]);
         LogInformation(
             $"{Id:x} became leader at term {Term}.");
     }
@@ -312,6 +321,22 @@ internal sealed class RaftCore
             From = Id,
             To = Id,
             Type = MessageType.MsgHup,
+        });
+    }
+
+    internal void TickLeader()
+    {
+        LeaderClockTick tick = TickLeaderClocks();
+        if (!tick.HeartbeatDue || Role != RaftRole.Leader)
+        {
+            return;
+        }
+
+        Step(new Message
+        {
+            From = Id,
+            To = Id,
+            Type = MessageType.MsgBeat,
         });
     }
 
@@ -601,33 +626,72 @@ internal sealed class RaftCore
 
     private void HandleRoleMessage(Message message)
     {
-        if (IsLeaderMessage(message.Type))
+        switch (message.Type)
         {
-            HandleLeaderMessage(message);
-            return;
+            case MessageType.MsgProp:
+                HandleProposal(message);
+                return;
+            case MessageType.MsgBeat:
+                if (Role == RaftRole.Leader)
+                {
+                    BroadcastHeartbeat();
+                }
+
+                return;
+            case MessageType.MsgAppResp:
+                if (Role == RaftRole.Leader)
+                {
+                    HandleAppendResponse(message);
+                }
+
+                return;
+            case MessageType.MsgHeartbeatResp:
+                if (Role == RaftRole.Leader)
+                {
+                    HandleHeartbeatResponse(message);
+                }
+
+                return;
+            case MessageType.MsgApp:
+            case MessageType.MsgHeartbeat:
+            case MessageType.MsgSnap:
+                if (!HandleLeaderMessage(message))
+                {
+                    return;
+                }
+
+                break;
         }
 
-        if (Role == RaftRole.Candidate
-            && message.Type == MessageType.MsgVoteResp)
+        switch (message.Type)
         {
-            HandleVoteResponse(message);
+            case MessageType.MsgApp:
+                HandleAppendEntries(message);
+                return;
+            case MessageType.MsgHeartbeat:
+                HandleHeartbeat(message);
+                return;
+            case MessageType.MsgVoteResp
+                when Role == RaftRole.Candidate:
+                HandleVoteResponse(message);
+                return;
         }
     }
 
-    private void HandleLeaderMessage(Message message)
+    private bool HandleLeaderMessage(Message message)
     {
         switch (Role)
         {
             case RaftRole.Follower:
                 electionElapsed = 0;
                 LeaderId = message.From;
-                return;
+                return true;
             case RaftRole.PreCandidate:
             case RaftRole.Candidate:
                 BecomeFollower(Term, message.From);
-                return;
+                return true;
             case RaftRole.Leader:
-                return;
+                return false;
             default:
                 throw new RaftInvariantException(
                     $"Unknown Raft role {Role}.");
@@ -642,6 +706,7 @@ internal sealed class RaftCore
         {
             case VoteResult.Won:
                 BecomeLeader();
+                BroadcastAppend();
                 return;
             case VoteResult.Lost:
                 BecomeFollower(Term, RaftMessageTargets.None);
@@ -651,6 +716,281 @@ internal sealed class RaftCore
             default:
                 throw new RaftInvariantException(
                     $"Unknown vote result {result}.");
+        }
+    }
+
+    private void HandleProposal(Message message)
+    {
+        if (message.Entries.Count == 0)
+        {
+            throw new RaftInvariantException(
+                "A proposal must contain at least one entry.");
+        }
+
+        switch (Role)
+        {
+            case RaftRole.Leader:
+                if (!Tracker.Progress.ContainsKey(Id))
+                {
+                    throw new ProposalDroppedException(
+                        "The leader has no local replication progress.");
+                }
+
+                AppendLeaderEntries(message.Entries);
+                BroadcastAppend();
+                return;
+            case RaftRole.Follower:
+                if (LeaderId == RaftMessageTargets.None)
+                {
+                    throw new ProposalDroppedException(
+                        "The follower has no known leader.");
+                }
+
+                if (DisableProposalForwarding)
+                {
+                    throw new ProposalDroppedException(
+                        "Proposal forwarding is disabled.");
+                }
+
+                Message forwarded = message.Clone();
+                forwarded.To = LeaderId;
+                Send(forwarded);
+                return;
+            case RaftRole.PreCandidate:
+            case RaftRole.Candidate:
+                throw new ProposalDroppedException(
+                    $"A {Role} cannot process proposals.");
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown Raft role {Role}.");
+        }
+    }
+
+    private void AppendLeaderEntries(
+        IEnumerable<Entry> entries)
+    {
+        Entry[] appended = ProtocolCloning.CloneEntries(entries);
+        if (appended.Length == 0)
+        {
+            throw new RaftInvariantException(
+                "At least one leader entry is required.");
+        }
+
+        ulong lastIndex = Log.LastIndex;
+        if (lastIndex == ulong.MaxValue)
+        {
+            throw new RaftInvariantException(
+                "The log has no representable successor index.");
+        }
+
+        ulong availableIndexes =
+            ulong.MaxValue - lastIndex - 1;
+        if ((ulong)appended.Length > availableIndexes)
+        {
+            throw new RaftInvariantException(
+                $"Appending {appended.Length} entries after index {lastIndex} would leave no representable successor.");
+        }
+
+        for (var offset = 0; offset < appended.Length; offset++)
+        {
+            Entry entry = appended[offset];
+            entry.Term = Term;
+            entry.Index =
+                lastIndex + (ulong)offset + 1;
+        }
+
+        ulong newLastIndex = Log.Append(appended);
+        Send(new Message
+        {
+            To = Id,
+            Type = MessageType.MsgAppResp,
+            Index = newLastIndex,
+        });
+    }
+
+    private void BroadcastAppend()
+    {
+        Tracker.Visit((id, progress) =>
+        {
+            if (id != Id)
+            {
+                SendAppend(id, progress);
+            }
+        });
+    }
+
+    private bool SendAppend(ulong to, Progress progress)
+    {
+        ulong previousIndex = progress.Next - 1;
+        ulong previousTerm;
+        IReadOnlyList<Entry> entries;
+        try
+        {
+            previousTerm = Log.GetTerm(previousIndex);
+            entries = Log.GetEntries(progress.Next);
+        }
+        catch (StorageException exception)
+            when (exception.Error == StorageError.Compacted)
+        {
+            return false;
+        }
+
+        var message = new Message
+        {
+            To = to,
+            Type = MessageType.MsgApp,
+            Index = previousIndex,
+            LogTerm = previousTerm,
+            Commit = Log.Committed,
+        };
+        message.Entries.Add(entries);
+        Send(message);
+        return true;
+    }
+
+    private void HandleAppendEntries(Message message)
+    {
+        if (message.Index < Log.Committed)
+        {
+            Send(new Message
+            {
+                To = message.From,
+                Type = MessageType.MsgAppResp,
+                Index = Log.Committed,
+            });
+            return;
+        }
+
+        var slice = new LogSlice(
+            message.Term,
+            new EntryId(
+                Term: message.LogTerm,
+                Index: message.Index),
+            message.Entries);
+        if (Log.MaybeAppend(
+                slice,
+                message.Commit,
+                out ulong lastNewIndex))
+        {
+            Send(new Message
+            {
+                To = message.From,
+                Type = MessageType.MsgAppResp,
+                Index = lastNewIndex,
+            });
+            return;
+        }
+
+        Send(new Message
+        {
+            To = message.From,
+            Type = MessageType.MsgAppResp,
+            Index = message.Index,
+            Reject = true,
+        });
+    }
+
+    private void HandleAppendResponse(Message message)
+    {
+        if (!Tracker.Progress.TryGetValue(
+                message.From,
+                out Progress? progress))
+        {
+            return;
+        }
+
+        if (message.Reject)
+        {
+            progress.RecentActive = true;
+            if (message.Index == 0)
+            {
+                return;
+            }
+
+            if (progress.MaybeDecrementTo(
+                    message.Index,
+                    message.Index - 1))
+            {
+                SendAppend(message.From, progress);
+            }
+
+            return;
+        }
+
+        if (message.Index > Log.LastIndex)
+        {
+            throw new RaftInvariantException(
+                $"Append acknowledgement {message.Index} exceeds last index {Log.LastIndex}.");
+        }
+
+        progress.RecentActive = true;
+        if (!progress.MaybeUpdate(message.Index))
+        {
+            return;
+        }
+
+        if (MaybeCommit())
+        {
+            BroadcastAppend();
+        }
+        else if (message.From != Id
+                 && progress.Match < Log.LastIndex)
+        {
+            SendAppend(message.From, progress);
+        }
+    }
+
+    private bool MaybeCommit()
+    {
+        return Log.MaybeCommit(new EntryId(
+            Term: Term,
+            Index: Tracker.CommittedIndex));
+    }
+
+    private void BroadcastHeartbeat()
+    {
+        Tracker.Visit((id, progress) =>
+        {
+            if (id == Id)
+            {
+                return;
+            }
+
+            Send(new Message
+            {
+                To = id,
+                Type = MessageType.MsgHeartbeat,
+                Commit = Math.Min(
+                    progress.Match,
+                    Log.Committed),
+            });
+        });
+    }
+
+    private void HandleHeartbeat(Message message)
+    {
+        Log.CommitTo(message.Commit);
+        Send(new Message
+        {
+            To = message.From,
+            Type = MessageType.MsgHeartbeatResp,
+            Context = message.Context,
+        });
+    }
+
+    private void HandleHeartbeatResponse(Message message)
+    {
+        if (!Tracker.Progress.TryGetValue(
+                message.From,
+                out Progress? progress))
+        {
+            return;
+        }
+
+        progress.RecentActive = true;
+        if (progress.Match < Log.LastIndex)
+        {
+            SendAppend(message.From, progress);
         }
     }
 

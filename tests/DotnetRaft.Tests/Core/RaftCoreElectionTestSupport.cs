@@ -29,7 +29,12 @@ internal static class RaftCoreElectionTestSupport
         ulong commit = 0,
         ulong applied = 0,
         int electionTick = 10,
+        int heartbeatTick = 1,
         ulong maxCommittedSizePerReady = 0,
+        ulong maxSizePerMessage = ulong.MaxValue,
+        ulong maxUncommittedEntriesSize = 0,
+        bool checkQuorum = false,
+        bool disableProposalForwarding = false,
         Func<int, int>? randomOffset = null)
     {
         var storage = new CoreTestStorage();
@@ -66,9 +71,15 @@ internal static class RaftCoreElectionTestSupport
                 Storage = storage,
                 Applied = applied,
                 ElectionTick = electionTick,
-                HeartbeatTick = 1,
+                HeartbeatTick = heartbeatTick,
                 MaxCommittedSizePerReady =
                     maxCommittedSizePerReady,
+                MaxSizePerMessage = maxSizePerMessage,
+                MaxUncommittedEntriesSize =
+                    maxUncommittedEntriesSize,
+                CheckQuorum = checkQuorum,
+                DisableProposalForwarding =
+                    disableProposalForwarding,
             },
             randomOffset ?? (_ => 0));
 
@@ -119,21 +130,22 @@ internal static class RaftCoreElectionTestSupport
         MessageType type,
         ulong term)
     {
-        var message = new Message
+        ulong lastIndex = core.Log.LastIndex;
+        return new Message
         {
             From = 2,
             To = core.Id,
             Term = term,
             Type = type,
-            Index = 7,
-            LogTerm = 6,
-            Commit = 7,
+            Index = lastIndex,
+            LogTerm = core.Log.GetTerm(lastIndex),
+            Commit = core.Log.Committed,
             Snapshot = new Snapshot
             {
                 Metadata = new SnapshotMetadata
                 {
-                    Index = 7,
-                    Term = 6,
+                    Index = lastIndex,
+                    Term = core.Log.GetTerm(lastIndex),
                     ConfState = new ConfState
                     {
                         Voters = { 2, 3 },
@@ -141,12 +153,6 @@ internal static class RaftCoreElectionTestSupport
                 },
             },
         };
-        message.Entries.Add(new Entry
-        {
-            Index = 8,
-            Term = 6,
-        });
-        return message;
     }
 
     internal static void EnterRole(

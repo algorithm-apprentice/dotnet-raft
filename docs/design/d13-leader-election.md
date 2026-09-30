@@ -338,8 +338,8 @@ state persisted in the preceding batch.
 - `Step` treats the inbound message as immutable.
 - Campaign messages are newly allocated and then cloned by D12 `Send`.
 - Vote responses are newly allocated and core-owned.
-- `AdvanceMessagesAfterAppend` transfers existing owned messages without
-  rewriting their term or payload.
+- The test persistence helper captures one after-append batch before stepping
+  its self-addressed messages.
 
 ## Invariants
 

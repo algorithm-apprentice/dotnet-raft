@@ -57,13 +57,14 @@ public sealed class RaftCoreElectionTests
     }
 
     [Fact]
-    public void DurableSelfVoteElectsSingletonWithoutAppendingNoOp()
+    public void DurableSelfVoteElectsSingletonAndNoOpNeedsNextBatch()
     {
         RaftCore core = Create(
             voters: [1],
             entries: [EntryAt(1, 1)],
             term: 2).Core;
         ulong lastIndex = core.Log.LastIndex;
+        ulong committed = core.Log.Committed;
 
         core.Step(Hup(core.Id));
 
@@ -79,8 +80,19 @@ public sealed class RaftCoreElectionTests
 
         Assert.Equal(RaftRole.Leader, core.Role);
         Assert.Equal(core.Id, core.LeaderId);
-        Assert.Equal(lastIndex, core.Log.LastIndex);
+        Assert.Equal(lastIndex + 1, core.Log.LastIndex);
         Assert.Equal(lastIndex, core.PendingConfigurationIndex);
+        Assert.Empty(core.TakeMessages());
+        Assert.Equal(committed, core.Log.Committed);
+
+        Message noOpAck = Assert.Single(
+            core.TakeMessagesAfterAppend());
+        Assert.Equal(MessageType.MsgAppResp, noOpAck.Type);
+        Assert.Equal(lastIndex + 1, noOpAck.Index);
+
+        core.Step(noOpAck);
+
+        Assert.Equal(lastIndex + 1, core.Log.Committed);
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
     }
@@ -174,6 +186,7 @@ public sealed class RaftCoreElectionTests
         RaftCore leader = Create(voters: [1], term: 1).Core;
         leader.BecomeCandidate();
         leader.BecomeLeader();
+        leader.TakeMessagesAfterAppend();
 
         RaftCore learner = Create(
             voters: [2],

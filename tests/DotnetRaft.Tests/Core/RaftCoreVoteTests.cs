@@ -9,7 +9,7 @@ public sealed class RaftCoreVoteTests
 {
     [Theory]
     [MemberData(nameof(RolesAndLeaderMessages))]
-    public void HigherTermLeaderMessageStepsEveryRoleDownWithoutPayload(
+    public void HigherTermLeaderMessageStepsEveryRoleDownAndHandlesPayload(
         ElectionTestRole role,
         MessageType type)
     {
@@ -20,6 +20,11 @@ public sealed class RaftCoreVoteTests
             commit: 1,
             applied: 1).Core;
         EnterRole(core, role);
+        if (role == ElectionTestRole.Leader)
+        {
+            core.TakeMessagesAfterAppend();
+        }
+
         core.ElectionElapsed = 4;
         ulong lastIndex = core.Log.LastIndex;
         ulong committed = core.Log.Committed;
@@ -38,8 +43,7 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(0, core.ElectionElapsed);
         Assert.Equal(lastIndex, core.Log.LastIndex);
         Assert.Equal(committed, core.Log.Committed);
-        Assert.Empty(core.TakeMessages());
-        Assert.Empty(core.TakeMessagesAfterAppend());
+        AssertLeaderMessageResponse(core, type, lastIndex);
     }
 
     [Fact]
@@ -50,6 +54,7 @@ public sealed class RaftCoreVoteTests
             entries: [EntryAt(1, 1)],
             term: 4).Core;
         EnterRole(core, ElectionTestRole.Leader);
+        core.TakeMessagesAfterAppend();
         ulong term = core.Term;
         ulong lastIndex = core.Log.LastIndex;
 
@@ -77,7 +82,7 @@ public sealed class RaftCoreVoteTests
     [InlineData(MessageType.MsgApp)]
     [InlineData(MessageType.MsgHeartbeat)]
     [InlineData(MessageType.MsgSnap)]
-    public void CurrentTermLeaderMessageMakesCandidateFollowerWithoutPayload(
+    public void CurrentTermLeaderMessageMakesCandidateFollowerAndHandlesPayload(
         MessageType type)
     {
         RaftCore core = Create(
@@ -101,15 +106,14 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(0, core.ElectionElapsed);
         Assert.Equal(lastIndex, core.Log.LastIndex);
         Assert.Equal(committed, core.Log.Committed);
-        Assert.Empty(core.TakeMessages());
-        Assert.Empty(core.TakeMessagesAfterAppend());
+        AssertLeaderMessageResponse(core, type, lastIndex);
     }
 
     [Theory]
     [InlineData(MessageType.MsgApp)]
     [InlineData(MessageType.MsgHeartbeat)]
     [InlineData(MessageType.MsgSnap)]
-    public void CurrentTermLeaderMessageRefreshesFollowerWithoutPayload(
+    public void CurrentTermLeaderMessageRefreshesFollowerAndHandlesPayload(
         MessageType type)
     {
         RaftCore core = Create(
@@ -129,8 +133,7 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(0, core.ElectionElapsed);
         Assert.Equal(lastIndex, core.Log.LastIndex);
         Assert.Equal(committed, core.Log.Committed);
-        Assert.Empty(core.TakeMessages());
-        Assert.Empty(core.TakeMessagesAfterAppend());
+        AssertLeaderMessageResponse(core, type, lastIndex);
     }
 
     [Theory]
@@ -146,6 +149,7 @@ public sealed class RaftCoreVoteTests
             term: 4).Core;
         core.BecomeCandidate();
         core.BecomeLeader();
+        core.TakeMessagesAfterAppend();
         core.ElectionElapsed = 4;
         ulong lastIndex = core.Log.LastIndex;
         ulong committed = core.Log.Committed;
@@ -175,6 +179,7 @@ public sealed class RaftCoreVoteTests
             term: 4).Core;
         core.BecomeCandidate();
         core.BecomeLeader();
+        core.TakeMessagesAfterAppend();
         core.ElectionElapsed = 3;
         SoftState beforeSoftState = core.SoftState;
         HardState beforeHardState = core.HardState;
@@ -213,7 +218,13 @@ public sealed class RaftCoreVoteTests
             entries: [EntryAt(1, 1)],
             term: 4).Core;
         EnterRole(core, role);
+        if (role == ElectionTestRole.Leader)
+        {
+            core.TakeMessagesAfterAppend();
+        }
+
         ulong requestTerm = core.Term + 1;
+        EntryId lastEntry = core.Log.LastEntryId;
 
         core.Step(new Message
         {
@@ -221,8 +232,8 @@ public sealed class RaftCoreVoteTests
             To = 1,
             Term = requestTerm,
             Type = MessageType.MsgVote,
-            Index = 1,
-            LogTerm = 1,
+            Index = lastEntry.Index,
+            LogTerm = lastEntry.Term,
         });
 
         Assert.Equal(RaftRole.Follower, core.Role);
@@ -490,6 +501,11 @@ public sealed class RaftCoreVoteTests
             voters: [1, 2, 3],
             term: 4).Core;
         EnterRole(core, role);
+        if (role == ElectionTestRole.Leader)
+        {
+            core.TakeMessagesAfterAppend();
+        }
+
         SoftState before = core.SoftState;
 
         core.Step(VoteResponse(core, 2, granted: true));
@@ -498,6 +514,45 @@ public sealed class RaftCoreVoteTests
         Assert.Empty(core.Tracker.Votes);
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
+    }
+
+    private static void AssertLeaderMessageResponse(
+        RaftCore core,
+        MessageType type,
+        ulong lastIndex)
+    {
+        switch (type)
+        {
+            case MessageType.MsgApp:
+                Assert.Empty(core.TakeMessages());
+                Message appendResponse = Assert.Single(
+                    core.TakeMessagesAfterAppend());
+                Assert.Equal(
+                    MessageType.MsgAppResp,
+                    appendResponse.Type);
+                Assert.Equal(2UL, appendResponse.To);
+                Assert.Equal(lastIndex, appendResponse.Index);
+                Assert.False(appendResponse.Reject);
+                return;
+            case MessageType.MsgHeartbeat:
+                Message heartbeatResponse = Assert.Single(
+                    core.TakeMessages());
+                Assert.Equal(
+                    MessageType.MsgHeartbeatResp,
+                    heartbeatResponse.Type);
+                Assert.Equal(2UL, heartbeatResponse.To);
+                Assert.Empty(core.TakeMessagesAfterAppend());
+                return;
+            case MessageType.MsgSnap:
+                Assert.Empty(core.TakeMessages());
+                Assert.Empty(core.TakeMessagesAfterAppend());
+                return;
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(type),
+                    type,
+                    null);
+        }
     }
 
     public static TheoryData<ElectionTestRole, MessageType>

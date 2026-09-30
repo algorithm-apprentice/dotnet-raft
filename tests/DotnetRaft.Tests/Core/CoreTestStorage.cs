@@ -22,6 +22,8 @@ internal sealed class CoreTestStorage : IStorage
         ulong MaxSize)> EntryRequests
     { get; } = [];
 
+    internal Func<ulong, ulong>? GetTermOverride { get; set; }
+
     public StorageState GetInitialState()
     {
         CallCount++;
@@ -44,6 +46,11 @@ internal sealed class CoreTestStorage : IStorage
     public ulong GetTerm(ulong index)
     {
         CallCount++;
+        if (GetTermOverride is not null)
+        {
+            return GetTermOverride(index);
+        }
+
         return LogStorage.GetTerm(index);
     }
 

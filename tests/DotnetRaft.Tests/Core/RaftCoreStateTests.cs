@@ -206,7 +206,7 @@ public sealed class RaftCoreStateTests
     }
 
     [Fact]
-    public void LeaderTransitionSetsLocalReplicationStateWithoutNoOp()
+    public void LeaderTransitionSetsLocalReplicationStateBeforeNoOpAck()
     {
         RaftCore core = NewCore(
             voters: [1, 2],
@@ -219,13 +219,19 @@ public sealed class RaftCoreStateTests
 
         Assert.Equal(RaftRole.Leader, core.Role);
         Assert.Equal(core.Id, core.LeaderId);
-        Assert.Equal(lastIndex, core.Log.LastIndex);
+        Assert.Equal(lastIndex + 1, core.Log.LastIndex);
         Assert.Equal(lastIndex, core.PendingConfigurationIndex);
         Progress local = core.Tracker.Progress[core.Id];
         Assert.Equal(ProgressState.Replicate, local.State);
         Assert.Equal(lastIndex, local.Match);
         Assert.Equal(lastIndex + 1, local.Next);
         Assert.True(local.RecentActive);
+        Message response = Assert.Single(
+            core.TakeMessagesAfterAppend());
+        Assert.Equal(MessageType.MsgAppResp, response.Type);
+        Assert.Equal(core.Id, response.To);
+        Assert.Equal(lastIndex + 1, response.Index);
+        Assert.Empty(core.TakeMessages());
     }
 
     [Fact]

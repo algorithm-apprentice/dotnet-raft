@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M3 Election model
 - **Current milestone:** M4 Replicated log
-- **Completed nodes:** D00-D13
-- **Next node:** D14 Basic log replication
+- **Completed nodes:** D00-D14
+- **Next node:** D15 Replication flow control
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -33,6 +33,7 @@ following the validated graph in strict topological order.
 - [D11 read-only tracker design](docs/design/d11-read-only-tracker.md)
 - [D12 core state-machine shell design](docs/design/d12-core-state-machine-shell.md)
 - [D13 leader election design](docs/design/d13-leader-election.md)
+- [D14 basic log replication design](docs/design/d14-basic-log-replication.md)
 
 ## Development principles
 
