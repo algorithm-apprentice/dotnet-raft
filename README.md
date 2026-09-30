@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M1 Foundations
 - **Current milestone:** M2 Log substrate
-- **Completed nodes:** D00-D06
-- **Next node:** D07 Inflight append buffer
+- **Completed nodes:** D00-D07
+- **Next node:** D08 Follower progress
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -26,6 +26,7 @@ following the validated graph in strict topological order.
 - [D04 stable storage design](docs/design/d04-stable-storage.md)
 - [D05 unstable log design](docs/design/d05-unstable-log.md)
 - [D06 unified Raft log design](docs/design/d06-raft-log.md)
+- [D07 inflight window design](docs/design/d07-inflight-window.md)
 
 ## Development principles
 
