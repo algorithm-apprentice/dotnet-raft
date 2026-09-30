@@ -17,13 +17,14 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M1 Foundations
 - **Current milestone:** M2 Log substrate
-- **Completed nodes:** D00-D04
-- **Next node:** D05 Unstable log buffer
+- **Completed nodes:** D00-D05
+- **Next node:** D06 Unified Raft log
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
 - [ADR 0001: Porting strategy and architectural boundary](docs/adr/0001-porting-strategy.md)
 - [D04 stable storage design](docs/design/d04-stable-storage.md)
+- [D05 unstable log design](docs/design/d05-unstable-log.md)
 
 ## Development principles
 
