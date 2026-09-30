@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M1 Foundations
 - **Current milestone:** M2 Log substrate
-- **Completed nodes:** D00-D08
-- **Next node:** D09 Progress tracker
+- **Completed nodes:** D00-D09
+- **Next node:** D10 Configuration changes
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -28,6 +28,7 @@ following the validated graph in strict topological order.
 - [D06 unified Raft log design](docs/design/d06-raft-log.md)
 - [D07 inflight window design](docs/design/d07-inflight-window.md)
 - [D08 follower progress design](docs/design/d08-follower-progress.md)
+- [D09 progress tracker design](docs/design/d09-progress-tracker.md)
 
 ## Development principles
 
