@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M1 Foundations
 - **Current milestone:** M2 Log substrate
-- **Completed nodes:** D00-D09
-- **Next node:** D10 Configuration changes
+- **Completed nodes:** D00-D10
+- **Next node:** D11 Read-only tracker
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -29,6 +29,7 @@ following the validated graph in strict topological order.
 - [D07 inflight window design](docs/design/d07-inflight-window.md)
 - [D08 follower progress design](docs/design/d08-follower-progress.md)
 - [D09 progress tracker design](docs/design/d09-progress-tracker.md)
+- [D10 configuration changes design](docs/design/d10-configuration-changes.md)
 
 ## Development principles
 

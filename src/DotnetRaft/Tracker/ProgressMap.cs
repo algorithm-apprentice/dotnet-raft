@@ -9,6 +9,17 @@ internal sealed class ProgressMap
     : Dictionary<ulong, Progress>,
       IAckedIndexer
 {
+    internal ProgressMap Clone()
+    {
+        var clone = new ProgressMap();
+        foreach ((ulong id, Progress progress) in this)
+        {
+            clone[id] = progress.Clone();
+        }
+
+        return clone;
+    }
+
     bool IAckedIndexer.TryGetAckedIndex(
         ulong voterId,
         out ulong index)

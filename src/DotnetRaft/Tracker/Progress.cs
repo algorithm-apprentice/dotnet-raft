@@ -47,7 +47,7 @@ internal sealed class Progress
 
     internal bool AppendFlowPaused { get; set; }
 
-    internal InflightWindow Inflights { get; }
+    internal InflightWindow Inflights { get; private set; }
 
     internal bool IsLearner { get; set; }
 
@@ -188,6 +188,26 @@ internal sealed class Progress
     internal void RecordSentCommit(ulong commit)
     {
         LastSentCommit = commit;
+    }
+
+    internal Progress Clone()
+    {
+        var clone = new Progress(
+            Match,
+            Next,
+            Inflights.Capacity,
+            Inflights.MaxBytes,
+            IsLearner,
+            RecentActive)
+        {
+            LastSentCommit = LastSentCommit,
+            State = State,
+            PendingSnapshot = PendingSnapshot,
+            AppendFlowPaused = AppendFlowPaused,
+            Inflights = Inflights.Clone(),
+        };
+
+        return clone;
     }
 
     internal bool MaybeUpdate(ulong acknowledgedIndex)

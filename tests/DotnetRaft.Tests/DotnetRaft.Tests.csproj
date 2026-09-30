@@ -22,4 +22,10 @@
     <ProjectReference Include="..\..\src\DotnetRaft\DotnetRaft.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="ConfChange/TestData/*.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
