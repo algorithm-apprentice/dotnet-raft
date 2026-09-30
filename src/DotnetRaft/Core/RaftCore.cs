@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using DotnetRaft.ConfChange;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
+using DotnetRaft.Quorum;
 using DotnetRaft.Read;
 using DotnetRaft.Tracker;
 
@@ -299,6 +300,99 @@ internal sealed class RaftCore
         return new LeaderClockTick(electionDue, heartbeatDue);
     }
 
+    internal void TickElection()
+    {
+        if (!TickElectionClock())
+        {
+            return;
+        }
+
+        Step(new Message
+        {
+            From = Id,
+            To = Id,
+            Type = MessageType.MsgHup,
+        });
+    }
+
+    internal void Step(Message message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (message.Term == 0
+            && IsRealVoteMessage(message.Type))
+        {
+            throw new RaftInvariantException(
+                $"{message.Type} must carry a nonzero term.");
+        }
+
+        if (message.Term > Term)
+        {
+            if (IsHigherTermPreVoteException(message))
+            {
+                return;
+            }
+
+            ulong leaderId = IsLeaderMessage(message.Type)
+                ? message.From
+                : RaftMessageTargets.None;
+            BecomeFollower(message.Term, leaderId);
+        }
+        else if (message.Term != 0 && message.Term < Term)
+        {
+            return;
+        }
+
+        switch (message.Type)
+        {
+            case MessageType.MsgHup:
+                HandleHup();
+                return;
+            case MessageType.MsgVote:
+                HandleVoteRequest(message);
+                return;
+            default:
+                HandleRoleMessage(message);
+                return;
+        }
+    }
+
+    internal void Campaign()
+    {
+        BecomeCandidate();
+
+        EntryId lastEntry = default;
+        bool hasLastEntry = false;
+        foreach (ulong voterId in Tracker.VoterNodes())
+        {
+            if (voterId == Id)
+            {
+                Send(new Message
+                {
+                    To = voterId,
+                    Term = Term,
+                    Type = MessageType.MsgVoteResp,
+                });
+                continue;
+            }
+
+            if (!hasLastEntry)
+            {
+                lastEntry = Log.LastEntryId;
+                hasLastEntry = true;
+            }
+
+            Send(new Message
+            {
+                To = voterId,
+                Term = Term,
+                Type = MessageType.MsgVote,
+                Index = lastEntry.Index,
+                LogTerm = lastEntry.Term,
+            });
+        }
+    }
+
     internal void Send(Message message)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -374,6 +468,29 @@ internal sealed class RaftCore
             MessageType.MsgPreVoteResp;
     }
 
+    private static bool IsRealVoteMessage(MessageType type)
+    {
+        return type is
+            MessageType.MsgVote or
+            MessageType.MsgVoteResp;
+    }
+
+    private static bool IsLeaderMessage(MessageType type)
+    {
+        return type is
+            MessageType.MsgApp or
+            MessageType.MsgHeartbeat or
+            MessageType.MsgSnap;
+    }
+
+    private static bool IsHigherTermPreVoteException(
+        Message message)
+    {
+        return message.Type == MessageType.MsgPreVote
+            || (message.Type == MessageType.MsgPreVoteResp
+                && !message.Reject);
+    }
+
     private static bool RequiresDurableState(MessageType type)
     {
         return type is
@@ -400,6 +517,141 @@ internal sealed class RaftCore
         }
 
         return elapsed + 1;
+    }
+
+    private void HandleHup()
+    {
+        if (Role == RaftRole.Leader
+            || !Promotable
+            || HasUnappliedConfigurationChanges())
+        {
+            return;
+        }
+
+        Campaign();
+    }
+
+    private bool HasUnappliedConfigurationChanges()
+    {
+        if (Log.Applied >= Log.Committed)
+        {
+            return false;
+        }
+
+        ulong next = Log.Applied + 1;
+        ulong high = Log.Committed + 1;
+        while (next < high)
+        {
+            IReadOnlyList<Entry> entries = Log.Slice(
+                next,
+                high,
+                MaxCommittedSizePerReady);
+            if (entries.Count == 0)
+            {
+                throw new RaftInvariantException(
+                    $"Configuration scan returned no entries for [{next}, {high}).");
+            }
+
+            foreach (Entry entry in entries)
+            {
+                if (entry.Type is
+                    EntryType.EntryConfChange or
+                    EntryType.EntryConfChangeV2)
+                {
+                    return true;
+                }
+            }
+
+            next += (ulong)entries.Count;
+        }
+
+        return false;
+    }
+
+    private void HandleVoteRequest(Message message)
+    {
+        bool canVote =
+            Vote == message.From
+            || (Vote == RaftMessageTargets.None
+                && LeaderId == RaftMessageTargets.None);
+        bool upToDate = Log.IsUpToDate(
+            new EntryId(message.LogTerm, message.Index));
+
+        if (canVote && upToDate)
+        {
+            Send(new Message
+            {
+                To = message.From,
+                Term = message.Term,
+                Type = MessageType.MsgVoteResp,
+            });
+            electionElapsed = 0;
+            Vote = message.From;
+            return;
+        }
+
+        Send(new Message
+        {
+            To = message.From,
+            Term = Term,
+            Type = MessageType.MsgVoteResp,
+            Reject = true,
+        });
+    }
+
+    private void HandleRoleMessage(Message message)
+    {
+        if (IsLeaderMessage(message.Type))
+        {
+            HandleLeaderMessage(message);
+            return;
+        }
+
+        if (Role == RaftRole.Candidate
+            && message.Type == MessageType.MsgVoteResp)
+        {
+            HandleVoteResponse(message);
+        }
+    }
+
+    private void HandleLeaderMessage(Message message)
+    {
+        switch (Role)
+        {
+            case RaftRole.Follower:
+                electionElapsed = 0;
+                LeaderId = message.From;
+                return;
+            case RaftRole.PreCandidate:
+            case RaftRole.Candidate:
+                BecomeFollower(Term, message.From);
+                return;
+            case RaftRole.Leader:
+                return;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown Raft role {Role}.");
+        }
+    }
+
+    private void HandleVoteResponse(Message message)
+    {
+        Tracker.RecordVote(message.From, !message.Reject);
+        (_, _, VoteResult result) = Tracker.TallyVotes();
+        switch (result)
+        {
+            case VoteResult.Won:
+                BecomeLeader();
+                return;
+            case VoteResult.Lost:
+                BecomeFollower(Term, RaftMessageTargets.None);
+                return;
+            case VoteResult.Pending:
+                return;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown vote result {result}.");
+        }
     }
 
     private void Reset(ulong term)

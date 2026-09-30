@@ -16,6 +16,12 @@ internal sealed class CoreTestStorage : IStorage
 
     internal int CallCount { get; private set; }
 
+    internal List<(
+        ulong LowInclusive,
+        ulong HighExclusive,
+        ulong MaxSize)> EntryRequests
+    { get; } = [];
+
     public StorageState GetInitialState()
     {
         CallCount++;
@@ -28,6 +34,7 @@ internal sealed class CoreTestStorage : IStorage
         ulong maxSize)
     {
         CallCount++;
+        EntryRequests.Add((lowInclusive, highExclusive, maxSize));
         return LogStorage.GetEntries(
             lowInclusive,
             highExclusive,
