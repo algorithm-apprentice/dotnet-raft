@@ -316,10 +316,13 @@ A follower never auto-proposes. If leadership later changes while the joint
 configuration remains active, applying a later entry as the new leader
 re-evaluates the condition and proposes the exit.
 
-The host must call `ApplyConfigurationChange` for a committed configuration
-entry before acknowledging application through `AppliedTo` at or beyond that
-entry. D21 will enforce and document this ordering through `Ready`/`Advance`;
-D17 tests exercise the internal sequence directly.
+For every committed configuration entry, the host must make its accept/reject
+decision solely from deterministic replicated application state at that log
+position. It must call `ApplyConfigurationChange` for an accepted entry before
+acknowledging application through `AppliedTo` at or beyond that entry. A
+rejected entry is applied as a no-op and must not call
+`ApplyConfigurationChange`. D21 enforces and documents this ordering through
+`Ready`/`Advance`; D17 tests exercise the accepted internal sequence directly.
 
 ## Ownership and failure atomicity
 

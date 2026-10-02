@@ -195,6 +195,13 @@ internal sealed class RaftCore
         Commit = Log.Committed,
     };
 
+    internal bool HasMessages => messages.Count > 0;
+
+    internal bool HasMessagesAfterAppend =>
+        messagesAfterAppend.Count > 0;
+
+    internal bool HasReadStates => readStates.Count > 0;
+
     internal void BecomeFollower(ulong term, ulong leaderId)
     {
         Reset(term);
@@ -549,14 +556,35 @@ internal sealed class RaftCore
         return Take(messages);
     }
 
+    internal Message[] PeekMessages()
+    {
+        return CloneMessages(messages);
+    }
+
     internal Message[] TakeMessagesAfterAppend()
     {
         return Take(messagesAfterAppend);
     }
 
+    internal Message[] PeekMessagesAfterAppend()
+    {
+        return CloneMessages(messagesAfterAppend);
+    }
+
     internal ReadState[] TakeReadStates()
     {
         return Take(readStates);
+    }
+
+    internal ReadState[] PeekReadStates()
+    {
+        return
+        [
+            .. readStates.Select(
+                state => new ReadState(
+                    state.Index,
+                    state.RequestContext)),
+        ];
     }
 
     internal void ReduceUncommittedSize(ulong payloadSize)
@@ -657,6 +685,16 @@ internal sealed class RaftCore
         T[] taken = [.. queue];
         queue.Clear();
         return taken;
+    }
+
+    private static Message[] CloneMessages(
+        IEnumerable<Message> source)
+    {
+        return
+        [
+            .. source.Select(
+                message => message.Clone()),
+        ];
     }
 
     private static int IncrementElapsed(
