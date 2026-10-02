@@ -8,6 +8,10 @@ using DotnetRaft.Read;
 using DotnetRaft.Storage;
 using DotnetRaft.Tracker;
 
+using Google.Protobuf;
+
+using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
+
 namespace DotnetRaft.Core;
 
 internal sealed class RaftCore
@@ -488,6 +492,51 @@ internal sealed class RaftCore
             : UncommittedSize - payloadSize;
     }
 
+    internal ConfState ApplyConfigurationChange(
+        ProtocolConfChange change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        return ApplyConfigurationChange(change.AsV2());
+    }
+
+    internal ConfState ApplyConfigurationChange(
+        ConfChangeV2 change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        ConfChangeV2 owned = change.Clone();
+        var changer = new ConfigurationChanger(
+            Tracker,
+            Log.LastIndex);
+        ConfigurationChangeResult result;
+        if (owned.IsLeaveJoint())
+        {
+            result = changer.LeaveJoint();
+        }
+        else if (owned.TryGetJointTransition(
+                     out bool autoLeave))
+        {
+            result = changer.EnterJoint(
+                autoLeave,
+                owned.Changes);
+        }
+        else
+        {
+            result = changer.Simple(owned.Changes);
+        }
+
+        return SwitchToConfiguration(
+            result.Config,
+            result.Progress);
+    }
+
+    internal void AppliedTo(
+        ulong index,
+        ulong encodedSize)
+    {
+        Log.AppliedTo(index, encodedSize);
+        MaybeAutoLeave();
+    }
+
     private static bool IsEmpty(HardState? state)
     {
         return state is null
@@ -765,12 +814,19 @@ internal sealed class RaftCore
                         "The leader has no local replication progress.");
                 }
 
-                if (!AppendLeaderEntries(message.Entries))
+                (
+                    Entry[] entries,
+                    ulong pendingConfigurationIndex) =
+                    PrepareProposalEntries(
+                        message.Entries);
+                if (!AppendLeaderEntries(entries))
                 {
                     throw new ProposalDroppedException(
                         "The proposal exceeds the uncommitted entry size limit.");
                 }
 
+                PendingConfigurationIndex =
+                    pendingConfigurationIndex;
                 BroadcastAppend();
                 return;
             case RaftRole.Follower:
@@ -876,6 +932,68 @@ internal sealed class RaftCore
             Index = newLastIndex,
         });
         return true;
+    }
+
+    private (
+        Entry[] Entries,
+        ulong PendingConfigurationIndex)
+        PrepareProposalEntries(
+            IEnumerable<Entry> entries)
+    {
+        Entry[] owned = ProtocolCloning.CloneEntries(entries);
+        ulong candidatePending =
+            PendingConfigurationIndex;
+        ulong lastIndex = Log.LastIndex;
+
+        for (var offset = 0; offset < owned.Length; offset++)
+        {
+            Entry entry = owned[offset];
+            ConfChangeV2? change = entry.Type switch
+            {
+                EntryType.EntryConfChange =>
+                    ProtocolConfChange.Parser
+                        .ParseFrom(entry.Data)
+                        .AsV2(),
+                EntryType.EntryConfChangeV2 =>
+                    ConfChangeV2.Parser.ParseFrom(
+                        entry.Data),
+                _ => null,
+            };
+            if (change is null)
+            {
+                continue;
+            }
+
+            bool alreadyPending =
+                candidatePending > Log.Applied;
+            bool alreadyJoint =
+                Tracker.Config.Voters.Outgoing.Count > 0;
+            bool wantsLeaveJoint =
+                change.Changes.Count == 0;
+            bool incompatible =
+                alreadyPending
+                || (alreadyJoint && !wantsLeaveJoint)
+                || (!alreadyJoint && wantsLeaveJoint);
+            if (incompatible
+                && !DisableConfChangeValidation)
+            {
+                owned[offset] = new Entry();
+                continue;
+            }
+
+            try
+            {
+                candidatePending = checked(
+                    lastIndex + (ulong)offset + 1);
+            }
+            catch (OverflowException exception)
+            {
+                throw new RaftInvariantException(
+                    $"Configuration entry at offset {offset} has no representable log index: {exception.Message}");
+            }
+        }
+
+        return (owned, candidatePending);
     }
 
     private void BroadcastAppend()
@@ -1310,6 +1428,96 @@ internal sealed class RaftCore
         return state.Voters.Contains(Id)
             || state.Learners.Contains(Id)
             || state.VotersOutgoing.Contains(Id);
+    }
+
+    private ConfState SwitchToConfiguration(
+        TrackerConfig config,
+        ProgressMap progress)
+    {
+        Tracker.Config = config;
+        Tracker.Progress = progress;
+
+        ConfState state = Tracker.ToConfState();
+        bool hasLocalProgress =
+            Tracker.Progress.TryGetValue(
+                Id,
+                out Progress? localProgress);
+        IsLearner =
+            hasLocalProgress
+            && localProgress!.IsLearner;
+
+        if ((!hasLocalProgress || IsLearner)
+            && Role == RaftRole.Leader)
+        {
+            if (StepDownOnRemoval)
+            {
+                BecomeFollower(
+                    Term,
+                    RaftMessageTargets.None);
+            }
+
+            return state;
+        }
+
+        if (Role != RaftRole.Leader
+            || state.Voters.Count == 0)
+        {
+            return state;
+        }
+
+        if (MaybeCommit())
+        {
+            BroadcastAppend();
+        }
+        else
+        {
+            Tracker.Visit((id, peerProgress) =>
+            {
+                if (id != Id)
+                {
+                    MaybeSendAppend(
+                        id,
+                        peerProgress,
+                        sendIfEmpty: false);
+                }
+            });
+        }
+
+        if (LeaderTransferee !=
+                RaftMessageTargets.None
+            && !Tracker.Config.Voters.Ids()
+                .Contains(LeaderTransferee))
+        {
+            LeaderTransferee =
+                RaftMessageTargets.None;
+        }
+
+        return state;
+    }
+
+    private void MaybeAutoLeave()
+    {
+        if (!Tracker.Config.AutoLeave
+            || Log.Applied <
+                PendingConfigurationIndex
+            || Role != RaftRole.Leader)
+        {
+            return;
+        }
+
+        var proposal = new Message
+        {
+            From = Id,
+            To = Id,
+            Type = MessageType.MsgProp,
+        };
+        proposal.Entries.Add(new Entry
+        {
+            Type = EntryType.EntryConfChangeV2,
+            Data = new ConfChangeV2()
+                .ToByteString(),
+        });
+        Step(proposal);
     }
 
     private void Reset(ulong term)

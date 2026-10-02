@@ -36,6 +36,8 @@ internal static class RaftCoreElectionTestSupport
         int maxInflightMessages = 256,
         ulong maxInflightBytes = 0,
         bool checkQuorum = false,
+        bool disableConfChangeValidation = false,
+        bool stepDownOnRemoval = false,
         bool disableProposalForwarding = false,
         Func<int, int>? randomOffset = null)
     {
@@ -82,6 +84,9 @@ internal static class RaftCoreElectionTestSupport
                 MaxInflightMessages = maxInflightMessages,
                 MaxInflightBytes = maxInflightBytes,
                 CheckQuorum = checkQuorum,
+                DisableConfChangeValidation =
+                    disableConfChangeValidation,
+                StepDownOnRemoval = stepDownOnRemoval,
                 DisableProposalForwarding =
                     disableProposalForwarding,
             },

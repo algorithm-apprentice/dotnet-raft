@@ -185,7 +185,6 @@ public sealed class RaftCoreReplicationTests
         });
         proposal.Entries.Add(new Entry
         {
-            Type = EntryType.EntryConfChange,
             Data = ByteString.CopyFromUtf8("second"),
         });
         Message original = proposal.Clone();
@@ -200,7 +199,7 @@ public sealed class RaftCoreReplicationTests
             appended,
             entry => Assert.Equal(core.Term, entry.Term));
         Assert.Equal(EntryType.EntryNormal, appended[0].Type);
-        Assert.Equal(EntryType.EntryConfChange, appended[1].Type);
+        Assert.Equal(EntryType.EntryNormal, appended[1].Type);
         Assert.Equal("first", appended[0].Data.ToStringUtf8());
         Assert.Equal("second", appended[1].Data.ToStringUtf8());
         Assert.Equal(11UL, core.UncommittedSize);
