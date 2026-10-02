@@ -19,6 +19,8 @@ internal sealed class RaftCore
     private readonly Func<int, int> randomOffset;
     private readonly List<Message> messages = [];
     private readonly List<Message> messagesAfterAppend = [];
+    private readonly Queue<Message> pendingReadIndexMessages = [];
+    private readonly List<ReadState> readStates = [];
     private int electionElapsed;
     private int heartbeatElapsed;
 
@@ -485,6 +487,11 @@ internal sealed class RaftCore
         return Take(messagesAfterAppend);
     }
 
+    internal ReadState[] TakeReadStates()
+    {
+        return Take(readStates);
+    }
+
     internal void ReduceUncommittedSize(ulong payloadSize)
     {
         UncommittedSize = payloadSize >= UncommittedSize
@@ -585,9 +592,9 @@ internal sealed class RaftCore
             MessageType.MsgPreVoteResp;
     }
 
-    private static Message[] Take(List<Message> queue)
+    private static T[] Take<T>(List<T> queue)
     {
-        Message[] taken = [.. queue];
+        T[] taken = [.. queue];
         queue.Clear();
         return taken;
     }
@@ -710,6 +717,16 @@ internal sealed class RaftCore
                 if (Role == RaftRole.Leader)
                 {
                     HandleHeartbeatResponse(message);
+                }
+
+                return;
+            case MessageType.MsgReadIndex:
+                HandleReadIndexMessage(message);
+                return;
+            case MessageType.MsgReadIndexResp:
+                if (Role == RaftRole.Follower)
+                {
+                    HandleReadIndexResponse(message);
                 }
 
                 return;
@@ -1230,13 +1247,21 @@ internal sealed class RaftCore
 
     private bool MaybeCommit()
     {
-        return Log.MaybeCommit(new EntryId(
+        bool committed = Log.MaybeCommit(new EntryId(
             Term: Term,
             Index: Tracker.CommittedIndex));
+        if (committed)
+        {
+            ReleasePendingReadIndexMessages();
+        }
+
+        return committed;
     }
 
     private void BroadcastHeartbeat()
     {
+        ByteString context =
+            ReadOnly.GetHeartbeatContext();
         Tracker.Visit((id, progress) =>
         {
             if (id == Id)
@@ -1249,6 +1274,7 @@ internal sealed class RaftCore
                 To = id,
                 Type = MessageType.MsgHeartbeat,
                 Commit = Math.Min(progress.Match, Log.Committed),
+                Context = context,
             });
             progress.RecordSentCommit(
                 Math.Min(progress.Match, Log.Committed));
@@ -1284,6 +1310,181 @@ internal sealed class RaftCore
                 message.From,
                 progress,
                 sendIfEmpty: true);
+        }
+
+        if (!message.Context.IsEmpty)
+        {
+            ReadOnly.ReceiveAcknowledgement(
+                message.From,
+                message.Context);
+            AdvanceReadOnly();
+        }
+    }
+
+    private void HandleReadIndexMessage(Message message)
+    {
+        switch (Role)
+        {
+            case RaftRole.Leader:
+                HandleLeaderReadIndex(message);
+                return;
+            case RaftRole.Follower:
+                if (LeaderId == RaftMessageTargets.None)
+                {
+                    return;
+                }
+
+                Message forwarded = message.Clone();
+                forwarded.To = LeaderId;
+                Send(forwarded);
+                return;
+            case RaftRole.PreCandidate:
+            case RaftRole.Candidate:
+                return;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown Raft role {Role}.");
+        }
+    }
+
+    private void HandleLeaderReadIndex(Message message)
+    {
+        ValidateReadIndexRequest(message);
+        if (IsLocalSingleton())
+        {
+            RespondToReadIndex(
+                message,
+                Log.Committed);
+            return;
+        }
+
+        if (!HasCommittedEntryInCurrentTerm())
+        {
+            pendingReadIndexMessages.Enqueue(
+                message.Clone());
+            return;
+        }
+
+        TrackReadIndex(message);
+    }
+
+    private void HandleReadIndexResponse(Message message)
+    {
+        if (message.Entries.Count != 1)
+        {
+            LogError(
+                $"{Id:x} ignored {MessageType.MsgReadIndexResp} " +
+                $"with {message.Entries.Count} entries; expected exactly one entry.");
+            return;
+        }
+
+        readStates.Add(new ReadState(
+            message.Index,
+            message.Entries[0].Data));
+    }
+
+    private void TrackReadIndex(Message message)
+    {
+        ReadOnly.AddRequest(
+            Log.Committed,
+            message);
+        ByteString context =
+            ReadOnly.GetHeartbeatContext();
+        ReadOnly.ReceiveAcknowledgement(
+            Id,
+            context);
+        AdvanceReadOnly();
+        if (ReadOnly.PendingCount > 0)
+        {
+            BroadcastHeartbeat();
+        }
+    }
+
+    private void AdvanceReadOnly()
+    {
+        foreach (ReadIndexRequest request in
+                 ReadOnly.Advance(
+                     Tracker.Config.Voters))
+        {
+            RespondToReadIndex(
+                request.Request,
+                request.Index);
+        }
+    }
+
+    private void RespondToReadIndex(
+        Message request,
+        ulong index)
+    {
+        if (request.From == RaftMessageTargets.None
+            || request.From == Id)
+        {
+            readStates.Add(new ReadState(
+                index,
+                request.Entries[0].Data));
+            return;
+        }
+
+        var response = new Message
+        {
+            To = request.From,
+            Type = MessageType.MsgReadIndexResp,
+            Index = index,
+        };
+        response.Entries.Add(
+            request.Entries.Select(
+                entry => entry.Clone()));
+        Send(response);
+    }
+
+    private void ReleasePendingReadIndexMessages()
+    {
+        if (Role != RaftRole.Leader
+            || !HasCommittedEntryInCurrentTerm())
+        {
+            return;
+        }
+
+        while (pendingReadIndexMessages.TryDequeue(
+                   out Message? request))
+        {
+            HandleLeaderReadIndex(request);
+        }
+    }
+
+    private bool HasCommittedEntryInCurrentTerm()
+    {
+        try
+        {
+            return Log.GetTerm(Log.Committed) == Term;
+        }
+        catch (StorageException exception)
+            when (exception.Error is
+                  StorageError.Compacted or
+                  StorageError.Unavailable)
+        {
+            return false;
+        }
+    }
+
+    private bool IsLocalSingleton()
+    {
+        return Tracker.Config.Voters.Incoming.Count == 1
+            && Tracker.Config.Voters.Incoming.Contains(Id)
+            && Tracker.Config.Voters.Outgoing.Count == 0
+            && Tracker.Progress.TryGetValue(
+                Id,
+                out Progress? progress)
+            && !progress.IsLearner;
+    }
+
+    private static void ValidateReadIndexRequest(
+        Message message)
+    {
+        if (message.Entries.Count != 1)
+        {
+            throw new RaftInvariantException(
+                $"{MessageType.MsgReadIndex} must contain exactly one entry.");
         }
     }
 
@@ -1455,6 +1656,10 @@ internal sealed class RaftCore
                     Term,
                     RaftMessageTargets.None);
             }
+            else
+            {
+                ReevaluateReadOnlyAfterConfigurationChange();
+            }
 
             return state;
         }
@@ -1465,6 +1670,7 @@ internal sealed class RaftCore
             return state;
         }
 
+        ReevaluateReadOnlyAfterConfigurationChange();
         if (MaybeCommit())
         {
             BroadcastAppend();
@@ -1493,6 +1699,15 @@ internal sealed class RaftCore
         }
 
         return state;
+    }
+
+    private void ReevaluateReadOnlyAfterConfigurationChange()
+    {
+        AdvanceReadOnly();
+        if (ReadOnly.PendingCount > 0)
+        {
+            BroadcastHeartbeat();
+        }
     }
 
     private void MaybeAutoLeave()
@@ -1604,6 +1819,14 @@ internal sealed class RaftCore
         if (Logger.IsEnabled(RaftLogLevel.Information))
         {
             Logger.Log(RaftLogLevel.Information, message);
+        }
+    }
+
+    private void LogError(string message)
+    {
+        if (Logger.IsEnabled(RaftLogLevel.Error))
+        {
+            Logger.Log(RaftLogLevel.Error, message);
         }
     }
 }

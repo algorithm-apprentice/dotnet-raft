@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M4 Replicated log
 - **Current milestone:** M5 Full core semantics
-- **Completed nodes:** D00-D17
-- **Next node:** D18 Safe linearizable reads
+- **Completed nodes:** D00-D18
+- **Next node:** D19 Availability extensions
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -37,6 +37,7 @@ following the validated graph in strict topological order.
 - [D15 replication flow control design](docs/design/d15-replication-flow-control.md)
 - [D16 snapshot design](docs/design/d16-snapshots.md)
 - [D17 membership integration design](docs/design/d17-membership-integration.md)
+- [D18 safe linearizable reads design](docs/design/d18-safe-linearizable-reads.md)
 
 ## Development principles
 

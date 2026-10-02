@@ -1,5 +1,7 @@
 using DotnetRaft.Core;
+using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
+using DotnetRaft.Read;
 using DotnetRaft.Storage;
 
 namespace DotnetRaft.Tests.Core;
@@ -39,6 +41,8 @@ internal static class RaftCoreElectionTestSupport
         bool disableConfChangeValidation = false,
         bool stepDownOnRemoval = false,
         bool disableProposalForwarding = false,
+        ReadOnlyOption readOnlyOption = ReadOnlyOption.Safe,
+        IRaftLogger? logger = null,
         Func<int, int>? randomOffset = null)
     {
         var storage = new CoreTestStorage();
@@ -84,6 +88,8 @@ internal static class RaftCoreElectionTestSupport
                 MaxInflightMessages = maxInflightMessages,
                 MaxInflightBytes = maxInflightBytes,
                 CheckQuorum = checkQuorum,
+                ReadOnlyOption = readOnlyOption,
+                Logger = logger,
                 DisableConfChangeValidation =
                     disableConfChangeValidation,
                 StepDownOnRemoval = stepDownOnRemoval,
