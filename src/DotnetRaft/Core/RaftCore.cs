@@ -350,6 +350,14 @@ internal sealed class RaftCore
             });
         }
 
+        if (tick.ElectionDue
+            && Role == RaftRole.Leader
+            && LeaderTransferee !=
+                RaftMessageTargets.None)
+        {
+            AbortLeaderTransfer();
+        }
+
         if (Role != RaftRole.Leader
             || !tick.HeartbeatDue)
         {
@@ -666,6 +674,15 @@ internal sealed class RaftCore
 
     private void HandleHup()
     {
+        HandleHup(
+            PreVote
+                ? CampaignType.PreElection
+                : CampaignType.Election);
+    }
+
+    private void HandleHup(
+        CampaignType campaignType)
+    {
         if (Role == RaftRole.Leader
             || !Promotable
             || HasUnappliedConfigurationChanges())
@@ -673,10 +690,7 @@ internal sealed class RaftCore
             return;
         }
 
-        Campaign(
-            PreVote
-                ? CampaignType.PreElection
-                : CampaignType.Election);
+        Campaign(campaignType);
     }
 
     private bool HasUnappliedConfigurationChanges()
@@ -779,6 +793,16 @@ internal sealed class RaftCore
                 return;
             case MessageType.MsgForgetLeader:
                 HandleForgetLeader();
+                return;
+            case MessageType.MsgTransferLeader:
+                HandleTransferLeader(message);
+                return;
+            case MessageType.MsgTimeoutNow:
+                if (Role == RaftRole.Follower)
+                {
+                    HandleHup(CampaignType.Transfer);
+                }
+
                 return;
             case MessageType.MsgAppResp:
                 if (Role == RaftRole.Leader)
@@ -915,6 +939,13 @@ internal sealed class RaftCore
                 {
                     throw new ProposalDroppedException(
                         "The leader has no local replication progress.");
+                }
+
+                if (LeaderTransferee !=
+                    RaftMessageTargets.None)
+                {
+                    throw new ProposalDroppedException(
+                        "The leader is transferring leadership.");
                 }
 
                 (
@@ -1329,6 +1360,12 @@ internal sealed class RaftCore
             {
             }
         }
+
+        if (message.From == LeaderTransferee
+            && progress.Match == Log.LastIndex)
+        {
+            SendTimeoutNow(message.From);
+        }
     }
 
     private bool MaybeCommit()
@@ -1405,6 +1442,89 @@ internal sealed class RaftCore
                 message.Context);
             AdvanceReadOnly();
         }
+    }
+
+    private void HandleTransferLeader(
+        Message message)
+    {
+        switch (Role)
+        {
+            case RaftRole.Follower:
+                if (LeaderId == RaftMessageTargets.None)
+                {
+                    return;
+                }
+
+                Message forwarded = message.Clone();
+                forwarded.To = LeaderId;
+                Send(forwarded);
+                return;
+            case RaftRole.PreCandidate:
+            case RaftRole.Candidate:
+                return;
+            case RaftRole.Leader:
+                HandleLeaderTransfer(message.From);
+                return;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown Raft role {Role}.");
+        }
+    }
+
+    private void HandleLeaderTransfer(
+        ulong transferee)
+    {
+        if (!Tracker.Progress.TryGetValue(
+                transferee,
+                out Progress? progress)
+            || progress.IsLearner)
+        {
+            return;
+        }
+
+        if (LeaderTransferee !=
+            RaftMessageTargets.None)
+        {
+            if (LeaderTransferee == transferee)
+            {
+                return;
+            }
+
+            AbortLeaderTransfer();
+        }
+
+        if (transferee == Id)
+        {
+            return;
+        }
+
+        ElectionElapsed = 0;
+        LeaderTransferee = transferee;
+        if (progress.Match == Log.LastIndex)
+        {
+            SendTimeoutNow(transferee);
+            return;
+        }
+
+        MaybeSendAppend(
+            transferee,
+            progress,
+            sendIfEmpty: true);
+    }
+
+    private void SendTimeoutNow(ulong to)
+    {
+        Send(new Message
+        {
+            To = to,
+            Type = MessageType.MsgTimeoutNow,
+        });
+    }
+
+    private void AbortLeaderTransfer()
+    {
+        LeaderTransferee =
+            RaftMessageTargets.None;
     }
 
     private void HandleReadIndexMessage(Message message)
@@ -1923,7 +2043,15 @@ internal sealed class RaftCore
             Data = new ConfChangeV2()
                 .ToByteString(),
         });
-        Step(proposal);
+        try
+        {
+            Step(proposal);
+        }
+        catch (ProposalDroppedException exception)
+        {
+            LogDebug(
+                $"Automatic joint exit remains pending: {exception.Message}");
+        }
     }
 
     private void Reset(ulong term)
@@ -2010,6 +2138,14 @@ internal sealed class RaftCore
         if (Logger.IsEnabled(RaftLogLevel.Information))
         {
             Logger.Log(RaftLogLevel.Information, message);
+        }
+    }
+
+    private void LogDebug(string message)
+    {
+        if (Logger.IsEnabled(RaftLogLevel.Debug))
+        {
+            Logger.Log(RaftLogLevel.Debug, message);
         }
     }
 

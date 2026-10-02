@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M4 Replicated log
 - **Current milestone:** M5 Full core semantics
-- **Completed nodes:** D00-D19
-- **Next node:** D20 Leadership transfer
+- **Completed nodes:** D00-D20
+- **Next node:** D21 RawNode and Ready
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -39,6 +39,7 @@ following the validated graph in strict topological order.
 - [D17 membership integration design](docs/design/d17-membership-integration.md)
 - [D18 safe linearizable reads design](docs/design/d18-safe-linearizable-reads.md)
 - [D19 availability extensions design](docs/design/d19-availability-extensions.md)
+- [D20 leadership transfer design](docs/design/d20-leadership-transfer.md)
 
 ## Development principles
 
