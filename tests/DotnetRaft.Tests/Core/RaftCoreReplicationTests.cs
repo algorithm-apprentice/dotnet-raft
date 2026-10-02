@@ -628,7 +628,7 @@ public sealed class RaftCoreReplicationTests
     }
 
     [Fact]
-    public void CompactedProgressWaitsForD16SnapshotSupport()
+    public void CompactedProgressSendsSnapshot()
     {
         var storage = new CoreTestStorage();
         storage.LogStorage.ApplySnapshot(new Snapshot
@@ -684,7 +684,12 @@ public sealed class RaftCoreReplicationTests
         });
 
         Assert.True(remote.RecentActive);
-        Assert.Empty(core.TakeMessages());
+        Message snapshot = Assert.Single(core.TakeMessages());
+        Assert.Equal(MessageType.MsgSnap, snapshot.Type);
+        Assert.Equal(2UL, snapshot.To);
+        Assert.Equal(5UL, snapshot.Snapshot.Metadata.Index);
+        Assert.Equal(ProgressState.Snapshot, remote.State);
+        Assert.Equal(5UL, remote.PendingSnapshot);
     }
 
     [Fact]

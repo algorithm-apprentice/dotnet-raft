@@ -1,5 +1,6 @@
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
+using DotnetRaft.Storage;
 using DotnetRaft.Tracker;
 
 using Google.Protobuf;
@@ -164,6 +165,123 @@ public sealed class RaftCoreReplicationInteractionTests
         Assert.Equal(0, remote.Inflights.Count);
     }
 
+    [Fact]
+    public void CompactedSlowVoterRecoversThroughPersistedSnapshot()
+    {
+        ElectionCoreFixture leader = CreateCompactedFixture(
+            id: 1,
+            voters: [1, 2]);
+        ElectionCoreFixture follower = Create(
+            id: 2,
+            voters: [1, 2],
+            term: 1);
+        var network = new DeterministicNetwork(
+            leader,
+            follower);
+
+        network.Deliver(Hup(1));
+
+        Assert.Equal(RaftRole.Leader, leader.Core.Role);
+        Assert.Equal(1, network.SnapshotMessageCount);
+        Assert.Equal(5UL, follower.Storage.LogStorage
+            .GetSnapshot().Metadata.Index);
+        Assert.False(follower.Core.Log.HasUnstableSnapshot);
+        Assert.Equal(8UL, follower.Core.Log.LastIndex);
+        Assert.Equal(8UL, follower.Core.Log.Committed);
+        Assert.Equal(
+            leader.Core.Log.GetAllEntries(),
+            follower.Core.Log.GetAllEntries());
+        Progress progress = leader.Core.Tracker.Progress[2];
+        Assert.Equal(ProgressState.Replicate, progress.State);
+        Assert.Equal(8UL, progress.Match);
+    }
+
+    [Fact]
+    public void CompactedSlowLearnerRecoversWithoutAffectingQuorum()
+    {
+        ElectionCoreFixture leader = CreateCompactedFixture(
+            id: 1,
+            voters: [1, 2],
+            learners: [3]);
+        ElectionCoreFixture voter = CreateCompactedFixture(
+            id: 2,
+            voters: [1, 2],
+            learners: [3]);
+        ElectionCoreFixture learner = Create(
+            id: 3,
+            voters: [1, 2],
+            learners: [3],
+            term: 1);
+        var network = new DeterministicNetwork(
+            leader,
+            voter,
+            learner);
+
+        network.Deliver(Hup(1));
+
+        Assert.Equal(RaftRole.Leader, leader.Core.Role);
+        Assert.Equal(1, network.SnapshotMessageCount);
+        Assert.True(learner.Core.IsLearner);
+        Assert.Equal(5UL, learner.Storage.LogStorage
+            .GetSnapshot().Metadata.Index);
+        Assert.False(learner.Core.Log.HasUnstableSnapshot);
+        Assert.Equal(8UL, learner.Core.Log.LastIndex);
+        Assert.Equal(8UL, learner.Core.Log.Committed);
+        Assert.Equal(
+            leader.Core.Log.GetAllEntries(),
+            learner.Core.Log.GetAllEntries());
+        Progress progress = leader.Core.Tracker.Progress[3];
+        Assert.True(progress.IsLearner);
+        Assert.Equal(ProgressState.Replicate, progress.State);
+        Assert.Equal(8UL, progress.Match);
+    }
+
+    private static ElectionCoreFixture CreateCompactedFixture(
+        ulong id,
+        IEnumerable<ulong> voters,
+        IEnumerable<ulong>? learners = null)
+    {
+        var storage = new CoreTestStorage();
+        var state = new ConfState();
+        state.Voters.Add(voters);
+        if (learners is not null)
+        {
+            state.Learners.Add(learners);
+        }
+
+        storage.LogStorage.ApplySnapshot(new Snapshot
+        {
+            Data = ByteString.CopyFromUtf8("state"),
+            Metadata = new SnapshotMetadata
+            {
+                Index = 5,
+                Term = 1,
+                ConfState = state.Clone(),
+            },
+        });
+        storage.LogStorage.Append(
+        [
+            EntryAt(6, 1),
+            EntryAt(7, 1),
+        ]);
+        storage.InitialState = new StorageState(
+            new HardState
+            {
+                Term = 1,
+                Commit = 5,
+            },
+            state);
+        var core = new RaftCore(
+            new RaftConfig
+            {
+                Id = id,
+                Storage = storage,
+                Applied = 5,
+            },
+            _ => 0);
+        return new ElectionCoreFixture(core, storage);
+    }
+
     private static Message Proposal(ulong id, string data)
     {
         return Proposal(id, [data]);
@@ -193,6 +311,7 @@ public sealed class RaftCoreReplicationInteractionTests
     private sealed class DeterministicNetwork
     {
         private readonly Dictionary<ulong, RaftCore> nodes;
+        private readonly Dictionary<ulong, CoreTestStorage> storages = [];
         private readonly Queue<Message> messages = new();
 
         internal DeterministicNetwork(params RaftCore[] nodes)
@@ -200,10 +319,23 @@ public sealed class RaftCoreReplicationInteractionTests
             this.nodes = nodes.ToDictionary(core => core.Id);
         }
 
+        internal DeterministicNetwork(
+            params ElectionCoreFixture[] fixtures)
+        {
+            nodes = fixtures.ToDictionary(
+                fixture => fixture.Core.Id,
+                fixture => fixture.Core);
+            storages = fixtures.ToDictionary(
+                fixture => fixture.Core.Id,
+                fixture => fixture.Storage);
+        }
+
         internal IEnumerable<RaftCore> Nodes =>
             nodes.Values.OrderBy(core => core.Id);
 
         internal int RejectedAppendCount { get; private set; }
+
+        internal int SnapshotMessageCount { get; private set; }
 
         internal RaftCore this[ulong id] => nodes[id];
 
@@ -224,6 +356,11 @@ public sealed class RaftCoreReplicationInteractionTests
                 RejectedAppendCount++;
             }
 
+            if (message.Type == MessageType.MsgSnap)
+            {
+                SnapshotMessageCount++;
+            }
+
             RaftCore core = nodes[message.To];
             core.Step(message);
             CompleteReadyBatches(core);
@@ -242,6 +379,11 @@ public sealed class RaftCoreReplicationInteractionTests
                     return;
                 }
 
+                if (afterAppend.Length > 0)
+                {
+                    PersistReadyBatch(core);
+                }
+
                 foreach (Message message in immediate)
                 {
                     messages.Enqueue(message);
@@ -258,6 +400,49 @@ public sealed class RaftCoreReplicationInteractionTests
                         messages.Enqueue(message);
                     }
                 }
+            }
+        }
+
+        private void PersistReadyBatch(RaftCore core)
+        {
+            if (!storages.TryGetValue(
+                    core.Id,
+                    out CoreTestStorage? storage))
+            {
+                return;
+            }
+
+            Snapshot? snapshot =
+                core.Log.GetNextUnstableSnapshot();
+            Entry[] entries =
+                [.. core.Log.GetNextUnstableEntries()];
+            core.Log.AcceptUnstable();
+
+            HardState hardState = core.HardState;
+            storage.LogStorage.SetHardState(hardState);
+            storage.InitialState = new StorageState(
+                hardState.Clone(),
+                core.Tracker.ToConfState());
+            if (snapshot is not null)
+            {
+                storage.LogStorage.ApplySnapshot(snapshot);
+            }
+
+            if (entries.Length > 0)
+            {
+                storage.LogStorage.Append(entries);
+            }
+
+            if (snapshot is not null)
+            {
+                core.Log.AcknowledgeSnapshot(
+                    snapshot.Metadata.Index);
+            }
+
+            if (entries.Length > 0)
+            {
+                core.Log.StableTo(
+                    EntryId.From(entries[^1]));
             }
         }
     }

@@ -24,6 +24,8 @@ internal sealed class CoreTestStorage : IStorage
 
     internal Func<ulong, ulong>? GetTermOverride { get; set; }
 
+    internal Func<Snapshot>? GetSnapshotOverride { get; set; }
+
     public StorageState GetInitialState()
     {
         CallCount++;
@@ -69,6 +71,11 @@ internal sealed class CoreTestStorage : IStorage
     public Snapshot GetSnapshot()
     {
         CallCount++;
+        if (GetSnapshotOverride is not null)
+        {
+            return GetSnapshotOverride();
+        }
+
         return LogStorage.GetSnapshot();
     }
 }

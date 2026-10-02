@@ -671,6 +671,13 @@ internal sealed class RaftCore
                 }
 
                 return;
+            case MessageType.MsgSnapStatus:
+                if (Role == RaftRole.Leader)
+                {
+                    HandleSnapshotStatus(message);
+                }
+
+                return;
             case MessageType.MsgApp:
             case MessageType.MsgHeartbeat:
             case MessageType.MsgSnap:
@@ -689,6 +696,9 @@ internal sealed class RaftCore
                 return;
             case MessageType.MsgHeartbeat:
                 HandleHeartbeat(message);
+                return;
+            case MessageType.MsgSnap:
+                HandleSnapshot(message);
                 return;
             case MessageType.MsgVoteResp
                 when Role == RaftRole.Candidate:
@@ -909,7 +919,7 @@ internal sealed class RaftCore
         catch (StorageException exception)
             when (exception.Error == StorageError.Compacted)
         {
-            return false;
+            return MaybeSendSnapshot(to, progress);
         }
 
         if (entries.Count == 0 && !sendIfEmpty)
@@ -1063,6 +1073,12 @@ internal sealed class RaftCore
                     message.Index);
                 break;
             case ProgressState.Snapshot:
+                if (progress.Match >= Log.FirstIndex - 1)
+                {
+                    progress.BecomeProbe();
+                    progress.BecomeReplicate();
+                }
+
                 break;
             default:
                 throw new RaftInvariantException(
@@ -1166,6 +1182,134 @@ internal sealed class RaftCore
         {
             progress.BecomeProbe();
         }
+    }
+
+    private bool MaybeSendSnapshot(
+        ulong to,
+        Progress progress)
+    {
+        if (!progress.RecentActive)
+        {
+            return false;
+        }
+
+        Snapshot snapshot;
+        try
+        {
+            snapshot = Log.GetSnapshot();
+        }
+        catch (StorageException exception)
+            when (exception.Error ==
+                  StorageError.SnapshotTemporarilyUnavailable)
+        {
+            return false;
+        }
+
+        ulong snapshotIndex = snapshot.Metadata.Index;
+        if (snapshotIndex == 0)
+        {
+            throw new RaftInvariantException(
+                "Cannot send an empty snapshot.");
+        }
+
+        progress.BecomeSnapshot(snapshotIndex);
+        Send(new Message
+        {
+            To = to,
+            Type = MessageType.MsgSnap,
+            Snapshot = snapshot,
+        });
+        return true;
+    }
+
+    private void HandleSnapshotStatus(Message message)
+    {
+        if (!Tracker.Progress.TryGetValue(
+                message.From,
+                out Progress? progress)
+            || progress.State != ProgressState.Snapshot)
+        {
+            return;
+        }
+
+        progress.ReportSnapshot(!message.Reject);
+    }
+
+    private void HandleSnapshot(Message message)
+    {
+        Snapshot snapshot = ProtocolDefaults.EnsureSnapshot(
+            message.Snapshot?.Clone());
+        bool restored = RestoreSnapshot(snapshot);
+        Send(new Message
+        {
+            To = message.From,
+            Type = MessageType.MsgAppResp,
+            Index = restored
+                ? Log.LastIndex
+                : Log.Committed,
+        });
+    }
+
+    private bool RestoreSnapshot(Snapshot snapshot)
+    {
+        ulong snapshotIndex = snapshot.Metadata.Index;
+        if (snapshotIndex <= Log.Committed)
+        {
+            return false;
+        }
+
+        if (Role != RaftRole.Follower)
+        {
+            if (Term == ulong.MaxValue)
+            {
+                throw new RaftInvariantException(
+                    "Raft term overflow while rejecting a snapshot outside follower state.");
+            }
+
+            BecomeFollower(
+                Term + 1,
+                RaftMessageTargets.None);
+            return false;
+        }
+
+        ConfState state = snapshot.Metadata.ConfState;
+        if (!ContainsLocalNode(state))
+        {
+            return false;
+        }
+
+        var snapshotEntry = new EntryId(
+            Term: snapshot.Metadata.Term,
+            Index: snapshotIndex);
+        if (Log.MatchTerm(snapshotEntry))
+        {
+            Log.CommitTo(snapshotIndex);
+            return false;
+        }
+
+        var scratch = new ProgressTracker(
+            Tracker.MaxInflightMessages,
+            Tracker.MaxInflightBytes);
+        ConfigurationChangeResult restored =
+            ConfigurationRestore.Restore(
+                new ConfigurationChanger(
+                    scratch,
+                    snapshotIndex),
+                state);
+
+        Log.Restore(snapshot);
+        Tracker.Config = restored.Config;
+        Tracker.Progress = restored.Progress;
+        Tracker.ResetVotes();
+        UpdateLocalLearnerState();
+        return true;
+    }
+
+    private bool ContainsLocalNode(ConfState state)
+    {
+        return state.Voters.Contains(Id)
+            || state.Learners.Contains(Id)
+            || state.VotersOutgoing.Contains(Id);
     }
 
     private void Reset(ulong term)

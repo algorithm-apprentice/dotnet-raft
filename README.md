@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M4 Replicated log
 - **Current milestone:** M5 Full core semantics
-- **Completed nodes:** D00-D15
-- **Next node:** D16 Snapshots
+- **Completed nodes:** D00-D16
+- **Next node:** D17 Membership integration
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -35,6 +35,7 @@ following the validated graph in strict topological order.
 - [D13 leader election design](docs/design/d13-leader-election.md)
 - [D14 basic log replication design](docs/design/d14-basic-log-replication.md)
 - [D15 replication flow control design](docs/design/d15-replication-flow-control.md)
+- [D16 snapshot design](docs/design/d16-snapshots.md)
 
 ## Development principles
 

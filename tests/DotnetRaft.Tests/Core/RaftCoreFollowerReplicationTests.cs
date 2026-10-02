@@ -308,7 +308,7 @@ public sealed class RaftCoreFollowerReplicationTests
     }
 
     [Fact]
-    public void SnapshotStillOnlyRecordsLeaderIdentityInD14()
+    public void SnapshotRestoresLogAndQueuesDurableResponse()
     {
         RaftCore core = Create(
             voters: [1, 2, 3],
@@ -339,9 +339,17 @@ public sealed class RaftCoreFollowerReplicationTests
 
         Assert.Equal(RaftRole.Follower, core.Role);
         Assert.Equal(2UL, core.LeaderId);
-        Assert.Equal(1UL, core.Log.LastIndex);
+        Assert.Equal(10UL, core.Log.LastIndex);
+        Assert.Equal(10UL, core.Log.Committed);
+        Assert.Equal(11UL, core.Log.FirstIndex);
+        Assert.True(core.Log.HasUnstableSnapshot);
         Assert.Empty(core.TakeMessages());
-        Assert.Empty(core.TakeMessagesAfterAppend());
+        Message response = Assert.Single(
+            core.TakeMessagesAfterAppend());
+        Assert.Equal(MessageType.MsgAppResp, response.Type);
+        Assert.Equal(2UL, response.To);
+        Assert.Equal(10UL, response.Index);
+        Assert.False(response.Reject);
     }
 
     private static Message Append(

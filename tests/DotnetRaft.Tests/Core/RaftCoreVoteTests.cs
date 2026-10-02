@@ -545,7 +545,16 @@ public sealed class RaftCoreVoteTests
                 return;
             case MessageType.MsgSnap:
                 Assert.Empty(core.TakeMessages());
-                Assert.Empty(core.TakeMessagesAfterAppend());
+                Message snapshotResponse = Assert.Single(
+                    core.TakeMessagesAfterAppend());
+                Assert.Equal(
+                    MessageType.MsgAppResp,
+                    snapshotResponse.Type);
+                Assert.Equal(2UL, snapshotResponse.To);
+                Assert.Equal(
+                    core.Log.Committed,
+                    snapshotResponse.Index);
+                Assert.False(snapshotResponse.Reject);
                 return;
             default:
                 throw new ArgumentOutOfRangeException(
