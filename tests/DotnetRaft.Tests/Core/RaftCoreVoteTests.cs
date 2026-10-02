@@ -288,6 +288,12 @@ public sealed class RaftCoreVoteTests
             Term = core.Term + 1,
             Type = MessageType.MsgPreVote,
         });
+        Message response = Assert.Single(
+            core.TakeMessagesAfterAppend());
+        Assert.Equal(MessageType.MsgPreVoteResp, response.Type);
+        Assert.False(response.Reject);
+        Assert.Equal(core.Term + 1, response.Term);
+
         core.Step(new Message
         {
             From = 2,

@@ -25,6 +25,7 @@ internal static class RaftCoreElectionTestSupport
         IEnumerable<ulong>? voters = null,
         IEnumerable<ulong>? outgoingVoters = null,
         IEnumerable<ulong>? learners = null,
+        IEnumerable<ulong>? learnersNext = null,
         IEnumerable<Entry>? entries = null,
         ulong term = 0,
         ulong vote = 0,
@@ -38,6 +39,7 @@ internal static class RaftCoreElectionTestSupport
         int maxInflightMessages = 256,
         ulong maxInflightBytes = 0,
         bool checkQuorum = false,
+        bool preVote = false,
         bool disableConfChangeValidation = false,
         bool stepDownOnRemoval = false,
         bool disableProposalForwarding = false,
@@ -61,6 +63,11 @@ internal static class RaftCoreElectionTestSupport
         if (learners is not null)
         {
             confState.Learners.Add(learners);
+        }
+
+        if (learnersNext is not null)
+        {
+            confState.LearnersNext.Add(learnersNext);
         }
 
         storage.InitialState = new StorageState(
@@ -88,6 +95,7 @@ internal static class RaftCoreElectionTestSupport
                 MaxInflightMessages = maxInflightMessages,
                 MaxInflightBytes = maxInflightBytes,
                 CheckQuorum = checkQuorum,
+                PreVote = preVote,
                 ReadOnlyOption = readOnlyOption,
                 Logger = logger,
                 DisableConfChangeValidation =

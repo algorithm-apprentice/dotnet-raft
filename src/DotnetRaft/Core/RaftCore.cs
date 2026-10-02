@@ -16,6 +16,8 @@ namespace DotnetRaft.Core;
 
 internal sealed class RaftCore
 {
+    private static readonly ByteString CampaignTransferContext =
+        ByteString.CopyFromUtf8("CampaignTransfer");
     private readonly Func<int, int> randomOffset;
     private readonly List<Message> messages = [];
     private readonly List<Message> messagesAfterAppend = [];
@@ -338,7 +340,18 @@ internal sealed class RaftCore
     internal void TickLeader()
     {
         LeaderClockTick tick = TickLeaderClocks();
-        if (!tick.HeartbeatDue || Role != RaftRole.Leader)
+        if (tick.ElectionDue && CheckQuorum)
+        {
+            Step(new Message
+            {
+                From = Id,
+                To = Id,
+                Type = MessageType.MsgCheckQuorum,
+            });
+        }
+
+        if (Role != RaftRole.Leader
+            || !tick.HeartbeatDue)
         {
             return;
         }
@@ -356,7 +369,7 @@ internal sealed class RaftCore
         ArgumentNullException.ThrowIfNull(message);
 
         if (message.Term == 0
-            && IsRealVoteMessage(message.Type))
+            && IsVoteMessage(message.Type))
         {
             throw new RaftInvariantException(
                 $"{message.Type} must carry a nonzero term.");
@@ -364,18 +377,23 @@ internal sealed class RaftCore
 
         if (message.Term > Term)
         {
-            if (IsHigherTermPreVoteException(message))
+            if (ShouldIgnoreElectionRequestWithinLease(
+                    message))
             {
                 return;
             }
 
-            ulong leaderId = IsLeaderMessage(message.Type)
-                ? message.From
-                : RaftMessageTargets.None;
-            BecomeFollower(message.Term, leaderId);
+            if (!IsHigherTermPreVoteException(message))
+            {
+                ulong leaderId = IsLeaderMessage(message.Type)
+                    ? message.From
+                    : RaftMessageTargets.None;
+                BecomeFollower(message.Term, leaderId);
+            }
         }
         else if (message.Term != 0 && message.Term < Term)
         {
+            HandleLowerTermMessage(message);
             return;
         }
 
@@ -385,6 +403,7 @@ internal sealed class RaftCore
                 HandleHup();
                 return;
             case MessageType.MsgVote:
+            case MessageType.MsgPreVote:
                 HandleVoteRequest(message);
                 return;
             default:
@@ -395,7 +414,44 @@ internal sealed class RaftCore
 
     internal void Campaign()
     {
-        BecomeCandidate();
+        Campaign(CampaignType.Election);
+    }
+
+    internal void Campaign(CampaignType campaignType)
+    {
+        MessageType voteType;
+        ulong campaignTerm;
+        ByteString context;
+        switch (campaignType)
+        {
+            case CampaignType.PreElection:
+                if (Term == ulong.MaxValue)
+                {
+                    throw new RaftInvariantException(
+                        "Raft term overflow while starting pre-election.");
+                }
+
+                BecomePreCandidate();
+                voteType = MessageType.MsgPreVote;
+                campaignTerm = Term + 1;
+                context = ByteString.Empty;
+                break;
+            case CampaignType.Election:
+                BecomeCandidate();
+                voteType = MessageType.MsgVote;
+                campaignTerm = Term;
+                context = ByteString.Empty;
+                break;
+            case CampaignType.Transfer:
+                BecomeCandidate();
+                voteType = MessageType.MsgVote;
+                campaignTerm = Term;
+                context = CampaignTransferContext;
+                break;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown campaign type {campaignType}.");
+        }
 
         EntryId lastEntry = default;
         bool hasLastEntry = false;
@@ -406,8 +462,10 @@ internal sealed class RaftCore
                 Send(new Message
                 {
                     To = voterId,
-                    Term = Term,
-                    Type = MessageType.MsgVoteResp,
+                    Term = campaignTerm,
+                    Type =
+                        MessageClassifier.VoteResponseType(
+                            voteType),
                 });
                 continue;
             }
@@ -421,10 +479,11 @@ internal sealed class RaftCore
             Send(new Message
             {
                 To = voterId,
-                Term = Term,
-                Type = MessageType.MsgVote,
+                Term = campaignTerm,
+                Type = voteType,
                 Index = lastEntry.Index,
                 LogTerm = lastEntry.Term,
+                Context = context,
             });
         }
     }
@@ -561,13 +620,6 @@ internal sealed class RaftCore
             MessageType.MsgPreVoteResp;
     }
 
-    private static bool IsRealVoteMessage(MessageType type)
-    {
-        return type is
-            MessageType.MsgVote or
-            MessageType.MsgVoteResp;
-    }
-
     private static bool IsLeaderMessage(MessageType type)
     {
         return type is
@@ -621,7 +673,10 @@ internal sealed class RaftCore
             return;
         }
 
-        Campaign();
+        Campaign(
+            PreVote
+                ? CampaignType.PreElection
+                : CampaignType.Election);
     }
 
     private bool HasUnappliedConfigurationChanges()
@@ -666,9 +721,14 @@ internal sealed class RaftCore
         bool canVote =
             Vote == message.From
             || (Vote == RaftMessageTargets.None
-                && LeaderId == RaftMessageTargets.None);
+                && LeaderId == RaftMessageTargets.None)
+            || (message.Type == MessageType.MsgPreVote
+                && message.Term > Term);
         bool upToDate = Log.IsUpToDate(
             new EntryId(message.LogTerm, message.Index));
+        MessageType responseType =
+            MessageClassifier.VoteResponseType(
+                message.Type);
 
         if (canVote && upToDate)
         {
@@ -676,10 +736,14 @@ internal sealed class RaftCore
             {
                 To = message.From,
                 Term = message.Term,
-                Type = MessageType.MsgVoteResp,
+                Type = responseType,
             });
-            electionElapsed = 0;
-            Vote = message.From;
+            if (message.Type == MessageType.MsgVote)
+            {
+                electionElapsed = 0;
+                Vote = message.From;
+            }
+
             return;
         }
 
@@ -687,7 +751,7 @@ internal sealed class RaftCore
         {
             To = message.From,
             Term = Term,
-            Type = MessageType.MsgVoteResp,
+            Type = responseType,
             Reject = true,
         });
     }
@@ -705,6 +769,16 @@ internal sealed class RaftCore
                     BroadcastHeartbeat();
                 }
 
+                return;
+            case MessageType.MsgCheckQuorum:
+                if (Role == RaftRole.Leader)
+                {
+                    HandleCheckQuorum();
+                }
+
+                return;
+            case MessageType.MsgForgetLeader:
+                HandleForgetLeader();
                 return;
             case MessageType.MsgAppResp:
                 if (Role == RaftRole.Leader)
@@ -770,6 +844,10 @@ internal sealed class RaftCore
                 when Role == RaftRole.Candidate:
                 HandleVoteResponse(message);
                 return;
+            case MessageType.MsgPreVoteResp
+                when Role == RaftRole.PreCandidate:
+                HandleVoteResponse(message);
+                return;
         }
     }
 
@@ -800,8 +878,16 @@ internal sealed class RaftCore
         switch (result)
         {
             case VoteResult.Won:
-                BecomeLeader();
-                BroadcastAppend();
+                if (Role == RaftRole.PreCandidate)
+                {
+                    Campaign(CampaignType.Election);
+                }
+                else
+                {
+                    BecomeLeader();
+                    BroadcastAppend();
+                }
+
                 return;
             case VoteResult.Lost:
                 BecomeFollower(Term, RaftMessageTargets.None);
@@ -1365,7 +1451,18 @@ internal sealed class RaftCore
             return;
         }
 
-        TrackReadIndex(message);
+        if (ReadOnly.Option ==
+                ReadOnlyOption.LeaseBased
+            && IsLocalVoter())
+        {
+            RespondToReadIndex(
+                message,
+                Log.Committed);
+        }
+        else
+        {
+            TrackReadIndex(message);
+        }
     }
 
     private void HandleReadIndexResponse(Message message)
@@ -1472,6 +1569,16 @@ internal sealed class RaftCore
         return Tracker.Config.Voters.Incoming.Count == 1
             && Tracker.Config.Voters.Incoming.Contains(Id)
             && Tracker.Config.Voters.Outgoing.Count == 0
+            && Tracker.Progress.TryGetValue(
+                Id,
+                out Progress? progress)
+            && !progress.IsLearner;
+    }
+
+    private bool IsLocalVoter()
+    {
+        return (Tracker.Config.Voters.Incoming.Contains(Id)
+                || Tracker.Config.Voters.Outgoing.Contains(Id))
             && Tracker.Progress.TryGetValue(
                 Id,
                 out Progress? progress)
@@ -1710,6 +1817,90 @@ internal sealed class RaftCore
         }
     }
 
+    private void HandleCheckQuorum()
+    {
+        if (!Tracker.QuorumActive())
+        {
+            LogWarning(
+                $"{Id:x} stepped down because quorum is not active.");
+            BecomeFollower(
+                Term,
+                RaftMessageTargets.None);
+        }
+
+        Tracker.Visit((id, progress) =>
+        {
+            if (id != Id)
+            {
+                progress.RecentActive = false;
+            }
+        });
+    }
+
+    private void HandleForgetLeader()
+    {
+        switch (Role)
+        {
+            case RaftRole.Follower:
+                if (ReadOnly.Option ==
+                    ReadOnlyOption.LeaseBased)
+                {
+                    LogError(
+                        "Ignoring MsgForgetLeader in lease-based read mode.");
+                    return;
+                }
+
+                LeaderId = RaftMessageTargets.None;
+                return;
+            case RaftRole.PreCandidate:
+            case RaftRole.Candidate:
+            case RaftRole.Leader:
+                return;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown Raft role {Role}.");
+        }
+    }
+
+    private bool ShouldIgnoreElectionRequestWithinLease(
+        Message message)
+    {
+        return message.Type is
+                MessageType.MsgVote or
+                MessageType.MsgPreVote
+            && CheckQuorum
+            && LeaderId != RaftMessageTargets.None
+            && electionElapsed < ElectionTick
+            && message.Context != CampaignTransferContext;
+    }
+
+    private void HandleLowerTermMessage(Message message)
+    {
+        if ((CheckQuorum || PreVote)
+            && message.Type is
+                MessageType.MsgApp or
+                MessageType.MsgHeartbeat)
+        {
+            Send(new Message
+            {
+                To = message.From,
+                Type = MessageType.MsgAppResp,
+            });
+            return;
+        }
+
+        if (message.Type == MessageType.MsgPreVote)
+        {
+            Send(new Message
+            {
+                To = message.From,
+                Term = Term,
+                Type = MessageType.MsgPreVoteResp,
+                Reject = true,
+            });
+        }
+    }
+
     private void MaybeAutoLeave()
     {
         if (!Tracker.Config.AutoLeave
@@ -1827,6 +2018,14 @@ internal sealed class RaftCore
         if (Logger.IsEnabled(RaftLogLevel.Error))
         {
             Logger.Log(RaftLogLevel.Error, message);
+        }
+    }
+
+    private void LogWarning(string message)
+    {
+        if (Logger.IsEnabled(RaftLogLevel.Warning))
+        {
+            Logger.Log(RaftLogLevel.Warning, message);
         }
     }
 }

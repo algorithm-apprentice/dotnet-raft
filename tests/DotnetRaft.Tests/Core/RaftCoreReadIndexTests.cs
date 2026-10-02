@@ -1,6 +1,5 @@
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
-using DotnetRaft.Read;
 
 using Google.Protobuf;
 
@@ -181,34 +180,6 @@ public sealed class RaftCoreReadIndexTests
         Assert.Empty(core.TakeReadStates());
         Assert.Empty(core.TakeMessages());
         Assert.Equal(0, core.ReadOnly.PendingCount);
-    }
-
-    [Fact]
-    public void LeaseBasedConfigurationUsesSafeFallbackBeforeD19()
-    {
-        RaftCore core = NewLeader(
-            voters: [1, 2, 3],
-            readOnlyOption: ReadOnlyOption.LeaseBased,
-            checkQuorum: true);
-
-        core.Step(ReadRequest("lease"));
-
-        Assert.Empty(core.TakeReadStates());
-        ByteString context = LatestHeartbeatContext(
-            core.TakeMessages());
-        Assert.False(context.IsEmpty);
-
-        core.Step(HeartbeatResponse(
-            core,
-            from: 2,
-            context));
-
-        ReadState state = Assert.Single(
-            core.TakeReadStates());
-        Assert.Equal(1UL, state.Index);
-        Assert.Equal(
-            "lease",
-            state.RequestContext.ToStringUtf8());
     }
 
     [Fact]

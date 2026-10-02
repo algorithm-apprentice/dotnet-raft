@@ -605,8 +605,7 @@ public sealed class RaftCoreReplicationTests
         RaftCore core = NewLeader(
             voters: [1, 2, 3],
             electionTick: 5,
-            heartbeatTick: 2,
-            checkQuorum: true);
+            heartbeatTick: 2);
 
         core.TickLeader();
 

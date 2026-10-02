@@ -83,6 +83,7 @@ flowchart TD
     D14 --> D18
     D09 --> D19
     D13 --> D19
+    D17 --> D19
     D18 --> D19
     D15 --> D20
     D19 --> D20
@@ -105,7 +106,7 @@ flowchart TD
     D25 --> D26
 ```
 
-The graph contains 27 nodes and 58 dependency edges. Every edge points from a
+The graph contains 27 nodes and 59 dependency edges. Every edge points from a
 lower selected-order node to a higher selected-order node, so the sequence
 below is a valid topological sort.
 
@@ -141,7 +142,7 @@ D00 -> D01 -> D02 -> D03 -> D04 -> D05 -> D06 -> D07 -> D08
 | D16 | Add snapshot sending, receiving, restoring, reporting, and compacted-follower recovery. | D04, D10, D15 | `raft_snap_test.go`, snapshot interaction files | Obsolete snapshots are ignored; valid snapshots restore log/configuration and resume replication. |
 | D17 | Integrate membership changes into the core, including pending-change protection, learners, joint consensus, auto-leave, and leader removal. | D10, D14, D16 | Membership sections of `raft.go`, `testdata/confchange_*` | V1 and V2 membership scenarios pass without violating quorum or learner invariants. |
 | D18 | Implement safe `ReadIndex`, heartbeat contexts, follower forwarding, and pending reads awaiting a current-term commit. | D09, D11, D14 | `read_only.go`, read-index sections of `raft_test.go` | Safe linearizable read indexes are released only after quorum confirmation. |
-| D19 | Implement `CheckQuorum`, `PreVote`, `ForgetLeader`, and lease-based `ReadIndex`. Lease mode requires `CheckQuorum` and assumes bounded clock drift. | D09, D13, D18 | `testdata/checkquorum.txt`, `prevote*.txt`, `forget_leader*.txt`, lease-read sections of `raft_test.go` | Isolated nodes do not unnecessarily disrupt an active leader, and lease reads cannot be enabled without their safety prerequisite. |
+| D19 | Implement `CheckQuorum`, `PreVote`, `ForgetLeader`, and lease-based `ReadIndex`. Lease mode requires `CheckQuorum` and assumes bounded clock drift. | D09, D13, D17, D18 | `testdata/checkquorum.txt`, `prevote*.txt`, `forget_leader*.txt`, lease-read sections of `raft_test.go` | Isolated nodes do not unnecessarily disrupt an active leader, and lease reads cannot be enabled without their safety prerequisite. |
 | D20 | Implement leadership transfer, `TimeoutNow`, transfer cancellation, and proposal rejection during transfer. | D15, D19 | Leadership-transfer sections of `raft.go` and `raft_test.go` | Transfer succeeds only to an eligible caught-up voter and times out safely. |
 | D21 | Implement `RawNode`, synchronous `Ready`/`Advance`, `HasReady`, `MustSync`, storage/apply acknowledgements, and reporting methods. | D16, D17, D18, D19, D20 | `rawnode.go`, `rawnode_test.go` | Persistence-before-response ordering and ordered synchronous Ready/Advance processing match the reference. |
 | D22 | Implement bootstrap, restart, status snapshots, message/entry descriptions, and tracing hooks. | D17, D21 | `bootstrap.go`, `status.go`, `util.go`, `state_trace*.go` | Bootstrap/restart and status tests pass without exposing mutable internal state. |

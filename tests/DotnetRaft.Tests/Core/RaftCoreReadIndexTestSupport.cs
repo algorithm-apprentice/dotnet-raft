@@ -15,6 +15,7 @@ internal static class RaftCoreReadIndexTestSupport
         IEnumerable<ulong> voters,
         IEnumerable<ulong>? outgoingVoters = null,
         IEnumerable<ulong>? learners = null,
+        IEnumerable<ulong>? learnersNext = null,
         bool commitCurrentTerm = true,
         ReadOnlyOption readOnlyOption = ReadOnlyOption.Safe,
         bool checkQuorum = false,
@@ -24,6 +25,7 @@ internal static class RaftCoreReadIndexTestSupport
             voters: voters,
             outgoingVoters: outgoingVoters,
             learners: learners,
+            learnersNext: learnersNext,
             checkQuorum: checkQuorum,
             readOnlyOption: readOnlyOption,
             logger: logger).Core;
