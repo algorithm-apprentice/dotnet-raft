@@ -1,4 +1,5 @@
 using DotnetRaft.Core;
+using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 
 using Google.Protobuf;
@@ -7,7 +8,7 @@ using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft;
 
-public sealed class RawNode
+public sealed partial class RawNode
 {
     private readonly RaftCore _core;
     private SoftState _previousSoftState;
@@ -15,6 +16,8 @@ public sealed class RawNode
     private Ready? _outstanding;
     private ReadyAcknowledgement? _acknowledgement;
     private Exception? _fault;
+    private RawNodeLifecycle _lifecycle;
+    private bool _operationInProgress;
 
     public RawNode(RaftConfig config)
     {
@@ -32,108 +35,386 @@ public sealed class RawNode
 
     internal RaftCore Core => _core;
 
+    public static RawNode Start(
+        RaftConfig config,
+        IEnumerable<Peer> peers)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        Peer[] materialized = MaterializePeers(peers);
+        var node = new RawNode(config);
+        node.BootstrapMaterialized(materialized);
+        return node;
+    }
+
+    public static RawNode Restart(RaftConfig config)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        return new RawNode(config);
+    }
+
+    public void Bootstrap(IEnumerable<Peer> peers)
+    {
+        Execute(() =>
+        {
+            Peer[] materialized = MaterializePeers(peers);
+            BootstrapValidated(materialized);
+        });
+    }
+
     public void Tick()
     {
-        EnsureUsable();
-        if (_core.Role == RaftRole.Leader)
+        Execute(() =>
         {
-            _core.TickLeader();
-            return;
-        }
+            Activate();
+            if (_core.Role == RaftRole.Leader)
+            {
+                _core.TickLeader();
+                return;
+            }
 
-        _core.TickElection();
+            _core.TickElection();
+        });
     }
 
     public void Campaign()
     {
-        EnsureUsable();
-        _core.Step(LocalMessage(MessageType.MsgHup));
+        Execute(() =>
+        {
+            Activate();
+            _core.Step(LocalMessage(MessageType.MsgHup));
+        });
     }
 
     public void Propose(ReadOnlySpan<byte> data)
     {
-        EnsureUsable();
-        var proposal = LocalMessage(MessageType.MsgProp);
-        proposal.Entries.Add(new Entry
+        byte[] owned = data.ToArray();
+        Execute(() =>
         {
-            Data = ByteString.CopyFrom(data),
+            Activate();
+            var proposal = LocalMessage(
+                MessageType.MsgProp);
+            proposal.Entries.Add(new Entry
+            {
+                Data = ByteString.CopyFrom(owned),
+            });
+            _core.Step(proposal);
         });
-        _core.Step(proposal);
     }
 
-    public void ProposeConfChange(ProtocolConfChange change)
+    public void ProposeConfChange(
+        ProtocolConfChange change)
     {
-        EnsureUsable();
-        ArgumentNullException.ThrowIfNull(change);
-        var proposal = LocalMessage(MessageType.MsgProp);
-        proposal.Entries.Add(new Entry
+        Execute(() =>
         {
-            Type = EntryType.EntryConfChange,
-            Data = change.ToByteString(),
+            ArgumentNullException.ThrowIfNull(change);
+            Activate();
+            var proposal = LocalMessage(
+                MessageType.MsgProp);
+            proposal.Entries.Add(new Entry
+            {
+                Type = EntryType.EntryConfChange,
+                Data = change.ToByteString(),
+            });
+            _core.Step(proposal);
         });
-        _core.Step(proposal);
     }
 
-    public void ProposeConfChange(ConfChangeV2 change)
+    public void ProposeConfChange(
+        ConfChangeV2 change)
     {
-        EnsureUsable();
-        ArgumentNullException.ThrowIfNull(change);
-        var proposal = LocalMessage(MessageType.MsgProp);
-        proposal.Entries.Add(new Entry
+        Execute(() =>
         {
-            Type = EntryType.EntryConfChangeV2,
-            Data = change.ToByteString(),
+            ArgumentNullException.ThrowIfNull(change);
+            Activate();
+            var proposal = LocalMessage(
+                MessageType.MsgProp);
+            proposal.Entries.Add(new Entry
+            {
+                Type = EntryType.EntryConfChangeV2,
+                Data = change.ToByteString(),
+            });
+            _core.Step(proposal);
         });
-        _core.Step(proposal);
     }
 
-    public ConfState ApplyConfChange(ProtocolConfChange change)
+    public ConfState ApplyConfChange(
+        ProtocolConfChange change)
     {
-        EnsureUsable();
-        ArgumentNullException.ThrowIfNull(change);
-        return ApplyConfChangeCore(
-            () => _core.ApplyConfigurationChange(change));
+        return Execute(() =>
+        {
+            ArgumentNullException.ThrowIfNull(change);
+            Activate();
+            return ApplyConfChangeCore(
+                () => _core.ApplyConfigurationChange(
+                    change));
+        });
     }
 
-    public ConfState ApplyConfChange(ConfChangeV2 change)
+    public ConfState ApplyConfChange(
+        ConfChangeV2 change)
     {
-        EnsureUsable();
-        ArgumentNullException.ThrowIfNull(change);
-        return ApplyConfChangeCore(
-            () => _core.ApplyConfigurationChange(change));
+        return Execute(() =>
+        {
+            ArgumentNullException.ThrowIfNull(change);
+            Activate();
+            return ApplyConfChangeCore(
+                () => _core.ApplyConfigurationChange(
+                    change));
+        });
     }
 
     public void Step(Message message)
     {
-        EnsureUsable();
-        ArgumentNullException.ThrowIfNull(message);
-
-        if (RaftMessageTargets.IsLocal(message.From))
+        Execute(() =>
         {
-            throw new InvalidOperationException(
-                $"Messages from reserved local sender {message.From} cannot be stepped through the network facade.");
-        }
+            ArgumentNullException.ThrowIfNull(message);
+            Message owned = message.Clone();
 
-        if (MessageClassifier.IsLocal(message.Type))
-        {
-            throw new InvalidOperationException(
-                $"Local message {message.Type} cannot be stepped through the network facade.");
-        }
+            if (RaftMessageTargets.IsLocal(owned.From))
+            {
+                throw new InvalidOperationException(
+                    $"Messages from reserved local sender {owned.From} cannot be stepped through the network facade.");
+            }
 
-        if (MessageClassifier.IsResponse(message.Type)
-            && !_core.Tracker.Progress.ContainsKey(
-                message.From))
-        {
-            throw new InvalidOperationException(
-                $"Response sender {message.From} is not a known peer.");
-        }
+            if (MessageClassifier.IsLocal(owned.Type))
+            {
+                throw new InvalidOperationException(
+                    $"Local message {owned.Type} cannot be stepped through the network facade.");
+            }
 
-        _core.Step(message);
+            if (MessageClassifier.IsResponse(owned.Type)
+                && !_core.Tracker.Progress.ContainsKey(
+                    owned.From))
+            {
+                throw new InvalidOperationException(
+                    $"Response sender {owned.From} is not a known peer.");
+            }
+
+            Activate();
+            _core.Step(owned);
+        });
     }
 
     public bool HasReady()
     {
-        EnsureUsable();
+        return Execute(HasReadyCore);
+    }
+
+    public Ready Ready()
+    {
+        return Execute(CreateReady);
+    }
+
+    public void Advance(Ready ready)
+    {
+        Execute(() => AdvanceCore(ready));
+    }
+
+    public void ReportUnreachable(ulong id)
+    {
+        Execute(() =>
+        {
+            Activate();
+            _core.Step(new Message
+            {
+                From = id,
+                To = _core.Id,
+                Type = MessageType.MsgUnreachable,
+            });
+        });
+    }
+
+    public void ReportSnapshot(
+        ulong id,
+        SnapshotStatus status)
+    {
+        Execute(() =>
+        {
+            if (status is not (
+                    SnapshotStatus.Success
+                    or SnapshotStatus.Failure))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(status),
+                    status,
+                    "Unknown snapshot status.");
+            }
+
+            Activate();
+            _core.Step(new Message
+            {
+                From = id,
+                To = _core.Id,
+                Type = MessageType.MsgSnapStatus,
+                Reject =
+                    status == SnapshotStatus.Failure,
+            });
+        });
+    }
+
+    public void TransferLeader(ulong transferee)
+    {
+        Execute(() =>
+        {
+            Activate();
+            _core.Step(new Message
+            {
+                From = transferee,
+                To = _core.Id,
+                Type = MessageType.MsgTransferLeader,
+            });
+        });
+    }
+
+    public void ForgetLeader()
+    {
+        Execute(() =>
+        {
+            Activate();
+            _core.Step(LocalMessage(
+                MessageType.MsgForgetLeader));
+        });
+    }
+
+    public void ReadIndex(ReadOnlySpan<byte> context)
+    {
+        byte[] owned = context.ToArray();
+        Execute(() =>
+        {
+            Activate();
+            var request = LocalMessage(
+                MessageType.MsgReadIndex);
+            request.Entries.Add(new Entry
+            {
+                Data = ByteString.CopyFrom(owned),
+            });
+            _core.Step(request);
+        });
+    }
+
+    public BasicStatus GetBasicStatus()
+    {
+        return ExecuteDiagnostic(
+            _core.GetBasicStatus);
+    }
+
+    public Status GetStatus()
+    {
+        return ExecuteDiagnostic(() =>
+        {
+            BasicStatus basic =
+                _core.GetBasicStatus();
+            ConfigurationStatus configuration =
+                _core.GetConfigurationStatus();
+            KeyValuePair<ulong, ProgressStatus>[] progress =
+                basic.Role == RaftRole.Leader
+                    ? _core.GetProgressStatuses()
+                    : [];
+            return new Status(
+                basic,
+                configuration,
+                progress);
+        });
+    }
+
+    public void VisitProgress(
+        Action<ulong, ProgressStatus> visitor)
+    {
+        ExecuteDiagnostic(() =>
+        {
+            ArgumentNullException.ThrowIfNull(visitor);
+            KeyValuePair<ulong, ProgressStatus>[] progress =
+                _core.GetProgressStatuses();
+            foreach ((ulong id, ProgressStatus status)
+                     in progress)
+            {
+                visitor(id, status);
+            }
+        });
+    }
+
+    public static bool MustSync(
+        HardState state,
+        HardState previousState,
+        int entryCount)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(previousState);
+        ArgumentOutOfRangeException.ThrowIfNegative(
+            entryCount);
+
+        return entryCount != 0
+            || state.Term != previousState.Term
+            || state.Vote != previousState.Vote;
+    }
+
+    private void BootstrapMaterialized(
+        Peer[] peers)
+    {
+        Execute(() => BootstrapValidated(peers));
+    }
+
+    private void BootstrapValidated(
+        Peer[] peers)
+    {
+        try
+        {
+            BootstrapValidatedCore(peers);
+        }
+        catch (Exception exception)
+        {
+            Fault(exception);
+            throw;
+        }
+    }
+
+    private void BootstrapValidatedCore(
+        Peer[] peers)
+    {
+        if (_lifecycle != RawNodeLifecycle.Fresh)
+        {
+            ThrowBootstrapPrecondition(
+                "Bootstrap requires a never-used RawNode.");
+        }
+
+        HardState hardState = _core.HardState;
+        ConfigurationStatus configuration =
+            _core.GetConfigurationStatus();
+        if (_core.Log.LastIndex != 0)
+        {
+            ThrowBootstrapPrecondition(
+                "Bootstrap requires an empty log.");
+        }
+
+        if (!IsEmpty(hardState))
+        {
+            ThrowBootstrapPrecondition(
+                "Bootstrap requires empty hard state.");
+        }
+
+        if (configuration.Voters.Count != 0
+            || configuration.VotersOutgoing.Count != 0
+            || configuration.Learners.Count != 0
+            || configuration.LearnersNext.Count != 0
+            || configuration.AutoLeave
+            || _core.Tracker.Progress.Count != 0)
+        {
+            ThrowBootstrapPrecondition(
+                "Bootstrap requires empty membership and progress.");
+        }
+
+        if (_outstanding is not null)
+        {
+            ThrowBootstrapPrecondition(
+                "Bootstrap cannot run with an outstanding Ready.");
+        }
+
+        _lifecycle = RawNodeLifecycle.Active;
+        _core.Bootstrap(peers);
+    }
+
+    private bool HasReadyCore()
+    {
         if (_outstanding is not null)
         {
             return false;
@@ -162,15 +443,15 @@ public sealed class RawNode
             || _core.HasReadStates;
     }
 
-    public Ready Ready()
+    private Ready CreateReady()
     {
-        EnsureUsable();
         if (_outstanding is not null)
         {
             throw new InvalidOperationException(
                 "The outstanding Ready must be advanced before requesting another batch.");
         }
 
+        Activate();
         SoftState currentSoftState = _core.SoftState;
         HardState currentHardState = _core.HardState;
         SoftState? emittedSoftState =
@@ -261,12 +542,12 @@ public sealed class RawNode
 
         _outstanding = ready;
         _acknowledgement = acknowledgement;
+        _core.TraceReadyAccepted();
         return ready;
     }
 
-    public void Advance(Ready ready)
+    private void AdvanceCore(Ready ready)
     {
-        EnsureUsable();
         ArgumentNullException.ThrowIfNull(ready);
         if (_outstanding is null
             || _acknowledgement is null)
@@ -281,6 +562,7 @@ public sealed class RawNode
                 "Advance must receive the exact outstanding Ready instance.");
         }
 
+        Activate();
         ReadyAcknowledgement acknowledgement =
             _acknowledgement;
         try
@@ -314,92 +596,12 @@ public sealed class RawNode
         }
         catch (Exception exception)
         {
-            _fault = exception;
+            Fault(exception);
             throw;
         }
 
         _outstanding = null;
         _acknowledgement = null;
-    }
-
-    public void ReportUnreachable(ulong id)
-    {
-        EnsureUsable();
-        _core.Step(new Message
-        {
-            From = id,
-            To = _core.Id,
-            Type = MessageType.MsgUnreachable,
-        });
-    }
-
-    public void ReportSnapshot(
-        ulong id,
-        SnapshotStatus status)
-    {
-        EnsureUsable();
-        if (status is not (
-                SnapshotStatus.Success
-                or SnapshotStatus.Failure))
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(status),
-                status,
-                "Unknown snapshot status.");
-        }
-
-        _core.Step(new Message
-        {
-            From = id,
-            To = _core.Id,
-            Type = MessageType.MsgSnapStatus,
-            Reject = status == SnapshotStatus.Failure,
-        });
-    }
-
-    public void TransferLeader(ulong transferee)
-    {
-        EnsureUsable();
-        _core.Step(new Message
-        {
-            From = transferee,
-            To = _core.Id,
-            Type = MessageType.MsgTransferLeader,
-        });
-    }
-
-    public void ForgetLeader()
-    {
-        EnsureUsable();
-        _core.Step(LocalMessage(
-            MessageType.MsgForgetLeader));
-    }
-
-    public void ReadIndex(ReadOnlySpan<byte> context)
-    {
-        EnsureUsable();
-        var request = LocalMessage(
-            MessageType.MsgReadIndex);
-        request.Entries.Add(new Entry
-        {
-            Data = ByteString.CopyFrom(context),
-        });
-        _core.Step(request);
-    }
-
-    public static bool MustSync(
-        HardState state,
-        HardState previousState,
-        int entryCount)
-    {
-        ArgumentNullException.ThrowIfNull(state);
-        ArgumentNullException.ThrowIfNull(previousState);
-        ArgumentOutOfRangeException.ThrowIfNegative(
-            entryCount);
-
-        return entryCount != 0
-            || state.Term != previousState.Term
-            || state.Vote != previousState.Vote;
     }
 
     private ConfState ApplyConfChangeCore(
@@ -411,7 +613,7 @@ public sealed class RawNode
         }
         catch (Exception exception)
         {
-            _fault = exception;
+            Fault(exception);
             throw;
         }
     }
@@ -426,6 +628,31 @@ public sealed class RawNode
         };
     }
 
+    private void Activate()
+    {
+        if (_lifecycle == RawNodeLifecycle.Fresh)
+        {
+            _lifecycle = RawNodeLifecycle.Active;
+        }
+    }
+
+    private void ThrowBootstrapPrecondition(
+        string message)
+    {
+        var exception =
+            new InvalidOperationException(message);
+        Fault(exception);
+        throw exception;
+    }
+
+    private void Fault(Exception exception)
+    {
+        _fault ??= exception;
+        _lifecycle = RawNodeLifecycle.Faulted;
+        _outstanding = null;
+        _acknowledgement = null;
+    }
+
     private void EnsureUsable()
     {
         if (_fault is not null)
@@ -434,6 +661,135 @@ public sealed class RawNode
                 "RawNode is faulted and must be discarded.",
                 _fault);
         }
+    }
+
+    private void Execute(Action action)
+    {
+        EnterOperation(allowFaulted: false);
+        try
+        {
+            action();
+        }
+        catch (RaftTracingException exception)
+        {
+            Fault(exception);
+            throw;
+        }
+        finally
+        {
+            _operationInProgress = false;
+        }
+    }
+
+    private T Execute<T>(Func<T> action)
+    {
+        EnterOperation(allowFaulted: false);
+        try
+        {
+            return action();
+        }
+        catch (RaftTracingException exception)
+        {
+            Fault(exception);
+            throw;
+        }
+        finally
+        {
+            _operationInProgress = false;
+        }
+    }
+
+    private void ExecuteDiagnostic(Action action)
+    {
+        EnterOperation(allowFaulted: true);
+        try
+        {
+            action();
+        }
+        finally
+        {
+            _operationInProgress = false;
+        }
+    }
+
+    private T ExecuteDiagnostic<T>(Func<T> action)
+    {
+        EnterOperation(allowFaulted: true);
+        try
+        {
+            return action();
+        }
+        finally
+        {
+            _operationInProgress = false;
+        }
+    }
+
+    private void EnterOperation(bool allowFaulted)
+    {
+        if (_operationInProgress)
+        {
+            throw new InvalidOperationException(
+                "RawNode does not allow same-instance reentry.");
+        }
+
+        if (!allowFaulted)
+        {
+            EnsureUsable();
+        }
+
+        _operationInProgress = true;
+    }
+
+    private static Peer[] MaterializePeers(
+        IEnumerable<Peer> peers)
+    {
+        ArgumentNullException.ThrowIfNull(peers);
+        var materialized = new List<Peer>();
+        var ids = new HashSet<ulong>();
+        foreach (Peer peer in peers)
+        {
+            if (peer is null)
+            {
+                throw new ArgumentException(
+                    "Peers cannot contain null values.",
+                    nameof(peers));
+            }
+
+            if (peer.Id == RaftMessageTargets.None
+                || RaftMessageTargets.IsLocal(peer.Id))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(peers),
+                    peer.Id,
+                    "Peer IDs must be nonzero remote node IDs.");
+            }
+
+            if (!ids.Add(peer.Id))
+            {
+                throw new ArgumentException(
+                    $"Peer ID {peer.Id} is duplicated.",
+                    nameof(peers));
+            }
+
+            materialized.Add(peer);
+        }
+
+        if (materialized.Count == 0)
+        {
+            throw new ArgumentException(
+                "Bootstrap requires at least one peer.",
+                nameof(peers));
+        }
+
+        return [.. materialized];
+    }
+
+    private static bool IsEmpty(HardState state)
+    {
+        return state.Term == 0
+            && state.Vote == 0
+            && state.Commit == 0;
     }
 
     private static bool HardStateEquals(
@@ -474,6 +830,13 @@ public sealed class RawNode
             appliedIndex,
             encodedSize,
             payloadSize);
+    }
+
+    private enum RawNodeLifecycle
+    {
+        Fresh,
+        Active,
+        Faulted,
     }
 
     private sealed record ReadyAcknowledgement(

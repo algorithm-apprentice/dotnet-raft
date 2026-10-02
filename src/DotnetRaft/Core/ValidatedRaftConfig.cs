@@ -19,6 +19,7 @@ internal sealed record ValidatedRaftConfig(
     bool CheckQuorum,
     bool PreVote,
     ReadOnlyOption ReadOnlyOption,
+    IRaftTraceSink? TraceSink,
     IRaftLogger Logger,
     bool DisableProposalForwarding,
     bool DisableConfChangeValidation,

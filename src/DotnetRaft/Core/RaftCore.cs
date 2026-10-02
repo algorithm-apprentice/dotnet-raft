@@ -23,8 +23,10 @@ internal sealed class RaftCore
     private readonly List<Message> messagesAfterAppend = [];
     private readonly Queue<Message> pendingReadIndexMessages = [];
     private readonly List<ReadState> readStates = [];
+    private readonly IRaftTraceSink? traceSink;
     private int electionElapsed;
     private int heartbeatElapsed;
+    private readonly bool suppressTransitionTrace = true;
 
     internal RaftCore(RaftConfig config)
         : this(
@@ -60,6 +62,7 @@ internal sealed class RaftCore
             validated.DisableConfChangeValidation;
         StepDownOnRemoval = validated.StepDownOnRemoval;
         Logger = validated.Logger;
+        traceSink = validated.TraceSink;
 
         Log = new RaftLog(
             validated.Storage,
@@ -111,9 +114,11 @@ internal sealed class RaftCore
         }
 
         BecomeFollower(Term, RaftMessageTargets.None);
+        suppressTransitionTrace = false;
         LogInformation(
             $"New Raft {Id:x} [term: {Term}, commit: {Log.Committed}, " +
             $"applied: {Log.Applied}, last index: {Log.LastIndex}].");
+        Trace(RaftTraceEventType.Initialized);
     }
 
     internal ulong Id { get; }
@@ -207,6 +212,11 @@ internal sealed class RaftCore
         Reset(term);
         LeaderId = leaderId;
         Role = RaftRole.Follower;
+        if (!suppressTransitionTrace)
+        {
+            Trace(RaftTraceEventType.BecameFollower);
+        }
+
         LogInformation(
             $"{Id:x} became follower at term {Term}.");
     }
@@ -228,6 +238,7 @@ internal sealed class RaftCore
         Reset(Term + 1);
         Vote = Id;
         Role = RaftRole.Candidate;
+        Trace(RaftTraceEventType.BecameCandidate);
         LogInformation(
             $"{Id:x} became candidate at term {Term}.");
     }
@@ -243,6 +254,7 @@ internal sealed class RaftCore
         Tracker.ResetVotes();
         LeaderId = RaftMessageTargets.None;
         Role = RaftRole.PreCandidate;
+        Trace(RaftTraceEventType.BecamePreCandidate);
         LogInformation(
             $"{Id:x} became pre-candidate at term {Term}.");
     }
@@ -277,6 +289,7 @@ internal sealed class RaftCore
         localProgress.BecomeReplicate();
         localProgress.RecentActive = true;
         PendingConfigurationIndex = lastIndex;
+        Trace(RaftTraceEventType.BecameLeader);
         if (!AppendLeaderEntries([new Entry()]))
         {
             throw new RaftInvariantException(
@@ -389,6 +402,10 @@ internal sealed class RaftCore
             throw new RaftInvariantException(
                 $"{message.Type} must carry a nonzero term.");
         }
+
+        TraceMessage(
+            RaftTraceEventType.MessageReceived,
+            message);
 
         if (message.Term > Term)
         {
@@ -539,6 +556,9 @@ internal sealed class RaftCore
         if (RequiresDurableState(outbound.Type))
         {
             messagesAfterAppend.Add(outbound);
+            TraceMessage(
+                RaftTraceEventType.MessageSent,
+                outbound);
             return;
         }
 
@@ -549,6 +569,9 @@ internal sealed class RaftCore
         }
 
         messages.Add(outbound);
+        TraceMessage(
+            RaftTraceEventType.MessageSent,
+            outbound);
     }
 
     internal Message[] TakeMessages()
@@ -585,6 +608,97 @@ internal sealed class RaftCore
                     state.Index,
                     state.RequestContext)),
         ];
+    }
+
+    internal BasicStatus GetBasicStatus()
+    {
+        return new BasicStatus(
+            Id,
+            Term,
+            Vote,
+            Log.Committed,
+            LeaderId,
+            Role,
+            Log.Applied,
+            LeaderTransferee);
+    }
+
+    internal ConfigurationStatus GetConfigurationStatus()
+    {
+        ConfState state = Tracker.ToConfState();
+        return new ConfigurationStatus(
+            state.Voters,
+            state.VotersOutgoing,
+            state.Learners,
+            state.LearnersNext,
+            state.AutoLeave);
+    }
+
+    internal KeyValuePair<ulong, ProgressStatus>[]
+        GetProgressStatuses()
+    {
+        return
+        [
+            .. Tracker.Progress
+                .OrderBy(pair => pair.Key)
+                .Select(pair =>
+                    new KeyValuePair<ulong, ProgressStatus>(
+                        pair.Key,
+                        ToStatus(pair.Value))),
+        ];
+    }
+
+    internal void Bootstrap(
+        IReadOnlyList<Peer> peers)
+    {
+        ArgumentNullException.ThrowIfNull(peers);
+        BecomeFollower(1, RaftMessageTargets.None);
+
+        var entries = new Entry[peers.Count];
+        for (var offset = 0; offset < peers.Count; offset++)
+        {
+            Peer peer = peers[offset];
+            var change = new ProtocolConfChange
+            {
+                Type =
+                    ConfChangeType.ConfChangeAddNode,
+                NodeId = peer.Id,
+            };
+            if (!peer.Context.IsEmpty)
+            {
+                change.Context = peer.Context;
+            }
+
+            entries[offset] = new Entry
+            {
+                Type = EntryType.EntryConfChange,
+                Term = 1,
+                Index = (ulong)offset + 1,
+                Data = change.ToByteString(),
+            };
+        }
+
+        Log.Append(entries);
+        TraceEntriesAppended(entries);
+        ulong previousCommit = Log.Committed;
+        Log.CommitTo((ulong)entries.Length);
+        TraceCommitAdvanced(previousCommit);
+
+        foreach (Peer peer in peers)
+        {
+            ApplyConfigurationChange(
+                new ProtocolConfChange
+                {
+                    Type =
+                        ConfChangeType.ConfChangeAddNode,
+                    NodeId = peer.Id,
+                });
+        }
+    }
+
+    internal void TraceReadyAccepted()
+    {
+        Trace(RaftTraceEventType.ReadyAccepted);
     }
 
     internal void ReduceUncommittedSize(ulong payloadSize)
@@ -629,6 +743,35 @@ internal sealed class RaftCore
         return SwitchToConfiguration(
             result.Config,
             result.Progress);
+    }
+
+    private static ProgressStatus ToStatus(
+        Progress progress)
+    {
+        return new ProgressStatus(
+            progress.Match,
+            progress.Next,
+            progress.LastSentCommit,
+            progress.State switch
+            {
+                ProgressState.Probe =>
+                    ReplicationState.Probe,
+                ProgressState.Replicate =>
+                    ReplicationState.Replicate,
+                ProgressState.Snapshot =>
+                    ReplicationState.Snapshot,
+                _ => throw new RaftInvariantException(
+                    $"Unknown progress state {progress.State}."),
+            },
+            progress.PendingSnapshot,
+            progress.RecentActive,
+            progress.AppendFlowPaused,
+            progress.IsPaused,
+            progress.IsLearner,
+            progress.Inflights.Count,
+            progress.Inflights.Bytes,
+            progress.Inflights.Capacity,
+            progress.Inflights.MaxBytes);
     }
 
     internal void AppliedTo(
@@ -991,7 +1134,9 @@ internal sealed class RaftCore
                     ulong pendingConfigurationIndex) =
                     PrepareProposalEntries(
                         message.Entries);
-                if (!AppendLeaderEntries(entries))
+                if (!AppendLeaderEntries(
+                        entries,
+                        traceConfigurationProposals: true))
                 {
                     throw new ProposalDroppedException(
                         "The proposal exceeds the uncommitted entry size limit.");
@@ -1029,7 +1174,8 @@ internal sealed class RaftCore
     }
 
     private bool AppendLeaderEntries(
-        IEnumerable<Entry> entries)
+        IEnumerable<Entry> entries,
+        bool traceConfigurationProposals = false)
     {
         Entry[] appended = ProtocolCloning.CloneEntries(entries);
         if (appended.Length == 0)
@@ -1095,8 +1241,14 @@ internal sealed class RaftCore
                 lastIndex + (ulong)offset + 1;
         }
 
+        if (traceConfigurationProposals)
+        {
+            TraceConfigurationProposals(appended);
+        }
+
         ulong newLastIndex = Log.Append(appended);
         UncommittedSize = nextUncommittedSize;
+        TraceEntriesAppended(appended);
         Send(new Message
         {
             To = Id,
@@ -1262,11 +1414,26 @@ internal sealed class RaftCore
                 Term: message.LogTerm,
                 Index: message.Index),
             message.Entries);
-        if (Log.MaybeAppend(
+        ulong previousCommit = Log.Committed;
+        if (Log.MaybeAppendEntries(
                 slice,
-                message.Commit,
-                out ulong lastNewIndex))
+                out ulong lastNewIndex,
+                out ulong firstAppendedIndex,
+                out int appendedCount))
         {
+            if (appendedCount > 0)
+            {
+                TraceEntriesAppended(
+                    appendedCount,
+                    firstAppendedIndex,
+                    lastNewIndex);
+            }
+
+            Log.CommitTo(
+                Math.Min(
+                    message.Commit,
+                    lastNewIndex));
+            TraceCommitAdvanced(previousCommit);
             Send(new Message
             {
                 To = message.From,
@@ -1408,11 +1575,13 @@ internal sealed class RaftCore
 
     private bool MaybeCommit()
     {
+        ulong previousCommit = Log.Committed;
         bool committed = Log.MaybeCommit(new EntryId(
             Term: Term,
             Index: Tracker.CommittedIndex));
         if (committed)
         {
+            TraceCommitAdvanced(previousCommit);
             ReleasePendingReadIndexMessages();
         }
 
@@ -1444,7 +1613,9 @@ internal sealed class RaftCore
 
     private void HandleHeartbeat(Message message)
     {
+        ulong previousCommit = Log.Committed;
         Log.CommitTo(message.Commit);
+        TraceCommitAdvanced(previousCommit);
         Send(new Message
         {
             To = message.From,
@@ -1867,7 +2038,9 @@ internal sealed class RaftCore
             Index: snapshotIndex);
         if (Log.MatchTerm(snapshotEntry))
         {
+            ulong previousCommit = Log.Committed;
             Log.CommitTo(snapshotIndex);
+            TraceCommitAdvanced(previousCommit);
             return false;
         }
 
@@ -1881,11 +2054,16 @@ internal sealed class RaftCore
                     snapshotIndex),
                 state);
 
-        Log.Restore(snapshot);
+        ulong restoredFromCommit = Log.Committed;
+        Log.RestoreUncommitted(snapshot);
         Tracker.Config = restored.Config;
         Tracker.Progress = restored.Progress;
         Tracker.ResetVotes();
         UpdateLocalLearnerState();
+        TraceConfigurationApplied(
+            Tracker.ToConfState());
+        Log.CommitTo(snapshotIndex);
+        TraceCommitAdvanced(restoredFromCommit);
         return true;
     }
 
@@ -1911,6 +2089,7 @@ internal sealed class RaftCore
         IsLearner =
             hasLocalProgress
             && localProgress!.IsLearner;
+        TraceConfigurationApplied(state);
 
         if ((!hasLocalProgress || IsLearner)
             && Role == RaftRole.Leader)
@@ -2169,6 +2348,152 @@ internal sealed class RaftCore
         IsLearner =
             Tracker.Progress.TryGetValue(Id, out Progress? progress)
             && progress.IsLearner;
+    }
+
+    private void TraceConfigurationProposals(
+        IReadOnlyList<Entry> entries)
+    {
+        if (traceSink is null)
+        {
+            return;
+        }
+
+        foreach (Entry entry in entries)
+        {
+            string? detail = entry.Type switch
+            {
+                EntryType.EntryConfChange =>
+                    RaftDescriptions.DescribeConfChange(
+                        ProtocolConfChange.Parser.ParseFrom(
+                            entry.Data)),
+                EntryType.EntryConfChangeV2 =>
+                    RaftDescriptions.DescribeConfChange(
+                        ConfChangeV2.Parser.ParseFrom(
+                            entry.Data)),
+                _ => null,
+            };
+            if (detail is not null)
+            {
+                Trace(
+                    RaftTraceEventType.ConfigurationProposed,
+                    detail: detail);
+            }
+        }
+    }
+
+    private void TraceEntriesAppended(
+        Entry[] entries)
+    {
+        if (traceSink is null || entries.Length == 0)
+        {
+            return;
+        }
+
+        TraceEntriesAppended(
+            entries.Length,
+            entries[0].Index,
+            entries[^1].Index);
+    }
+
+    private void TraceEntriesAppended(
+        int count,
+        ulong firstIndex,
+        ulong lastIndex)
+    {
+        if (traceSink is null || count == 0)
+        {
+            return;
+        }
+
+        string detail = string.Create(
+            System.Globalization.CultureInfo.InvariantCulture,
+            $"count:{count} first:{firstIndex} last:{lastIndex}");
+        Trace(
+            RaftTraceEventType.EntriesAppended,
+            detail: detail);
+    }
+
+    private void TraceCommitAdvanced(
+        ulong previousCommit)
+    {
+        if (traceSink is null
+            || Log.Committed <= previousCommit)
+        {
+            return;
+        }
+
+        Trace(RaftTraceEventType.CommitAdvanced);
+    }
+
+    private void TraceConfigurationApplied(
+        ConfState state)
+    {
+        if (traceSink is null)
+        {
+            return;
+        }
+
+        Trace(
+            RaftTraceEventType.ConfigurationApplied,
+            detail:
+                RaftDescriptions.DescribeConfState(state));
+    }
+
+    private void TraceMessage(
+        RaftTraceEventType type,
+        Message message)
+    {
+        if (traceSink is null)
+        {
+            return;
+        }
+
+        ulong snapshotIndex =
+            message.Snapshot?.Metadata?.Index ?? 0;
+        Trace(
+            type,
+            new RaftTraceMessage(
+                message.Type,
+                message.From,
+                message.To,
+                message.Term,
+                message.LogTerm,
+                message.Index,
+                message.Commit,
+                message.Vote,
+                message.Reject,
+                message.RejectHint,
+                message.Entries.Count,
+                snapshotIndex));
+    }
+
+    private void Trace(
+        RaftTraceEventType type,
+        RaftTraceMessage? message = null,
+        string? detail = null)
+    {
+        if (traceSink is null)
+        {
+            return;
+        }
+
+        var traceEvent = new RaftTraceEvent(
+            type,
+            GetBasicStatus(),
+            Log.LastIndex,
+            GetConfigurationStatus(),
+            message,
+            detail);
+        try
+        {
+            traceSink.Trace(traceEvent);
+        }
+        catch (Exception exception)
+        {
+            throw new RaftTracingException(
+                $"Raft trace sink failed while emitting {type}.",
+                exception);
+        }
     }
 
     private void LogInformation(string message)

@@ -1,3 +1,4 @@
+using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Read;
 using DotnetRaft.Storage;
@@ -32,7 +33,12 @@ internal static class RawNodeTestSupport
         return storage;
     }
 
-    internal static DotnetRaft.RawNode CreateNode(
+    internal static MemoryStorage CreateEmptyStorage()
+    {
+        return new MemoryStorage();
+    }
+
+    internal static RaftConfig CreateConfig(
         IStorage storage,
         ulong id = 1,
         ulong applied = 0,
@@ -43,9 +49,10 @@ internal static class RawNodeTestSupport
         bool asyncStorageWrites = false,
         bool checkQuorum = false,
         bool preVote = false,
-        ReadOnlyOption readOnlyOption = ReadOnlyOption.Safe)
+        ReadOnlyOption readOnlyOption = ReadOnlyOption.Safe,
+        IRaftTraceSink? traceSink = null)
     {
-        return new DotnetRaft.RawNode(new RaftConfig
+        return new RaftConfig
         {
             Id = id,
             Storage = storage,
@@ -60,7 +67,37 @@ internal static class RawNodeTestSupport
             CheckQuorum = checkQuorum,
             PreVote = preVote,
             ReadOnlyOption = readOnlyOption,
-        });
+            TraceSink = traceSink,
+        };
+    }
+
+    internal static DotnetRaft.RawNode CreateNode(
+        IStorage storage,
+        ulong id = 1,
+        ulong applied = 0,
+        int electionTick = 10,
+        int heartbeatTick = 1,
+        ulong maxCommittedSizePerReady = 0,
+        ulong maxUncommittedEntriesSize = 0,
+        bool asyncStorageWrites = false,
+        bool checkQuorum = false,
+        bool preVote = false,
+        ReadOnlyOption readOnlyOption = ReadOnlyOption.Safe,
+        IRaftTraceSink? traceSink = null)
+    {
+        return new DotnetRaft.RawNode(CreateConfig(
+            storage,
+            id,
+            applied,
+            electionTick,
+            heartbeatTick,
+            maxCommittedSizePerReady,
+            maxUncommittedEntriesSize,
+            asyncStorageWrites,
+            checkQuorum,
+            preVote,
+            readOnlyOption,
+            traceSink));
     }
 
     internal static void Persist(
@@ -350,5 +387,18 @@ internal sealed class OrderedApplicationHarness
         }
 
         storage.Compact(index);
+    }
+}
+
+internal sealed class RecordingTraceSink : IRaftTraceSink
+{
+    internal List<RaftTraceEvent> Events { get; } = [];
+
+    internal Action<RaftTraceEvent>? OnTrace { get; set; }
+
+    public void Trace(RaftTraceEvent traceEvent)
+    {
+        Events.Add(traceEvent);
+        OnTrace?.Invoke(traceEvent);
     }
 }

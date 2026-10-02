@@ -113,16 +113,54 @@ internal sealed class RaftLog
         ulong committed,
         out ulong lastNewIndex)
     {
+        return MaybeAppend(
+            slice,
+            committed,
+            out lastNewIndex,
+            out _,
+            out _);
+    }
+
+    internal bool MaybeAppend(
+        LogSlice slice,
+        ulong committed,
+        out ulong lastNewIndex,
+        out ulong firstAppendedIndex,
+        out int appendedCount)
+    {
+        if (!MaybeAppendEntries(
+                slice,
+                out lastNewIndex,
+                out firstAppendedIndex,
+                out appendedCount))
+        {
+            return false;
+        }
+
+        CommitTo(Math.Min(committed, lastNewIndex));
+        return true;
+    }
+
+    internal bool MaybeAppendEntries(
+        LogSlice slice,
+        out ulong lastNewIndex,
+        out ulong firstAppendedIndex,
+        out int appendedCount)
+    {
         ArgumentNullException.ThrowIfNull(slice);
         slice.Validate();
 
         if (!MatchTerm(slice.Previous))
         {
             lastNewIndex = 0;
+            firstAppendedIndex = 0;
+            appendedCount = 0;
             return false;
         }
 
         lastNewIndex = slice.LastIndex;
+        firstAppendedIndex = 0;
+        appendedCount = 0;
         ulong conflictIndex = FindConflict(slice.Entries);
         if (conflictIndex != 0)
         {
@@ -141,9 +179,11 @@ internal sealed class RaftLog
             }
 
             Append(slice.Entries.Skip(checked((int)position)));
+            firstAppendedIndex = conflictIndex;
+            appendedCount =
+                slice.Entries.Count - checked((int)position);
         }
 
-        CommitTo(Math.Min(committed, lastNewIndex));
         return true;
     }
 
@@ -274,6 +314,14 @@ internal sealed class RaftLog
 
     internal void Restore(Snapshot snapshot)
     {
+        Snapshot normalized =
+            RestoreUncommitted(snapshot);
+        CommitTo(normalized.Metadata.Index);
+    }
+
+    internal Snapshot RestoreUncommitted(
+        Snapshot snapshot)
+    {
         ArgumentNullException.ThrowIfNull(snapshot);
         Snapshot normalized = ProtocolDefaults.EnsureSnapshot(snapshot.Clone());
         if (normalized.Metadata.Index <= Committed)
@@ -283,7 +331,7 @@ internal sealed class RaftLog
         }
 
         Unstable.Restore(normalized);
-        Committed = normalized.Metadata.Index;
+        return normalized;
     }
 
     internal IReadOnlyList<Entry> GetNextUnstableEntries()

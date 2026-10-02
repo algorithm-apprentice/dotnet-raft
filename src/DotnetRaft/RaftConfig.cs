@@ -35,6 +35,8 @@ public sealed class RaftConfig
 
     public ReadOnlyOption ReadOnlyOption { get; init; }
 
+    public IRaftTraceSink? TraceSink { get; init; }
+
     public IRaftLogger? Logger { get; init; }
 
     public bool DisableProposalForwarding { get; init; }
@@ -127,6 +129,7 @@ public sealed class RaftConfig
             CheckQuorum,
             PreVote,
             ReadOnlyOption,
+            TraceSink,
             Logger ?? NullRaftLogger.Instance,
             DisableProposalForwarding,
             DisableConfChangeValidation,
