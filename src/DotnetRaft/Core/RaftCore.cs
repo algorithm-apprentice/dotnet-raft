@@ -20,6 +20,7 @@ internal sealed class RaftCore
         ByteString.CopyFromUtf8("CampaignTransfer");
     private readonly RaftClock clock;
     private readonly RaftOutput output = new();
+    private readonly RaftRoleState roleState = new();
     private readonly Queue<Message> pendingReadIndexMessages = [];
     private readonly List<ReadState> readStates = [];
     private readonly IRaftTraceSink? traceSink;
@@ -121,13 +122,17 @@ internal sealed class RaftCore
 
     internal ulong Id { get; }
 
-    internal ulong Term { get; private set; }
+    internal ulong Term =>
+        roleState.Term;
 
-    internal ulong Vote { get; private set; }
+    internal ulong Vote =>
+        roleState.Vote;
 
-    internal ulong LeaderId { get; private set; }
+    internal ulong LeaderId =>
+        roleState.LeaderId;
 
-    internal RaftRole Role { get; private set; }
+    internal RaftRole Role =>
+        roleState.Role;
 
     internal bool IsLearner =>
         Tracker.IsLearner(Id);
@@ -179,7 +184,11 @@ internal sealed class RaftCore
 
     internal bool StepDownOnRemoval { get; }
 
-    internal ulong LeaderTransferee { get; set; }
+    internal ulong LeaderTransferee
+    {
+        get => roleState.LeaderTransferee;
+        set => roleState.StartTransfer(value);
+    }
 
     internal ulong PendingConfigurationIndex { get; set; }
 
@@ -193,14 +202,11 @@ internal sealed class RaftCore
     internal bool PastElectionTimeout =>
         clock.PastElectionTimeout;
 
-    internal SoftState SoftState => new(LeaderId, Role);
+    internal SoftState SoftState =>
+        roleState.GetSoftState();
 
-    internal HardState HardState => new()
-    {
-        Term = Term,
-        Vote = Vote,
-        Commit = Log.Committed,
-    };
+    internal HardState HardState =>
+        roleState.GetHardState(Log.Committed);
 
     internal bool HasMessages =>
         output.HasMessages;
@@ -216,8 +222,7 @@ internal sealed class RaftCore
     internal void BecomeFollower(ulong term, ulong leaderId)
     {
         Reset(term);
-        LeaderId = leaderId;
-        Role = RaftRole.Follower;
+        roleState.BecomeFollower(leaderId);
         if (!suppressTransitionTrace)
         {
             Trace(RaftTraceEventType.BecameFollower);
@@ -242,8 +247,7 @@ internal sealed class RaftCore
         }
 
         Reset(Term + 1);
-        Vote = Id;
-        Role = RaftRole.Candidate;
+        roleState.BecomeCandidate(Id);
         Trace(RaftTraceEventType.BecameCandidate);
         LogInformation(
             $"{Id:x} became candidate at term {Term}.");
@@ -258,8 +262,7 @@ internal sealed class RaftCore
         }
 
         Tracker.ResetVotes();
-        LeaderId = RaftMessageTargets.None;
-        Role = RaftRole.PreCandidate;
+        roleState.BecomePreCandidate();
         Trace(RaftTraceEventType.BecamePreCandidate);
         LogInformation(
             $"{Id:x} became pre-candidate at term {Term}.");
@@ -289,8 +292,7 @@ internal sealed class RaftCore
         }
 
         Reset(Term);
-        LeaderId = Id;
-        Role = RaftRole.Leader;
+        roleState.BecomeLeader(Id);
 
         localProgress.BecomeReplicate();
         localProgress.RecentActive = true;
@@ -867,7 +869,7 @@ internal sealed class RaftCore
             if (message.Type == MessageType.MsgVote)
             {
                 ElectionElapsed = 0;
-                Vote = message.From;
+                roleState.GrantVote(message.From);
             }
 
             return;
@@ -1001,7 +1003,7 @@ internal sealed class RaftCore
         {
             case RaftRole.Follower:
                 ElectionElapsed = 0;
-                LeaderId = message.From;
+                roleState.SetLeader(message.From);
                 return true;
             case RaftRole.PreCandidate:
             case RaftRole.Candidate:
@@ -1647,7 +1649,7 @@ internal sealed class RaftCore
         }
 
         ElectionElapsed = 0;
-        LeaderTransferee = transferee;
+        roleState.StartTransfer(transferee);
         if (progress.Match == Log.LastIndex)
         {
             SendTimeoutNow(transferee);
@@ -1671,8 +1673,7 @@ internal sealed class RaftCore
 
     private void AbortLeaderTransfer()
     {
-        LeaderTransferee =
-            RaftMessageTargets.None;
+        roleState.AbortTransfer();
     }
 
     private void HandleReadIndexMessage(Message message)
@@ -2061,8 +2062,7 @@ internal sealed class RaftCore
             && !Tracker.Config.Voters.Ids()
                 .Contains(LeaderTransferee))
         {
-            LeaderTransferee =
-                RaftMessageTargets.None;
+            roleState.AbortTransfer();
         }
 
         return state;
@@ -2110,7 +2110,7 @@ internal sealed class RaftCore
                     return;
                 }
 
-                LeaderId = RaftMessageTargets.None;
+                roleState.ForgetLeader();
                 return;
             case RaftRole.PreCandidate:
             case RaftRole.Candidate:
@@ -2285,14 +2285,7 @@ internal sealed class RaftCore
 
         clock.Reset();
 
-        if (Term != term)
-        {
-            Term = term;
-            Vote = RaftMessageTargets.None;
-        }
-
-        LeaderId = RaftMessageTargets.None;
-        LeaderTransferee = RaftMessageTargets.None;
+        roleState.Reset(term);
         Tracker.ResetVotes();
 
         ulong lastIndex = Log.LastIndex;
@@ -2320,8 +2313,9 @@ internal sealed class RaftCore
         }
 
         Log.CommitTo(commit);
-        Term = state.Term;
-        Vote = state.Vote;
+        roleState.Load(
+            state.Term,
+            state.Vote);
     }
 
     private void TraceConfigurationProposals(

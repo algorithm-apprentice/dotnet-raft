@@ -271,6 +271,26 @@ public sealed class RaftCoreStateTests
         Assert.Equal(9, high.RandomizedElectionTimeout);
     }
 
+    [Fact]
+    public void LeaderTransitionRandomizesClockOncePerReset()
+    {
+        var calls = 0;
+        RaftCore core = NewCore(
+            voters: [1],
+            randomOffset: _ =>
+            {
+                calls++;
+                return 0;
+            });
+        Assert.Equal(1, calls);
+
+        core.BecomeCandidate();
+        Assert.Equal(2, calls);
+
+        core.BecomeLeader();
+        Assert.Equal(3, calls);
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(5)]

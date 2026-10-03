@@ -11,6 +11,7 @@
       "**/Core/RaftClock.cs",
       "**/Core/RaftLog.cs",
       "**/Core/RaftOutput.cs",
+      "**/Core/RaftRoleState.cs",
       "**/Core/UnstableLog.cs",
       "**/Tracker/ProgressTracker.cs"
     ],

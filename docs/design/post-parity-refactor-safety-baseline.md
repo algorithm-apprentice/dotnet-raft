@@ -184,3 +184,16 @@ six syntactically invalid mutants were excluded.
 
 Stage 3 preserves both checksums, adds no measured allocation, and remains
 within the 10% timing ceiling.
+
+### Stage 4: Raft role state extraction
+
+`RaftRoleState` mutation testing scored 100%: all 14 executable mutants were
+killed and two redundant block mutants were ignored.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4771.3666 | -4.53% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 282.97417 | -5.59% | 2464.00088 | 10936930208570869669 | Pass |
+
+Stage 4 preserves both checksums, adds no measured allocation, and remains
+within the 10% timing ceiling.
