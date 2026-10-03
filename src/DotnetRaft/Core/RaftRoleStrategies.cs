@@ -167,6 +167,37 @@ internal sealed class LeaderRoleStrategy
         RaftCore core,
         Message message)
     {
-        core.HandleRoleMessageLegacy(message);
+        switch (message.Type)
+        {
+            case MessageType.MsgProp:
+                core.HandleLeaderProposal(message);
+                return;
+            case MessageType.MsgBeat:
+                core.BroadcastHeartbeat();
+                return;
+            case MessageType.MsgCheckQuorum:
+                core.HandleCheckQuorum();
+                return;
+            case MessageType.MsgTransferLeader:
+                core.HandleLeaderTransfer(
+                    message.From);
+                return;
+            case MessageType.MsgAppResp:
+                core.HandleAppendResponse(message);
+                return;
+            case MessageType.MsgHeartbeatResp:
+                core.HandleHeartbeatResponse(
+                    message);
+                return;
+            case MessageType.MsgReadIndex:
+                core.HandleLeaderReadIndex(message);
+                return;
+            case MessageType.MsgUnreachable:
+                core.HandleUnreachable(message);
+                return;
+            case MessageType.MsgSnapStatus:
+                core.HandleSnapshotStatus(message);
+                return;
+        }
     }
 }

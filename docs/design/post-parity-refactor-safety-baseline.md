@@ -281,3 +281,23 @@ redundant block mutants were ignored.
 
 Stage 7.3 preserves all three checksums, adds no measured allocation, and
 remains within every timing ceiling.
+
+### Stage 7.4: leader strategy routing
+
+Leader routing moved into `LeaderRoleStrategy`, and the legacy role handler was
+removed. The strategy target retained 100% mutation coverage: all 26
+executable mutants were killed and five redundant block mutants were ignored.
+
+The host showed bimodal short-loop timing during this stage, so the final three
+current runs were interleaved with three runs from the Stage 7.3 commit in a
+detached worktree. The current medians below still satisfy the original
+absolute ceilings.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4601.8208 | -7.93% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 295.34 | -1.46% | 2464.00088 | 10936930208570869669 | Pass |
+| Safe read completion | 1737.925 | +3.97% | 5432.0248 | 3884428198604542453 | Pass |
+
+Stage 7.4 preserves all three checksums, adds no measured allocation, and
+remains within every timing ceiling.

@@ -900,78 +900,6 @@ internal sealed class RaftCore
             .Handle(this, message);
     }
 
-    internal void HandleRoleMessageLegacy(
-        Message message)
-    {
-        switch (message.Type)
-        {
-            case MessageType.MsgHup:
-                HandleHup();
-                return;
-            case MessageType.MsgProp:
-                HandleProposal(message);
-                return;
-            case MessageType.MsgBeat:
-                if (Role == RaftRole.Leader)
-                {
-                    BroadcastHeartbeat();
-                }
-
-                return;
-            case MessageType.MsgCheckQuorum:
-                if (Role == RaftRole.Leader)
-                {
-                    HandleCheckQuorum();
-                }
-
-                return;
-            case MessageType.MsgForgetLeader:
-                return;
-            case MessageType.MsgTransferLeader:
-                HandleLeaderTransfer(message.From);
-                return;
-            case MessageType.MsgTimeoutNow:
-                return;
-            case MessageType.MsgAppResp:
-                if (Role == RaftRole.Leader)
-                {
-                    HandleAppendResponse(message);
-                }
-
-                return;
-            case MessageType.MsgHeartbeatResp:
-                if (Role == RaftRole.Leader)
-                {
-                    HandleHeartbeatResponse(message);
-                }
-
-                return;
-            case MessageType.MsgReadIndex:
-                HandleLeaderReadIndex(message);
-                return;
-            case MessageType.MsgReadIndexResp:
-                return;
-            case MessageType.MsgUnreachable:
-                if (Role == RaftRole.Leader)
-                {
-                    HandleUnreachable(message);
-                }
-
-                return;
-            case MessageType.MsgSnapStatus:
-                if (Role == RaftRole.Leader)
-                {
-                    HandleSnapshotStatus(message);
-                }
-
-                return;
-            case MessageType.MsgApp:
-            case MessageType.MsgHeartbeat:
-            case MessageType.MsgSnap:
-                return;
-        }
-    }
-
     internal void HandleFollowerProposal(
         Message message)
     {
@@ -1144,7 +1072,8 @@ internal sealed class RaftCore
         }
     }
 
-    private void HandleProposal(Message message)
+    internal void HandleLeaderProposal(
+        Message message)
     {
         ValidateProposal(message);
         if (!Tracker.Progress.ContainsKey(Id))
@@ -1436,7 +1365,8 @@ internal sealed class RaftCore
         });
     }
 
-    private void HandleAppendResponse(Message message)
+    internal void HandleAppendResponse(
+        Message message)
     {
         if (!Tracker.Progress.TryGetValue(
                 message.From,
@@ -1564,7 +1494,7 @@ internal sealed class RaftCore
         return committed;
     }
 
-    private void BroadcastHeartbeat()
+    internal void BroadcastHeartbeat()
     {
         ByteString context =
             reads.GetHeartbeatContext();
@@ -1600,7 +1530,8 @@ internal sealed class RaftCore
         });
     }
 
-    private void HandleHeartbeatResponse(Message message)
+    internal void HandleHeartbeatResponse(
+        Message message)
     {
         if (!Tracker.Progress.TryGetValue(
                 message.From,
@@ -1631,7 +1562,7 @@ internal sealed class RaftCore
         }
     }
 
-    private void HandleLeaderTransfer(
+    internal void HandleLeaderTransfer(
         ulong transferee)
     {
         if (!Tracker.Progress.TryGetValue(
@@ -1686,7 +1617,8 @@ internal sealed class RaftCore
         roleState.AbortTransfer();
     }
 
-    private void HandleLeaderReadIndex(Message message)
+    internal void HandleLeaderReadIndex(
+        Message message)
     {
         ReadIndexCoordinator.ValidateRequest(message);
         if (IsLocalSingleton())
@@ -1811,7 +1743,8 @@ internal sealed class RaftCore
         return Tracker.IsVoter(Id);
     }
 
-    private void HandleUnreachable(Message message)
+    internal void HandleUnreachable(
+        Message message)
     {
         if (!Tracker.Progress.TryGetValue(
                 message.From,
@@ -1864,7 +1797,8 @@ internal sealed class RaftCore
         return true;
     }
 
-    private void HandleSnapshotStatus(Message message)
+    internal void HandleSnapshotStatus(
+        Message message)
     {
         if (!Tracker.Progress.TryGetValue(
                 message.From,
@@ -2038,7 +1972,7 @@ internal sealed class RaftCore
         }
     }
 
-    private void HandleCheckQuorum()
+    internal void HandleCheckQuorum()
     {
         if (!Tracker.QuorumActive())
         {
