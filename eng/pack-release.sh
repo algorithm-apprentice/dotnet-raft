@@ -15,7 +15,7 @@ if [[ -n "$(git -C "$repo" status --porcelain)" ]]; then
   exit 1
 fi
 
-SOURCE_DATE_EPOCH=0 \
+SOURCE_DATE_EPOCH=315532800 \
 dotnet pack "$repo/src/DotnetRaft/DotnetRaft.csproj" \
   -c Release \
   --no-restore \

@@ -442,7 +442,7 @@ ContinuousIntegrationBuild=true
 Deterministic=true
 RepositoryCommit=<same HEAD>
 PathMap=<physical worktree root>=/_/
-SOURCE_DATE_EPOCH=0
+SOURCE_DATE_EPOCH=315532800
 ```
 
 NuGet signature files are absent because D26 does not sign packages.
