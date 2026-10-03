@@ -250,3 +250,18 @@ five redundant block mutants were ignored.
 
 Stage 7.1 preserves all three checksums, adds no measured allocation, and
 remains within every timing ceiling.
+
+### Stage 7.2: candidate strategy routing
+
+Candidate and pre-candidate routing moved into their stateless strategies. The
+strategy target retained 100% mutation coverage: all 11 executable mutants
+were killed and five redundant block mutants were ignored.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4960.1666 | -0.76% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 289.61667 | -3.37% | 2464.00088 | 10936930208570869669 | Pass |
+| Safe read completion | 1739.4917 | +4.07% | 5432.0248 | 3884428198604542453 | Pass |
+
+Stage 7.2 preserves all three checksums, adds no measured allocation, and
+remains within every timing ceiling.

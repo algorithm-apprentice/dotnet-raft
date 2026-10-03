@@ -62,7 +62,26 @@ internal sealed class PreCandidateRoleStrategy
         RaftCore core,
         Message message)
     {
-        core.HandleRoleMessageLegacy(message);
+        switch (message.Type)
+        {
+            case MessageType.MsgHup:
+                core.HandleHup();
+                return;
+            case MessageType.MsgProp:
+                core.HandleCampaigningProposal(
+                    message);
+                return;
+            case MessageType.MsgApp:
+            case MessageType.MsgHeartbeat:
+            case MessageType.MsgSnap:
+                core.HandleCampaigningLeaderMessage(
+                    message);
+                return;
+            case MessageType.MsgPreVoteResp:
+                core.HandlePreCandidateVoteResponse(
+                    message);
+                return;
+        }
     }
 }
 
@@ -80,7 +99,26 @@ internal sealed class CandidateRoleStrategy
         RaftCore core,
         Message message)
     {
-        core.HandleRoleMessageLegacy(message);
+        switch (message.Type)
+        {
+            case MessageType.MsgHup:
+                core.HandleHup();
+                return;
+            case MessageType.MsgProp:
+                core.HandleCampaigningProposal(
+                    message);
+                return;
+            case MessageType.MsgApp:
+            case MessageType.MsgHeartbeat:
+            case MessageType.MsgSnap:
+                core.HandleCampaigningLeaderMessage(
+                    message);
+                return;
+            case MessageType.MsgVoteResp:
+                core.HandleCandidateVoteResponse(
+                    message);
+                return;
+        }
     }
 }
 

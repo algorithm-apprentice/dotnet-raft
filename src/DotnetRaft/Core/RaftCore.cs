@@ -439,12 +439,17 @@ internal sealed class RaftCore
 
         switch (message.Type)
         {
-            case MessageType.MsgHup:
-                HandleHup();
-                return;
             case MessageType.MsgVote:
             case MessageType.MsgPreVote:
                 HandleVoteRequest(message);
+                return;
+            case MessageType.MsgStorageAppendResp:
+                HandleStorageAppendResponse(
+                    message,
+                    acknowledgeEntries: true);
+                return;
+            case MessageType.MsgStorageApplyResp:
+                HandleStorageApplyResponse(message);
                 return;
             default:
                 HandleRoleMessage(message);
@@ -791,7 +796,7 @@ internal sealed class RaftCore
                 && !message.Reject);
     }
 
-    private void HandleHup()
+    internal void HandleHup()
     {
         HandleHup(
             PreVote
@@ -900,16 +905,11 @@ internal sealed class RaftCore
     {
         switch (message.Type)
         {
+            case MessageType.MsgHup:
+                HandleHup();
+                return;
             case MessageType.MsgProp:
                 HandleProposal(message);
-                return;
-            case MessageType.MsgStorageAppendResp:
-                HandleStorageAppendResponse(
-                    message,
-                    acknowledgeEntries: true);
-                return;
-            case MessageType.MsgStorageApplyResp:
-                HandleStorageApplyResponse(message);
                 return;
             case MessageType.MsgBeat:
                 if (Role == RaftRole.Leader)
@@ -998,14 +998,62 @@ internal sealed class RaftCore
             case MessageType.MsgSnap:
                 HandleSnapshot(message);
                 return;
-            case MessageType.MsgVoteResp
-                when Role == RaftRole.Candidate:
-                HandleVoteResponse(message);
+        }
+    }
+
+    internal void HandleCampaigningProposal(
+        Message message)
+    {
+        if (message.Entries.Count == 0)
+        {
+            throw new RaftInvariantException(
+                "A proposal must contain at least one entry.");
+        }
+
+        throw new ProposalDroppedException(
+            $"A {Role} cannot process proposals.");
+    }
+
+    internal void HandleCampaigningLeaderMessage(
+        Message message)
+    {
+        BecomeFollower(Term, message.From);
+        HandleAcceptedLeaderMessage(message);
+    }
+
+    internal void HandlePreCandidateVoteResponse(
+        Message message)
+    {
+        HandleVoteResponse(
+            message,
+            preCandidate: true);
+    }
+
+    internal void HandleCandidateVoteResponse(
+        Message message)
+    {
+        HandleVoteResponse(
+            message,
+            preCandidate: false);
+    }
+
+    private void HandleAcceptedLeaderMessage(
+        Message message)
+    {
+        switch (message.Type)
+        {
+            case MessageType.MsgApp:
+                HandleAppendEntries(message);
                 return;
-            case MessageType.MsgPreVoteResp
-                when Role == RaftRole.PreCandidate:
-                HandleVoteResponse(message);
+            case MessageType.MsgHeartbeat:
+                HandleHeartbeat(message);
                 return;
+            case MessageType.MsgSnap:
+                HandleSnapshot(message);
+                return;
+            default:
+                throw new RaftInvariantException(
+                    $"Unexpected leader message {message.Type}.");
         }
     }
 
@@ -1029,14 +1077,16 @@ internal sealed class RaftCore
         }
     }
 
-    private void HandleVoteResponse(Message message)
+    private void HandleVoteResponse(
+        Message message,
+        bool preCandidate)
     {
         Tracker.RecordVote(message.From, !message.Reject);
         (_, _, VoteResult result) = Tracker.TallyVotes();
         switch (result)
         {
             case VoteResult.Won:
-                if (Role == RaftRole.PreCandidate)
+                if (preCandidate)
                 {
                     Campaign(CampaignType.Election);
                 }
