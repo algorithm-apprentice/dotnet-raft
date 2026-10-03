@@ -38,8 +38,8 @@ This section is populated by D26 validation after the benchmark project is
 built and run.
 
 ```text
-commit: b3fb99a23cc3b27e8220253f8316d67bcb348058
-utcDate: 2026-10-03T07:55:07Z
+commit: 2907292d80fc7401e48ea2094eeb750d473aca90
+utcDate: 2026-10-03T08:36:42Z
 sdk: 10.0.100
 runtime: 10.0.0
 configuration: Release
@@ -51,9 +51,9 @@ command: dotnet run --project benchmarks/DotnetRaft.Benchmarks/DotnetRaft.Benchm
 ```
 
 ```json
-{"name":"sync-proposal-cycle","operations":10000,"iterations":5,"medianNanosecondsPerOperation":4410.0792,"operationsPerSecond":226753.2973103975,"checksum":9240325797370691861}
-{"name":"status-snapshot","operations":100000,"iterations":5,"medianNanosecondsPerOperation":203.285,"operationsPerSecond":4919202.105418501,"checksum":16443957934187860133}
-{"name":"describe-message","operations":100000,"iterations":5,"medianNanosecondsPerOperation":589.56166,"operationsPerSecond":1696175.4263328454,"checksum":16029445456918749989}
+{"name":"sync-proposal-cycle","operations":10000,"iterations":5,"medianNanosecondsPerOperation":5075.3958,"operationsPerSecond":197028.9686569863,"checksum":9240325797370691861}
+{"name":"status-snapshot","operations":100000,"iterations":5,"medianNanosecondsPerOperation":338.17459,"operationsPerSecond":2957052.4503334207,"checksum":16443957934187860133}
+{"name":"describe-message","operations":100000,"iterations":5,"medianNanosecondsPerOperation":624.685,"operationsPerSecond":1600806.806630542,"checksum":16029445456918749989}
 ```
 
 Future measurements should record the same environment fields and compare

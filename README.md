@@ -66,10 +66,9 @@ physical-application, and recovery rules in the
 
 ## Project status
 
-- **Completed milestone:** M6 Public integration
-- **Current milestone:** M7 Parity release
-- **Completed nodes:** D00-D25
-- **Current node:** D26 Parity and release hardening
+- **Completed milestone:** M7 Parity release
+- **Completed nodes:** D00-D26
+- **Next work:** behavior-preserving post-parity `RaftCore` refactoring
 
 Development preserves the pinned implementation's behavior and invariants
 before performing the separately reviewed post-parity structural refactor.

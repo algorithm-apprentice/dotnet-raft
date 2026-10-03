@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 
@@ -187,6 +188,59 @@ public sealed partial class ReleaseMetadataTests
                 File.ReadAllText(path),
                 StringComparison.Ordinal);
         }
+    }
+
+    [Fact]
+    public void PerformanceCommitContainsExactBenchmarkWorkload()
+    {
+        string performance = File.ReadAllText(
+            Path.Combine(
+                ReleaseTestPaths.RepositoryRoot,
+                "docs",
+                "performance.md"));
+        Match match = Regex.Match(
+            performance,
+            @"^commit: (?<commit>[0-9a-f]{40})$",
+            RegexOptions.Multiline
+            | RegexOptions.CultureInvariant);
+        Assert.True(
+            match.Success,
+            "Performance document has no commit provenance.");
+        string relative =
+            "benchmarks/DotnetRaft.Benchmarks/Program.cs";
+        var startInfo = new ProcessStartInfo(
+            "git",
+            $"-C \"{ReleaseTestPaths.RepositoryRoot}\" show \"{match.Groups["commit"].Value}:{relative}\"")
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        using Process process =
+            Process.Start(startInfo)
+            ?? throw new InvalidOperationException(
+                "Could not start git.");
+        string committed =
+            process.StandardOutput.ReadToEnd();
+        string error =
+            process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.True(
+            process.ExitCode == 0,
+            error);
+        Assert.Equal(
+            File.ReadAllText(
+                    Path.Combine(
+                        ReleaseTestPaths.RepositoryRoot,
+                        relative))
+                .Replace(
+                    "\r\n",
+                    "\n",
+                    StringComparison.Ordinal),
+            committed.Replace(
+                "\r\n",
+                "\n",
+                StringComparison.Ordinal));
     }
 
     private static string Value(
