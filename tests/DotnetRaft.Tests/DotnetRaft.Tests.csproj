@@ -19,7 +19,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\..\src\DotnetRaft\DotnetRaft.csproj" />
+    <ProjectReference Include="..\..\examples\DotnetRaft.KvCluster\DotnetRaft.KvCluster.csproj" />
   </ItemGroup>
 
   <ItemGroup>

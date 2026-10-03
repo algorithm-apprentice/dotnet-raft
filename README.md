@@ -56,6 +56,7 @@ physical-application, and recovery rules in the
 ## Documentation
 
 - [Public API and host responsibilities](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
+- [Runnable gRPC key-value cluster example](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.KvCluster)
 - [Behavioral parity matrix](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/parity-matrix.md)
 - [Reference architecture](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/reference-architecture.md)
 - [Implementation DAG](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/implementation-dag.md)
@@ -68,7 +69,9 @@ physical-application, and recovery rules in the
 
 - **Completed milestone:** M7 Parity release
 - **Completed nodes:** D00-D26
-- **Next work:** behavior-preserving post-parity `RaftCore` refactoring
+- **Completed:** behavior-preserving post-parity `RaftCore` refactoring
+- **Available example:** three-process ASP.NET Core gRPC key-value cluster
 
-Development preserves the pinned implementation's behavior and invariants
-before performing the separately reviewed post-parity structural refactor.
+The example remains intentionally educational: it uses in-memory storage and
+state, while demonstrating transport, Ready processing, application, and
+read-index barriers.

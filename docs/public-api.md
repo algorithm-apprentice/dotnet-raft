@@ -220,6 +220,11 @@ filtered. Classifier-local messages are not network protocol messages.
 After sending a snapshot, call `ReportSnapshot` with success or failure. A
 failure resumes probing; failing to report can leave follower progress paused.
 
+The runnable
+[`DotnetRaft.KvCluster`](../examples/DotnetRaft.KvCluster/README.md) example
+shows this boundary with an ASP.NET Core gRPC bytes-envelope transport. It is
+an educational in-memory host, not a durable deployment template.
+
 ## Snapshots and compaction
 
 An application snapshot contains:
@@ -271,4 +276,3 @@ Recover from:
 - a commit index repaired to at least physical application.
 
 Then create a new instance and discard every old local response.
-

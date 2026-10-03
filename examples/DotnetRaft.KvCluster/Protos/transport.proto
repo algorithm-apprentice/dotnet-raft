@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package dotnetraft.examples.transport;
+
+option csharp_namespace = "DotnetRaft.Examples.KvCluster.Transport";
+
+import "google/protobuf/empty.proto";
+
+service RaftTransport {
+  rpc Send (RaftEnvelope) returns (google.protobuf.Empty);
+}
+
+message RaftEnvelope {
+  bytes payload = 1;
+}
