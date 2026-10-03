@@ -19,8 +19,7 @@ internal sealed class RaftCore
     private static readonly ByteString CampaignTransferContext =
         ByteString.CopyFromUtf8("CampaignTransfer");
     private readonly RaftClock clock;
-    private readonly List<Message> messages = [];
-    private readonly List<Message> messagesAfterAppend = [];
+    private readonly RaftOutput output = new();
     private readonly Queue<Message> pendingReadIndexMessages = [];
     private readonly List<ReadState> readStates = [];
     private readonly IRaftTraceSink? traceSink;
@@ -203,10 +202,11 @@ internal sealed class RaftCore
         Commit = Log.Committed,
     };
 
-    internal bool HasMessages => messages.Count > 0;
+    internal bool HasMessages =>
+        output.HasMessages;
 
     internal bool HasMessagesAfterAppend =>
-        messagesAfterAppend.Count > 0;
+        output.HasMessagesAfterAppend;
 
     internal bool HasReadStates => readStates.Count > 0;
 
@@ -508,53 +508,10 @@ internal sealed class RaftCore
 
     internal void Send(Message message)
     {
-        ArgumentNullException.ThrowIfNull(message);
-        Message outbound = message.Clone();
-
-        if (outbound.From == RaftMessageTargets.None)
-        {
-            outbound.From = Id;
-        }
-
-        if (IsVoteMessage(outbound.Type))
-        {
-            if (outbound.Term == 0)
-            {
-                throw new RaftInvariantException(
-                    $"Term must be set when sending {outbound.Type}.");
-            }
-        }
-        else
-        {
-            if (outbound.Term != 0)
-            {
-                throw new RaftInvariantException(
-                    $"Term must not be set when sending {outbound.Type}.");
-            }
-
-            if (outbound.Type is not MessageType.MsgProp
-                and not MessageType.MsgReadIndex)
-            {
-                outbound.Term = Term;
-            }
-        }
-
-        if (RequiresDurableState(outbound.Type))
-        {
-            messagesAfterAppend.Add(outbound);
-            TraceMessage(
-                RaftTraceEventType.MessageSent,
-                outbound);
-            return;
-        }
-
-        if (outbound.To == Id)
-        {
-            throw new RaftInvariantException(
-                $"Immediate outbound {outbound.Type} cannot target the local node.");
-        }
-
-        messages.Add(outbound);
+        Message outbound = output.Enqueue(
+            message,
+            Id,
+            Term);
         TraceMessage(
             RaftTraceEventType.MessageSent,
             outbound);
@@ -562,22 +519,22 @@ internal sealed class RaftCore
 
     internal Message[] TakeMessages()
     {
-        return Take(messages);
+        return output.TakeMessages();
     }
 
     internal Message[] PeekMessages()
     {
-        return CloneMessages(messages);
+        return output.PeekMessages();
     }
 
     internal Message[] TakeMessagesAfterAppend()
     {
-        return Take(messagesAfterAppend);
+        return output.TakeMessagesAfterAppend();
     }
 
     internal Message[] PeekMessagesAfterAppend()
     {
-        return CloneMessages(messagesAfterAppend);
+        return output.PeekMessagesAfterAppend();
     }
 
     internal ReadState[] TakeReadStates()
@@ -820,29 +777,11 @@ internal sealed class RaftCore
                 && !message.Reject);
     }
 
-    private static bool RequiresDurableState(MessageType type)
-    {
-        return type is
-            MessageType.MsgAppResp or
-            MessageType.MsgVoteResp or
-            MessageType.MsgPreVoteResp;
-    }
-
     private static T[] Take<T>(List<T> queue)
     {
         T[] taken = [.. queue];
         queue.Clear();
         return taken;
-    }
-
-    private static Message[] CloneMessages(
-        IEnumerable<Message> source)
-    {
-        return
-        [
-            .. source.Select(
-                message => message.Clone()),
-        ];
     }
 
     private void HandleHup()

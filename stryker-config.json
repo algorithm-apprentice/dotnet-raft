@@ -10,6 +10,7 @@
       "**/Core/RaftCore.cs",
       "**/Core/RaftClock.cs",
       "**/Core/RaftLog.cs",
+      "**/Core/RaftOutput.cs",
       "**/Core/UnstableLog.cs",
       "**/Tracker/ProgressTracker.cs"
     ],

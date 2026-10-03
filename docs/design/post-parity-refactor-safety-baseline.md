@@ -170,3 +170,17 @@ killed and 12 redundant block mutants were ignored.
 
 Stage 2 preserves both checksums, adds no measured allocation, and remains
 within the 10% timing ceiling.
+
+### Stage 3: Raft output extraction
+
+`RaftOutput` mutation testing scored 100%: 31 mutants were killed, one
+infinite-loop mutant timed out, ten redundant block mutants were ignored, and
+six syntactically invalid mutants were excluded.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4883.7292 | -2.28% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 287.25917 | -4.16% | 2464.00088 | 10936930208570869669 | Pass |
+
+Stage 3 preserves both checksums, adds no measured allocation, and remains
+within the 10% timing ceiling.
