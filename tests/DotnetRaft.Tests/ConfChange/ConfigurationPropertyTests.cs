@@ -191,8 +191,9 @@ public sealed class ConfigurationPropertyTests
         ProgressTracker tracker,
         ConfigurationChangeResult result)
     {
-        tracker.Config = result.Config;
-        tracker.Progress = result.Progress;
+        tracker.Install(
+            result.Config,
+            result.Progress);
     }
 
     private static ConfChangeSingle Voter(ulong id)

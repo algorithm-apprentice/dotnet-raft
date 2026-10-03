@@ -27,31 +27,37 @@ internal static class ConfigurationRestore
         {
             foreach (ConfChangeSingle change in incoming)
             {
-                Install(
-                    scratch,
+                ConfigurationChangeResult stepResult =
                     new ConfigurationChanger(
                         scratch,
-                        changer.LastIndex).Simple([change]));
+                        changer.LastIndex).Simple([change]);
+                scratch.Install(
+                    stepResult.Config,
+                    stepResult.Progress);
             }
         }
         else
         {
             foreach (ConfChangeSingle change in outgoing)
             {
-                Install(
-                    scratch,
+                ConfigurationChangeResult stepResult =
                     new ConfigurationChanger(
                         scratch,
-                        changer.LastIndex).Simple([change]));
+                        changer.LastIndex).Simple([change]);
+                scratch.Install(
+                    stepResult.Config,
+                    stepResult.Progress);
             }
 
-            Install(
-                scratch,
+            ConfigurationChangeResult joint =
                 new ConfigurationChanger(
                     scratch,
                     changer.LastIndex).EnterJoint(
-                    normalized.AutoLeave,
-                    incoming));
+                        normalized.AutoLeave,
+                        incoming);
+            scratch.Install(
+                joint.Config,
+                joint.Progress);
         }
 
         var result = new ConfigurationChangeResult(
@@ -131,13 +137,5 @@ internal static class ConfigurationRestore
             Type = type,
             NodeId = id,
         };
-    }
-
-    private static void Install(
-        ProgressTracker tracker,
-        ConfigurationChangeResult result)
-    {
-        tracker.Config = result.Config;
-        tracker.Progress = result.Progress;
     }
 }

@@ -54,8 +54,9 @@ public sealed class ConfigurationDataDrivenTests
                             $"Unknown command {testCase.Command}."),
                     };
 
-                tracker.Config = result.Config;
-                tracker.Progress = result.Progress;
+                tracker.Install(
+                    result.Config,
+                    result.Progress);
                 actual = $"{tracker.Config}\n{tracker.Progress}"
                     .TrimEnd('\r', '\n');
             }

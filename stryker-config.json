@@ -9,7 +9,8 @@
     "mutate": [
       "**/Core/RaftCore.cs",
       "**/Core/RaftLog.cs",
-      "**/Core/UnstableLog.cs"
+      "**/Core/UnstableLog.cs",
+      "**/Tracker/ProgressTracker.cs"
     ],
     "reporters": [
       "cleartext",

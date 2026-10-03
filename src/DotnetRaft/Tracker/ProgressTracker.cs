@@ -20,15 +20,53 @@ internal sealed class ProgressTracker
         Progress = [];
     }
 
-    internal TrackerConfig Config { get; set; }
+    internal TrackerConfig Config { get; private set; }
 
-    internal ProgressMap Progress { get; set; }
+    internal ProgressMap Progress { get; private set; }
 
     internal IReadOnlyDictionary<ulong, bool> Votes => votes;
 
     internal int MaxInflightMessages { get; }
 
     internal ulong MaxInflightBytes { get; }
+
+    internal void Install(
+        TrackerConfig config,
+        ProgressMap progress)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(progress);
+
+        Config = config;
+        Progress = progress;
+    }
+
+    internal bool Contains(ulong id)
+    {
+        return Progress.ContainsKey(id);
+    }
+
+    internal bool IsLearner(ulong id)
+    {
+        return Progress.TryGetValue(
+                id,
+                out Progress? progress)
+            && progress.IsLearner;
+    }
+
+    internal bool IsVoter(ulong id)
+    {
+        if (!Config.Voters.Incoming.Contains(id)
+            && !Config.Voters.Outgoing.Contains(id))
+        {
+            return false;
+        }
+
+        return Progress.TryGetValue(
+                id,
+                out Progress? progress)
+            && !progress.IsLearner;
+    }
 
     internal bool IsSingleton =>
         Config.Voters.Incoming.Count == 1
@@ -98,8 +136,9 @@ internal sealed class ProgressTracker
 
         foreach ((ulong id, Progress progress) in Progress)
         {
+            var vote = false;
             if (progress.IsLearner
-                || !votes.TryGetValue(id, out bool vote))
+                || !votes.TryGetValue(id, out vote))
             {
                 continue;
             }

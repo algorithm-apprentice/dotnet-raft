@@ -338,6 +338,20 @@ public sealed class RaftCoreStateTests
     }
 
     [Fact]
+    public void LearnerStatusIsDerivedFromTrackerProgress()
+    {
+        RaftCore core = NewCore(voters: [1]);
+        Progress local = core.Tracker.Progress[1];
+        Assert.False(core.IsLearner);
+
+        local.IsLearner = true;
+        Assert.True(core.IsLearner);
+
+        local.IsLearner = false;
+        Assert.False(core.IsLearner);
+    }
+
+    [Fact]
     public void LeaderClocksSignalAndResetBothCadences()
     {
         RaftCore core = NewCore(

@@ -57,8 +57,9 @@ public sealed class ConfigurationRestoreTests
         ConfigurationChangeResult initial =
             new ConfigurationChanger(tracker, 1).Simple(
                 [Voter(1)]);
-        tracker.Config = initial.Config;
-        tracker.Progress = initial.Progress;
+        tracker.Install(
+            initial.Config,
+            initial.Progress);
 
         Assert.Throws<ConfigurationChangeException>(
             () => ConfigurationRestore.Restore(

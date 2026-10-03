@@ -99,9 +99,9 @@ internal sealed class RaftCore
                     Tracker,
                     Log.LastIndex),
                 persistedConfState);
-        Tracker.Config = restored.Config;
-        Tracker.Progress = restored.Progress;
-        UpdateLocalLearnerState();
+        Tracker.Install(
+            restored.Config,
+            restored.Progress);
 
         if (!IsEmpty(persistedHardState))
         {
@@ -131,7 +131,8 @@ internal sealed class RaftCore
 
     internal RaftRole Role { get; private set; }
 
-    internal bool IsLearner { get; private set; }
+    internal bool IsLearner =>
+        Tracker.IsLearner(Id);
 
     internal RaftLog Log { get; }
 
@@ -184,8 +185,8 @@ internal sealed class RaftCore
     internal ulong UncommittedSize { get; set; }
 
     internal bool Promotable =>
-        Tracker.Progress.TryGetValue(Id, out Progress? progress)
-        && !progress.IsLearner
+        Tracker.Contains(Id)
+        && !Tracker.IsLearner(Id)
         && !Log.HasUnstableSnapshot;
 
     internal bool PastElectionTimeout =>
@@ -1932,23 +1933,13 @@ internal sealed class RaftCore
 
     private bool IsLocalSingleton()
     {
-        return Tracker.Config.Voters.Incoming.Count == 1
-            && Tracker.Config.Voters.Incoming.Contains(Id)
-            && Tracker.Config.Voters.Outgoing.Count == 0
-            && Tracker.Progress.TryGetValue(
-                Id,
-                out Progress? progress)
-            && !progress.IsLearner;
+        return Tracker.IsSingleton
+            && Tracker.IsVoter(Id);
     }
 
     private bool IsLocalVoter()
     {
-        return (Tracker.Config.Voters.Incoming.Contains(Id)
-                || Tracker.Config.Voters.Outgoing.Contains(Id))
-            && Tracker.Progress.TryGetValue(
-                Id,
-                out Progress? progress)
-            && !progress.IsLearner;
+        return Tracker.IsVoter(Id);
     }
 
     private static void ValidateReadIndexRequest(
@@ -2093,10 +2084,10 @@ internal sealed class RaftCore
 
         ulong restoredFromCommit = Log.Committed;
         Log.RestoreUncommitted(snapshot);
-        Tracker.Config = restored.Config;
-        Tracker.Progress = restored.Progress;
+        Tracker.Install(
+            restored.Config,
+            restored.Progress);
         Tracker.ResetVotes();
-        UpdateLocalLearnerState();
         TraceConfigurationApplied(
             Tracker.ToConfState());
         Log.CommitTo(snapshotIndex);
@@ -2115,17 +2106,11 @@ internal sealed class RaftCore
         TrackerConfig config,
         ProgressMap progress)
     {
-        Tracker.Config = config;
-        Tracker.Progress = progress;
+        Tracker.Install(config, progress);
 
         ConfState state = Tracker.ToConfState();
         bool hasLocalProgress =
-            Tracker.Progress.TryGetValue(
-                Id,
-                out Progress? localProgress);
-        IsLearner =
-            hasLocalProgress
-            && localProgress!.IsLearner;
+            Tracker.Contains(Id);
         TraceConfigurationApplied(state);
 
         if ((!hasLocalProgress || IsLearner)
@@ -2348,10 +2333,10 @@ internal sealed class RaftCore
                     scratch,
                     index),
                 snapshot.Metadata.ConfState);
-        Tracker.Config = restored.Config;
-        Tracker.Progress = restored.Progress;
+        Tracker.Install(
+            restored.Config,
+            restored.Progress);
         Tracker.ResetVotes();
-        UpdateLocalLearnerState();
         TraceConfigurationApplied(
             Tracker.ToConfState());
     }
@@ -2459,13 +2444,6 @@ internal sealed class RaftCore
         Log.CommitTo(commit);
         Term = state.Term;
         Vote = state.Vote;
-    }
-
-    private void UpdateLocalLearnerState()
-    {
-        IsLearner =
-            Tracker.Progress.TryGetValue(Id, out Progress? progress)
-            && progress.IsLearner;
     }
 
     private void TraceConfigurationProposals(

@@ -37,6 +37,74 @@ public sealed class ProgressTrackerTests
     }
 
     [Fact]
+    public void InstallReplacesOwnedStateWithoutResettingVotes()
+    {
+        var tracker = new ProgressTracker(4, 0);
+        tracker.RecordVote(9, granted: true);
+        var config = new TrackerConfig(
+            new JointConfig(
+                new MajorityConfig([1, 2])));
+        var progress = new ProgressMap
+        {
+            [1] = NewProgress(1),
+            [2] = NewProgress(2),
+        };
+
+        tracker.Install(config, progress);
+
+        Assert.Same(config, tracker.Config);
+        Assert.Same(progress, tracker.Progress);
+        Assert.True(tracker.Votes[9]);
+
+        Assert.Throws<ArgumentNullException>(
+            () => tracker.Install(null!, progress));
+        Assert.Throws<ArgumentNullException>(
+            () => tracker.Install(config, null!));
+        Assert.Same(config, tracker.Config);
+        Assert.Same(progress, tracker.Progress);
+    }
+
+    [Fact]
+    public void MembershipQueriesDeriveFromInstalledState()
+    {
+        var tracker = new ProgressTracker(4, 0);
+        var config = new TrackerConfig(
+            new JointConfig(
+                new MajorityConfig([1, 5]),
+                new MajorityConfig([2])),
+            learners: [3],
+            learnersNext: [2]);
+        var progress = new ProgressMap
+        {
+            [1] = NewProgress(0),
+            [2] = NewProgress(0),
+            [3] = NewProgress(0, isLearner: true),
+            [4] = NewProgress(0),
+        };
+        tracker.Install(config, progress);
+
+        Assert.True(tracker.Contains(1));
+        Assert.True(tracker.Contains(4));
+        Assert.False(tracker.Contains(5));
+        Assert.False(tracker.IsLearner(1));
+        Assert.True(tracker.IsLearner(3));
+        Assert.False(tracker.IsLearner(5));
+        Assert.True(tracker.IsVoter(1));
+        Assert.True(tracker.IsVoter(2));
+        Assert.False(tracker.IsVoter(3));
+        Assert.False(tracker.IsVoter(4));
+        Assert.False(tracker.IsVoter(5));
+        Assert.False(tracker.IsSingleton);
+
+        var singleton = new TrackerConfig(
+            new JointConfig(
+                new MajorityConfig([1])));
+        tracker.Install(singleton, progress);
+
+        Assert.True(tracker.IsSingleton);
+    }
+
+    [Fact]
     public void TrackerConfigOwnsAllConstructorInputs()
     {
         var incoming = new MajorityConfig([1, 2]);
@@ -147,12 +215,14 @@ public sealed class ProgressTrackerTests
         var first = NewProgress(match: 0, recentActive: true);
         var second = new Progress(1, 2, 4, 0, recentActive: true);
         var third = new Progress(2, 3, 4, 0, recentActive: true);
-        tracker.Progress = new ProgressMap
-        {
-            [3] = third,
-            [1] = first,
-            [2] = second,
-        };
+        tracker.Install(
+            tracker.Config,
+            new ProgressMap
+            {
+                [3] = third,
+                [1] = first,
+                [2] = second,
+            });
 
         const string expected =
             "1: StateProbe match=0 next=1\n" +
@@ -179,28 +249,28 @@ public sealed class ProgressTrackerTests
     [Fact]
     public void CommittedIndexUsesOnlyConfiguredVoterQuorums()
     {
-        var tracker = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker tracker = NewTracker(
+            new TrackerConfig(
                 new JointConfig(new MajorityConfig([1, 2, 3])),
                 learners: [4]),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(30),
                 [2] = NewProgress(20),
                 [3] = NewProgress(10),
                 [4] = NewProgress(100, isLearner: true),
                 [5] = NewProgress(5),
-            },
-        };
+            });
 
         Assert.Equal(20UL, tracker.CommittedIndex);
 
-        tracker.Config = new TrackerConfig(
-            new JointConfig(
-                new MajorityConfig([1, 2, 3]),
-                new MajorityConfig([2, 3, 5])),
-            learners: [4]);
+        tracker.Install(
+            new TrackerConfig(
+                new JointConfig(
+                    new MajorityConfig([1, 2, 3]),
+                    new MajorityConfig([2, 3, 5])),
+                learners: [4]),
+            tracker.Progress);
 
         Assert.Equal(10UL, tracker.CommittedIndex);
     }
@@ -208,12 +278,11 @@ public sealed class ProgressTrackerTests
     [Fact]
     public void QuorumActivePreservesEveryActivityFlag()
     {
-        var tracker = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker tracker = NewTracker(
+            new TrackerConfig(
                 new JointConfig(new MajorityConfig([1, 2, 3])),
                 learners: [4]),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(0, recentActive: true),
                 [2] = NewProgress(0, recentActive: true),
@@ -222,8 +291,7 @@ public sealed class ProgressTrackerTests
                     0,
                     isLearner: true,
                     recentActive: true),
-            },
-        };
+            });
 
         Dictionary<ulong, bool> before = ActivitySnapshot(tracker);
         Assert.True(tracker.QuorumActive());
@@ -238,15 +306,14 @@ public sealed class ProgressTrackerTests
     [Fact]
     public void JointActivityCountsStagedButNotActiveLearners()
     {
-        var tracker = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker tracker = NewTracker(
+            new TrackerConfig(
                 new JointConfig(
                     new MajorityConfig([1, 2, 3]),
                     new MajorityConfig([2, 3, 4])),
                 learners: [5],
                 learnersNext: [4]),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(0, recentActive: true),
                 [2] = NewProgress(0, recentActive: true),
@@ -256,8 +323,7 @@ public sealed class ProgressTrackerTests
                     0,
                     isLearner: true,
                     recentActive: true),
-            },
-        };
+            });
 
         Dictionary<ulong, bool> before = ActivitySnapshot(tracker);
         Assert.True(tracker.QuorumActive());
@@ -272,15 +338,13 @@ public sealed class ProgressTrackerTests
     [Fact]
     public void NodeListsAreSortedOwnedAndRespectLearnerStages()
     {
-        var tracker = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker tracker = NewTracker(
+            new TrackerConfig(
                 new JointConfig(
                     new MajorityConfig([3, 1]),
                     new MajorityConfig([4, 3])),
                 learners: [9, 7],
-                learnersNext: [4]),
-        };
+                learnersNext: [4]));
 
         ulong[] voters = tracker.VoterNodes();
         ulong[] learners = tracker.LearnerNodes();
@@ -299,38 +363,42 @@ public sealed class ProgressTrackerTests
     {
         var tracker = new ProgressTracker(4, 0);
 
-        tracker.Config = new TrackerConfig(
-            new JointConfig(new MajorityConfig([1])));
+        tracker.Install(
+            new TrackerConfig(
+                new JointConfig(new MajorityConfig([1]))),
+            tracker.Progress);
         Assert.True(tracker.IsSingleton);
 
-        tracker.Config = new TrackerConfig(
-            new JointConfig(
-                new MajorityConfig([1]),
-                new MajorityConfig([1])));
+        tracker.Install(
+            new TrackerConfig(
+                new JointConfig(
+                    new MajorityConfig([1]),
+                    new MajorityConfig([1]))),
+            tracker.Progress);
         Assert.False(tracker.IsSingleton);
 
-        tracker.Config = new TrackerConfig(
-            new JointConfig(new MajorityConfig([1, 2])));
+        tracker.Install(
+            new TrackerConfig(
+                new JointConfig(new MajorityConfig([1, 2]))),
+            tracker.Progress);
         Assert.False(tracker.IsSingleton);
     }
 
     [Fact]
     public void VoteRecordingIsFirstWinsAndCountsTrackedNonLearners()
     {
-        var tracker = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker tracker = NewTracker(
+            new TrackerConfig(
                 new JointConfig(new MajorityConfig([1, 2, 3])),
                 learners: [4]),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(0),
                 [2] = NewProgress(0),
                 [3] = NewProgress(0),
                 [4] = NewProgress(0, isLearner: true),
                 [5] = NewProgress(0),
-            },
-        };
+            });
 
         tracker.RecordVote(1, granted: true);
         tracker.RecordVote(1, granted: false);
@@ -359,20 +427,18 @@ public sealed class ProgressTrackerTests
     [Fact]
     public void VoteResetAndJointResultsMatchBothMajorities()
     {
-        var tracker = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker tracker = NewTracker(
+            new TrackerConfig(
                 new JointConfig(
                     new MajorityConfig([1, 2, 3]),
                     new MajorityConfig([2, 3, 4]))),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(0),
                 [2] = NewProgress(0),
                 [3] = NewProgress(0),
                 [4] = NewProgress(0),
-            },
-        };
+            });
 
         tracker.RecordVote(1, granted: true);
         tracker.RecordVote(2, granted: true);
@@ -404,6 +470,17 @@ public sealed class ProgressTrackerTests
             maxInflightBytes: 0,
             isLearner,
             recentActive);
+    }
+
+    private static ProgressTracker NewTracker(
+        TrackerConfig config,
+        ProgressMap? progress = null)
+    {
+        var tracker = new ProgressTracker(4, 0);
+        tracker.Install(
+            config,
+            progress ?? []);
+        return tracker;
     }
 
     private static Dictionary<ulong, bool> ActivitySnapshot(

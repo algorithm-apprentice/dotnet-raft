@@ -185,92 +185,78 @@ public sealed class ConfigurationChangerTests
     [Fact]
     public void InvalidTrackerRoleAssignmentsAreRejectedBeforeChanges()
     {
-        var incomingLearner = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker incomingLearner = NewTracker(
+            new TrackerConfig(
                 new JointConfig(new MajorityConfig([1]))),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(isLearner: true),
-            },
-        };
+            });
         AssertInvalidSimple(incomingLearner);
 
-        var outgoingLearner = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker outgoingLearner = NewTracker(
+            new TrackerConfig(
                 new JointConfig(
                     new MajorityConfig([2]),
                     new MajorityConfig([1]))),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(isLearner: true),
                 [2] = NewProgress(),
-            },
-        };
+            });
         Assert.Throws<ConfigurationChangeException>(
             () => new ConfigurationChanger(
                 outgoingLearner,
                 1).LeaveJoint());
 
-        var unmarkedLearner = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker unmarkedLearner = NewTracker(
+            new TrackerConfig(
                 new JointConfig(new MajorityConfig([1])),
                 learners: [2]),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(),
                 [2] = NewProgress(),
-            },
-        };
+            });
         AssertInvalidSimple(unmarkedLearner);
 
-        var unstaged = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker unstaged = NewTracker(
+            new TrackerConfig(
                 new JointConfig(
                     new MajorityConfig([1]),
                     new MajorityConfig([1])),
                 learnersNext: [2]),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(),
                 [2] = NewProgress(),
-            },
-        };
+            });
         Assert.Throws<ConfigurationChangeException>(
             () => new ConfigurationChanger(unstaged, 1).LeaveJoint());
 
-        var missingProgress = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
-                new JointConfig(new MajorityConfig([1]))),
-        };
+        ProgressTracker missingProgress = NewTracker(
+            new TrackerConfig(
+                new JointConfig(new MajorityConfig([1]))));
         AssertInvalidSimple(missingProgress);
 
-        var invalidNonJoint = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker invalidNonJoint = NewTracker(
+            new TrackerConfig(
                 new JointConfig(new MajorityConfig([1])),
                 autoLeave: true),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(),
-            },
-        };
+            });
         AssertInvalidSimple(invalidNonJoint);
 
-        var overlap = new ProgressTracker(4, 0)
-        {
-            Config = new TrackerConfig(
+        ProgressTracker overlap = NewTracker(
+            new TrackerConfig(
                 new JointConfig(new MajorityConfig([1])),
                 learners: [1]),
-            Progress = new ProgressMap
+            new ProgressMap
             {
                 [1] = NewProgress(isLearner: true),
-            },
-        };
+            });
         AssertInvalidSimple(overlap);
     }
 
@@ -330,8 +316,20 @@ public sealed class ConfigurationChangerTests
         ProgressTracker tracker,
         ConfigurationChangeResult result)
     {
-        tracker.Config = result.Config;
-        tracker.Progress = result.Progress;
+        tracker.Install(
+            result.Config,
+            result.Progress);
+    }
+
+    private static ProgressTracker NewTracker(
+        TrackerConfig config,
+        ProgressMap? progress = null)
+    {
+        var tracker = new ProgressTracker(4, 0);
+        tracker.Install(
+            config,
+            progress ?? []);
+        return tracker;
     }
 
     private static ConfChangeSingle Voter(ulong id)

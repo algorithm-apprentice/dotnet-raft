@@ -139,3 +139,21 @@ For every later stage:
 
 The byte limits are the baseline plus the greater of 1% or 16 bytes. The time
 limits are the baseline plus 10%. A stage that exceeds either limit fails.
+
+## Stage comparisons
+
+### Stage 1: tracker installation ownership
+
+`ProgressTracker` mutation testing scored 97.14%: 34 killed, one survived,
+four compile errors, and 17 ignored. The sole survivor changes the initial
+value of a local that is always overwritten by `TryGetValue` before use and is
+equivalent. The compile errors are invalid mutations of collection `Count`
+expressions in `IsSingleton`.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---|
+| Sync proposal cycle | 5072.6125 | +1.49% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 293.29583 | -2.14% | 2464.00088 | 10936930208570869669 | Pass |
+
+Stage 1 preserves both checksums, adds no measured allocation, and remains
+within the 10% timing ceiling.

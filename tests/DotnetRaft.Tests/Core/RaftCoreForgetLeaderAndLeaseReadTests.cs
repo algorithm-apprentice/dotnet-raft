@@ -287,9 +287,11 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
             voters: [1, 2],
             readOnlyOption: ReadOnlyOption.LeaseBased,
             checkQuorum: true);
-        core.Tracker.Config = new TrackerConfig(
-            new JointConfig(
-                new MajorityConfig([2])));
+        core.Tracker.Install(
+            new TrackerConfig(
+                new JointConfig(
+                    new MajorityConfig([2]))),
+            core.Tracker.Progress);
 
         core.Step(ReadRequest("unconfigured"));
 
