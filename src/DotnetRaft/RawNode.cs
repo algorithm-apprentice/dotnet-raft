@@ -51,6 +51,9 @@ public sealed partial class RawNode
     internal RaftCore Core => _core;
 
     internal bool IsFaultedForTesting =>
+        IsFaulted;
+
+    internal bool IsFaulted =>
         _fault is not null;
 
     internal void SetRandomizedElectionTimeoutForTesting(
