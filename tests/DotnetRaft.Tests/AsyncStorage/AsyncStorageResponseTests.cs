@@ -1,3 +1,4 @@
+using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
@@ -164,7 +165,10 @@ public sealed class AsyncStorageResponseTests
     [Fact]
     public void SnapshotCompletionReassertsMatchingConfiguration()
     {
-        (DotnetRawNode node, _) = CreateNode(voters: [1, 2]);
+        var trace = new RecordingTraceSink();
+        (DotnetRawNode node, _) = CreateNode(
+            voters: [1, 2],
+            traceSink: trace);
         Snapshot snapshot = SnapshotAt(
             5,
             [1UL, 2UL]);
@@ -192,6 +196,7 @@ public sealed class AsyncStorageResponseTests
         Assert.Equal(
             [1UL],
             node.GetStatus().Configuration.Voters);
+        trace.Events.Clear();
 
         node.Step(response);
 
@@ -200,6 +205,61 @@ public sealed class AsyncStorageResponseTests
             node.GetStatus().Configuration.Voters);
         Assert.Equal(5UL, node.GetBasicStatus().Applied);
         Assert.False(node.Core.Log.HasUnstableSnapshot);
+        Assert.Contains(
+            trace.Events,
+            traceEvent =>
+                traceEvent.Type
+                == RaftTraceEventType.ConfigurationApplied);
+    }
+
+    [Fact]
+    public void SnapshotCompletionReassertsLearnerStateAndClearsVotes()
+    {
+        (DotnetRawNode node, _) = CreateNode(voters: [1, 2]);
+        var state = new ConfState();
+        state.Voters.Add(2);
+        state.Learners.Add(1);
+        var snapshot = new Snapshot
+        {
+            Metadata = new SnapshotMetadata
+            {
+                Index = 5,
+                Term = 1,
+                ConfState = state,
+            },
+        };
+        node.Step(
+            new Message
+            {
+                From = 2,
+                To = 1,
+                Type = MessageType.MsgSnap,
+                Term = 1,
+                Snapshot = snapshot,
+            });
+        Message response = StorageResponse(
+            node.Ready(),
+            MessageType.MsgStorageAppendResp);
+        Assert.True(node.Core.IsLearner);
+
+        node.ApplyConfChange(
+            new ProtocolConfChange
+            {
+                Type =
+                    ConfChangeType.ConfChangeAddNode,
+                NodeId = 1,
+            });
+        node.Core.Tracker.RecordVote(2, granted: true);
+        Assert.False(node.Core.IsLearner);
+        Assert.NotEmpty(node.Core.Tracker.Votes);
+
+        node.Step(response);
+
+        Assert.True(node.Core.IsLearner);
+        Assert.Empty(node.Core.Tracker.Votes);
+        Assert.Equal(
+            [1UL],
+            node.GetStatus().Configuration.Learners);
     }
 
     [Fact]
@@ -347,6 +407,16 @@ public sealed class AsyncStorageResponseTests
                 ConfState = state,
             },
         };
+    }
+
+    private sealed class RecordingTraceSink : IRaftTraceSink
+    {
+        internal List<RaftTraceEvent> Events { get; } = [];
+
+        public void Trace(RaftTraceEvent traceEvent)
+        {
+            Events.Add(traceEvent);
+        }
     }
 
     private static Message StorageResponse(

@@ -56,3 +56,12 @@ jobs:
           --no-restore
           --
           --smoke
+
+      - name: Refactor benchmark smoke
+        run: >-
+          dotnet run
+          --project benchmarks/DotnetRaft.RefactorBenchmarks/DotnetRaft.RefactorBenchmarks.csproj
+          -c Release
+          --no-restore
+          --
+          --smoke

@@ -50,6 +50,35 @@ public sealed class RaftCoreLeadershipTransferTests
     }
 
     [Fact]
+    public void OptimisticallySentVoterReceivesEmptyTransferProbe()
+    {
+        RaftCore core = CreateLeader(voters: [1, 2]).Core;
+        Progress progress = core.Tracker.Progress[2];
+        progress.BecomeReplicate();
+        core.Step(new Message
+        {
+            From = 2,
+            To = 1,
+            Term = core.Term,
+            Type = MessageType.MsgHeartbeatResp,
+        });
+        Message optimistic = Assert.Single(
+            core.TakeMessages());
+        Assert.NotEmpty(optimistic.Entries);
+        Assert.Equal(
+            core.Log.LastIndex + 1,
+            progress.Next);
+        Assert.True(progress.Match < core.Log.LastIndex);
+
+        core.Step(Transfer(2));
+
+        Message probe = Assert.Single(core.TakeMessages());
+        Assert.Equal(MessageType.MsgApp, probe.Type);
+        Assert.Equal(core.Log.LastIndex, probe.Index);
+        Assert.Empty(probe.Entries);
+    }
+
+    [Fact]
     public void CatchUpAcknowledgementEmitsTimeoutNow()
     {
         RaftCore core = CreateLeader().Core;

@@ -1,0 +1,26 @@
+{
+  "stryker-config": {
+    "solution": "DotnetRaft.sln",
+    "project": "DotnetRaft.csproj",
+    "test-projects": [
+      "tests/DotnetRaft.Tests/DotnetRaft.Tests.csproj"
+    ],
+    "configuration": "Release",
+    "mutate": [
+      "**/Core/RaftCore.cs",
+      "**/Core/RaftLog.cs",
+      "**/Core/UnstableLog.cs"
+    ],
+    "reporters": [
+      "cleartext",
+      "json"
+    ],
+    "coverage-analysis": "perTest",
+    "concurrency": 4,
+    "thresholds": {
+      "high": 85,
+      "low": 75,
+      "break": 0
+    }
+  }
+}

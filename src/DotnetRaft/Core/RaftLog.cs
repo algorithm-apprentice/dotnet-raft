@@ -522,7 +522,7 @@ internal sealed class RaftLog
         }
 
         ulong stableHigh = Math.Min(highExclusive, Unstable.Offset);
-        IReadOnlyList<Entry> storageEntries;
+        IReadOnlyList<Entry> storageEntries = [];
         try
         {
             storageEntries = _storage.GetEntries(

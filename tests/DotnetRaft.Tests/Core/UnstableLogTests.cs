@@ -430,6 +430,47 @@ public sealed class UnstableLogTests
     }
 
     [Fact]
+    public void AppendRejectsEmptyAndGappedInputWithoutMutation()
+    {
+        UnstableLog unstable = Create(
+            5,
+            Entries((5, 1)));
+
+        Assert.Throws<ArgumentException>(
+            () => unstable.TruncateAndAppend([]));
+        Assert.Throws<RaftInvariantException>(
+            () => unstable.TruncateAndAppend(
+                Entries((8, 2))));
+
+        Assert.Equal(5UL, unstable.Offset);
+        Assert.Equal(5UL, unstable.OffsetInProgress);
+        AssertRetainedEntries(
+            Entries((5, 1)),
+            unstable);
+    }
+
+    [Fact]
+    public void AppendRejectsNullAndNoncontiguousInput()
+    {
+        UnstableLog unstable = Create(
+            5,
+            Entries((5, 1)));
+
+        Assert.Throws<ArgumentNullException>(
+            () => unstable.TruncateAndAppend(null!));
+        Assert.Throws<ArgumentException>(
+            () => unstable.TruncateAndAppend(
+                [null!]));
+        Assert.Throws<RaftInvariantException>(
+            () => unstable.TruncateAndAppend(
+                Entries((6, 2), (8, 2))));
+
+        AssertRetainedEntries(
+            Entries((5, 1)),
+            unstable);
+    }
+
+    [Fact]
     public void InputsAndOutputsDoNotAliasRetainedState()
     {
         Entry[] entries = Entries((5, 1));

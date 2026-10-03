@@ -176,10 +176,50 @@ public sealed class RaftCoreMembershipApplicationTests
         core.ApplyConfigurationChange(V2(Remove(4)));
 
         Assert.Equal(2UL, core.Log.Committed);
-        Assert.DoesNotContain(
-            core.TakeMessages(),
-            message => message.To == 4);
+        Message[] messages = core.TakeMessages();
+        Message commitUpdate = Assert.Single(messages);
+        Assert.Equal(2UL, commitUpdate.To);
+        Assert.Equal(2UL, commitUpdate.Commit);
         Assert.Equal([1UL, 2UL, 3UL], core.Tracker.VoterNodes());
+    }
+
+    [Fact]
+    public void RemovedLeaderRebroadcastsPendingReadForNewQuorum()
+    {
+        RaftCore core = NewLeader(voters: [1, 2, 3]);
+        core.Step(new Message
+        {
+            From = 2,
+            To = 1,
+            Term = core.Term,
+            Type = MessageType.MsgAppResp,
+            Index = core.Log.LastIndex,
+        });
+        core.TakeMessages();
+        var request = new Message
+        {
+            From = 1,
+            To = 1,
+            Type = MessageType.MsgReadIndex,
+        };
+        request.Entries.Add(new Entry
+        {
+            Data = ByteString.CopyFromUtf8("read"),
+        });
+        core.Step(request);
+        core.TakeMessages();
+        Assert.Equal(1, core.ReadOnly.PendingCount);
+
+        core.ApplyConfigurationChange(V2(Remove(1)));
+
+        Assert.Equal(RaftRole.Leader, core.Role);
+        Assert.Equal(
+            [2UL, 3UL],
+            core.TakeMessages()
+                .Where(message =>
+                    message.Type
+                    == MessageType.MsgHeartbeat)
+                .Select(message => message.To));
     }
 
     [Fact]

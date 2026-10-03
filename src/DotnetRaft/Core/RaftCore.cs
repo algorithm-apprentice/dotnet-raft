@@ -207,6 +207,9 @@ internal sealed class RaftCore
 
     internal bool HasReadStates => readStates.Count > 0;
 
+    internal int PendingReadIndexMessageCount =>
+        pendingReadIndexMessages.Count;
+
     internal void BecomeFollower(ulong term, ulong leaderId)
     {
         Reset(term);
@@ -1233,7 +1236,7 @@ internal sealed class RaftCore
                 $"Appending {appended.Length} entries after index {lastIndex} would leave no representable successor.");
         }
 
-        ulong payloadSize;
+        ulong payloadSize = 0;
         try
         {
             payloadSize = EntrySizing.PayloadSize(appended);
@@ -1379,8 +1382,8 @@ internal sealed class RaftCore
         }
 
         ulong previousIndex = progress.Next - 1;
-        ulong previousTerm;
-        IReadOnlyList<Entry> entries;
+        ulong previousTerm = 0;
+        IReadOnlyList<Entry> entries = [];
         try
         {
             previousTerm = Log.GetTerm(previousIndex);
@@ -1403,7 +1406,7 @@ internal sealed class RaftCore
             return false;
         }
 
-        ulong payloadSize;
+        ulong payloadSize = 0;
         try
         {
             payloadSize = EntrySizing.PayloadSize(entries);
