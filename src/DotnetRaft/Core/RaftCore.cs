@@ -701,6 +701,20 @@ internal sealed class RaftCore
         Trace(RaftTraceEventType.ReadyAccepted);
     }
 
+    internal void SetRandomizedElectionTimeoutForTesting(
+        int timeout)
+    {
+        if (timeout <= 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(timeout),
+                timeout,
+                "Randomized election timeout must be positive.");
+        }
+
+        RandomizedElectionTimeout = timeout;
+    }
+
     internal void ReduceUncommittedSize(ulong payloadSize)
     {
         UncommittedSize = payloadSize >= UncommittedSize

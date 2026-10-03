@@ -17,8 +17,8 @@ following the validated graph in strict topological order.
 
 - **Completed milestone:** M5 Full core semantics
 - **Current milestone:** M6 Public integration
-- **Completed nodes:** D00-D22
-- **Next node:** D23 Interaction harness
+- **Completed nodes:** D00-D23
+- **Next node:** D24 Concurrent Node wrapper
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -42,6 +42,7 @@ following the validated graph in strict topological order.
 - [D20 leadership transfer design](docs/design/d20-leadership-transfer.md)
 - [D21 RawNode and Ready design](docs/design/d21-rawnode-ready.md)
 - [D22 bootstrap, status, and diagnostics design](docs/design/d22-bootstrap-status-diagnostics.md)
+- [D23 deterministic interaction harness design](docs/design/d23-interaction-harness.md)
 
 ## Development principles
 

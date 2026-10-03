@@ -1,0 +1,45 @@
+log-level none
+----
+ok
+
+add-nodes 1 voters=(1) index=2
+----
+ok
+
+campaign 1
+----
+ok
+
+stabilize
+----
+ok
+
+propose-conf-change 1 v1=true
+l2
+----
+ok
+
+stabilize
+----
+ok
+
+propose-conf-change 1
+r2
+----
+ok
+
+stabilize
+----
+ok
+
+log-level debug
+----
+ok
+
+status 1
+----
+1: Replicate match=5 next=6
+
+raft-state
+----
+1: Leader (Voter) Term:1 Lead:1

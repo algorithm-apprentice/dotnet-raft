@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+
 using DotnetRaft.Core;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
@@ -20,20 +22,47 @@ public sealed partial class RawNode
     private bool _operationInProgress;
 
     public RawNode(RaftConfig config)
+        : this(
+            config,
+            maximum =>
+                RandomNumberGenerator.GetInt32(maximum))
+    {
+    }
+
+    internal RawNode(
+        RaftConfig config,
+        Func<int, int> randomOffset)
     {
         ArgumentNullException.ThrowIfNull(config);
+        ArgumentNullException.ThrowIfNull(randomOffset);
         if (config.AsyncStorageWrites)
         {
             throw new NotSupportedException(
                 "Asynchronous storage writes are introduced in D25.");
         }
 
-        _core = new RaftCore(config);
+        _core = new RaftCore(
+            config,
+            randomOffset);
         _previousSoftState = _core.SoftState;
         _previousHardState = _core.HardState;
     }
 
     internal RaftCore Core => _core;
+
+    internal bool IsFaultedForTesting =>
+        _fault is not null;
+
+    internal void SetRandomizedElectionTimeoutForTesting(
+        int timeout)
+    {
+        Execute(() =>
+        {
+            Activate();
+            _core.SetRandomizedElectionTimeoutForTesting(
+                timeout);
+        });
+    }
 
     public static RawNode Start(
         RaftConfig config,

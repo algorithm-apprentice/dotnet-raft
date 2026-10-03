@@ -1,0 +1,81 @@
+log-level none
+----
+ok
+
+add-nodes 3 voters=(1,2,3) index=5 content=seed
+----
+ok
+
+campaign 1
+----
+ok
+
+stabilize
+----
+ok
+
+propose 1 one
+----
+ok
+
+process-ready 1
+----
+ok
+
+deliver-msgs drop=(3) type=MsgApp
+----
+ok
+
+stabilize 1 2
+----
+ok
+
+deliver-msgs drop=(3)
+----
+ok
+
+propose 1 two
+----
+ok
+
+process-ready 1
+----
+ok
+
+deliver-msgs drop=(3) type=MsgApp
+----
+ok
+
+stabilize 1 2
+----
+ok
+
+deliver-msgs drop=(3)
+----
+ok
+
+compact 1 7
+----
+ok
+
+tick-heartbeat 1
+----
+ok
+
+stabilize
+----
+ok
+
+log-level debug
+----
+ok
+
+status 1
+----
+1: Replicate match=8 next=9
+2: Replicate match=8 next=9
+3: Replicate match=8 next=9
+
+raft-log 3
+----
+log is empty: first index=9, last index=8
