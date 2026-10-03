@@ -108,6 +108,11 @@ internal sealed class RaftLog
 
     internal bool HasUnstableSnapshot => Unstable.HasSnapshot;
 
+    internal bool HasUnstableSnapshotAt(ulong index)
+    {
+        return Unstable.HasSnapshotAt(index);
+    }
+
     internal bool MaybeAppend(
         LogSlice slice,
         ulong committed,
@@ -369,7 +374,12 @@ internal sealed class RaftLog
 
     internal void AcknowledgeSnapshot(ulong index)
     {
-        AppliedTo(index, 0);
+        StableSnapshotTo(index);
+        AppliedTo(Math.Max(index, Applied), 0);
+    }
+
+    internal void StableSnapshotTo(ulong index)
+    {
         Unstable.StableSnapshotTo(index);
     }
 

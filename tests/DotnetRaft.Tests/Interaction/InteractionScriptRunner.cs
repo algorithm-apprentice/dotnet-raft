@@ -112,6 +112,46 @@ internal static class InteractionScriptRunner
             Path.GetFileName(file));
     }
 
+    internal static void RewriteFile(string file)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(file);
+        string source = File.ReadAllText(file);
+        string name = Path.GetFileName(file);
+        IReadOnlyList<InteractionScriptCase> cases =
+            Parse(source, name);
+        var environment =
+            new InteractionEnvironment();
+        var builder = new System.Text.StringBuilder();
+        foreach (InteractionScriptCase testCase in cases)
+        {
+            builder.AppendLine(testCase.CommandLine);
+            if (testCase.Input.Length > 0)
+            {
+                builder.AppendLine(testCase.Input);
+            }
+
+            builder.AppendLine("----");
+            builder.AppendLine(
+                Normalize(
+                    environment.Handle(
+                        testCase.CommandLine,
+                        testCase.Input,
+                        name,
+                        testCase.LineNumber)));
+            builder.AppendLine();
+        }
+
+        File.WriteAllText(
+            file,
+            builder.ToString()
+                .Replace(
+                    "\r\n",
+                    "\n",
+                    StringComparison.Ordinal)
+                .TrimEnd('\n')
+                + "\n");
+    }
+
     private static void SkipSeparators(
         string[] lines,
         ref int index)

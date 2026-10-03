@@ -792,8 +792,20 @@ internal sealed class RaftCore
         ulong index,
         ulong encodedSize)
     {
-        Log.AppliedTo(index, encodedSize);
+        ulong applied = Math.Max(
+            index,
+            Log.Applied);
+        Log.AppliedTo(applied, encodedSize);
         MaybeAutoLeave();
+    }
+
+    internal void TraceSyntheticMessageSent(
+        Message message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        TraceMessage(
+            RaftTraceEventType.MessageSent,
+            message);
     }
 
     private static bool IsEmpty(HardState? state)
@@ -971,6 +983,14 @@ internal sealed class RaftCore
         {
             case MessageType.MsgProp:
                 HandleProposal(message);
+                return;
+            case MessageType.MsgStorageAppendResp:
+                HandleStorageAppendResponse(
+                    message,
+                    acknowledgeEntries: true);
+                return;
+            case MessageType.MsgStorageApplyResp:
+                HandleStorageApplyResponse(message);
                 return;
             case MessageType.MsgBeat:
                 if (Role == RaftRole.Leader)
@@ -2227,6 +2247,15 @@ internal sealed class RaftCore
 
     private void HandleLowerTermMessage(Message message)
     {
+        if (message.Type
+            == MessageType.MsgStorageAppendResp)
+        {
+            HandleStorageAppendResponse(
+                message,
+                acknowledgeEntries: false);
+            return;
+        }
+
         if ((CheckQuorum || PreVote)
             && message.Type is
                 MessageType.MsgApp or
@@ -2250,6 +2279,78 @@ internal sealed class RaftCore
                 Reject = true,
             });
         }
+    }
+
+    private void HandleStorageAppendResponse(
+        Message message,
+        bool acknowledgeEntries)
+    {
+        if (acknowledgeEntries
+            && message.Index != 0)
+        {
+            Log.StableTo(
+                new EntryId(
+                    message.LogTerm,
+                    message.Index));
+        }
+
+        if (message.Snapshot is null)
+        {
+            return;
+        }
+
+        Snapshot snapshot =
+            ProtocolDefaults.EnsureSnapshot(
+                message.Snapshot.Clone());
+        ulong index = snapshot.Metadata.Index;
+        if (Log.HasUnstableSnapshotAt(index))
+        {
+            ReassertSnapshotConfiguration(snapshot);
+        }
+
+        Log.StableSnapshotTo(index);
+        AppliedTo(index, 0);
+    }
+
+    private void HandleStorageApplyResponse(
+        Message message)
+    {
+        if (message.Entries.Count == 0)
+        {
+            return;
+        }
+
+        Entry[] entries =
+        [
+            .. message.Entries.Select(
+                entry => entry.Clone()),
+        ];
+        AppliedTo(
+            entries[^1].Index,
+            EntrySizing.EncodedSize(entries));
+        ReduceUncommittedSize(
+            EntrySizing.PayloadSize(entries));
+    }
+
+    private void ReassertSnapshotConfiguration(
+        Snapshot snapshot)
+    {
+        ulong index = snapshot.Metadata.Index;
+        var scratch = new ProgressTracker(
+            Tracker.MaxInflightMessages,
+            Tracker.MaxInflightBytes);
+        ConfigurationChangeResult restored =
+            ConfigurationRestore.Restore(
+                new ConfigurationChanger(
+                    scratch,
+                    index),
+                snapshot.Metadata.ConfState);
+        Tracker.Config = restored.Config;
+        Tracker.Progress = restored.Progress;
+        Tracker.ResetVotes();
+        UpdateLocalLearnerState();
+        TraceConfigurationApplied(
+            Tracker.ToConfState());
     }
 
     private void MaybeAutoLeave()

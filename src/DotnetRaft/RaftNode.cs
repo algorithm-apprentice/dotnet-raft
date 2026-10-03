@@ -28,6 +28,7 @@ public sealed class RaftNode : IRaftNode
     private readonly LinkedList<ProposalRequest>
         _blockedProposals = new();
     private readonly RawNode _rawNode;
+    private readonly bool _asyncStorageWrites;
     private readonly IRaftLogger _logger;
     private readonly ulong _id;
     private readonly Task _runner;
@@ -49,6 +50,8 @@ public sealed class RaftNode : IRaftNode
         ArgumentNullException.ThrowIfNull(logger);
 
         _rawNode = rawNode;
+        _asyncStorageWrites =
+            rawNode.AsyncStorageWrites;
         _logger = logger;
         _id = ExecuteOwned(
             () => _rawNode.GetBasicStatus().Id);
@@ -202,12 +205,43 @@ public sealed class RaftNode : IRaftNode
         ArgumentNullException.ThrowIfNull(message);
         Message owned = message.Clone();
 
+        if (owned.Type is
+            MessageType.MsgStorageAppendResp
+            or MessageType.MsgStorageApplyResp)
+        {
+            if (!_asyncStorageWrites
+                && RaftMessageTargets.IsLocal(
+                    owned.From))
+            {
+                return QueueOperation(
+                    _ => throw new NotSupportedException(
+                        "Storage-thread responses require asynchronous storage writes."),
+                    cancellationToken);
+            }
+
+            return QueueOperation(
+                rawNode =>
+                {
+                    rawNode.Step(owned);
+                    return true;
+                },
+                cancellationToken);
+        }
+
         if (RaftMessageTargets.IsLocal(owned.From))
         {
-            return QueueOperation(
-                _ => throw new NotSupportedException(
-                    "Storage-thread messages are introduced in D25."),
-                cancellationToken);
+            return _asyncStorageWrites
+                ? QueueOperation(
+                    rawNode =>
+                    {
+                        rawNode.Step(owned);
+                        return true;
+                    },
+                    cancellationToken)
+                : QueueOperation(
+                    _ => throw new NotSupportedException(
+                        "Storage-thread responses require asynchronous storage writes."),
+                    cancellationToken);
         }
 
         if (MessageClassifier.IsLocal(owned.Type))
@@ -338,6 +372,14 @@ public sealed class RaftNode : IRaftNode
     public ValueTask AdvanceAsync(
         CancellationToken cancellationToken = default)
     {
+        if (_asyncStorageWrites)
+        {
+            return QueueOperation(
+                _ => throw new NotSupportedException(
+                    "Advance is replaced by storage response messages when asynchronous storage writes are enabled."),
+                cancellationToken);
+        }
+
         EnsureNotReentrant();
         Exception? unavailable =
             GetUnavailableException();
@@ -655,7 +697,11 @@ public sealed class RaftNode : IRaftNode
         {
             Ready ready = ExecuteOwned(
                 _rawNode.Ready);
-            _outstandingReady = ready;
+            if (!_asyncStorageWrites)
+            {
+                _outstandingReady = ready;
+            }
+
             request.Succeed(ready);
         }
         catch (Exception exception)
@@ -690,7 +736,8 @@ public sealed class RaftNode : IRaftNode
                 canceled = true;
             }
             else if (_readyWaiter is null
-                && _outstandingReady is null)
+                && (_asyncStorageWrites
+                    || _outstandingReady is null))
             {
                 _readyWaiter = request;
                 stored = true;
@@ -1394,6 +1441,7 @@ public sealed class RaftNode : IRaftNode
             return exception is
                 ProposalDroppedException
                 or ArgumentException
+                or StorageResponseValidationException
                 or NotSupportedException;
         }
     }

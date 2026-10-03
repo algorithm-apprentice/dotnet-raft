@@ -43,6 +43,8 @@ internal sealed record InteractionNodeOptions
 internal sealed class InteractionNode
 {
     private Snapshot _applicationSnapshot;
+    private readonly Queue<Message> _appendWork = new();
+    private readonly Queue<Message> _applyWork = new();
 
     internal InteractionNode(
         DotnetRaft.RawNode rawNode,
@@ -68,6 +70,10 @@ internal sealed class InteractionNode
 
     internal RaftConfig Config { get; }
 
+    internal int AppendWorkCount => _appendWork.Count;
+
+    internal int ApplyWorkCount => _applyWork.Count;
+
     internal Snapshot GetApplicationSnapshot()
     {
         return _applicationSnapshot.Clone();
@@ -78,6 +84,30 @@ internal sealed class InteractionNode
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         _applicationSnapshot = snapshot.Clone();
+    }
+
+    internal void EnqueueAppendWork(Message message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        _appendWork.Enqueue(message.Clone());
+    }
+
+    internal void EnqueueApplyWork(Message message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+        _applyWork.Enqueue(message.Clone());
+    }
+
+    internal bool TryDequeueAppendWork(
+        out Message? message)
+    {
+        return _appendWork.TryDequeue(out message);
+    }
+
+    internal bool TryDequeueApplyWork(
+        out Message? message)
+    {
+        return _applyWork.TryDequeue(out message);
     }
 }
 

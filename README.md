@@ -15,10 +15,10 @@ state machine remain application responsibilities.
 The architecture and implementation DAG are complete. Implementation is
 following the validated graph in strict topological order.
 
-- **Completed milestone:** M5 Full core semantics
-- **Current milestone:** M6 Public integration
-- **Completed nodes:** D00-D24
-- **Next node:** D25 Asynchronous storage writes
+- **Completed milestone:** M6 Public integration
+- **Current milestone:** M7 Parity release
+- **Completed nodes:** D00-D25
+- **Next node:** D26 Parity and release hardening
 
 - [Reference architecture](docs/reference-architecture.md)
 - [Implementation DAG](docs/implementation-dag.md)
@@ -44,6 +44,7 @@ following the validated graph in strict topological order.
 - [D22 bootstrap, status, and diagnostics design](docs/design/d22-bootstrap-status-diagnostics.md)
 - [D23 deterministic interaction harness design](docs/design/d23-interaction-harness.md)
 - [D24 concurrent Node wrapper design](docs/design/d24-concurrent-node.md)
+- [D25 asynchronous storage writes design](docs/design/d25-asynchronous-storage-writes.md)
 
 ## Development principles
 

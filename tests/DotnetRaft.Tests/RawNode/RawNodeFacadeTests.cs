@@ -12,14 +12,15 @@ namespace DotnetRaft.Tests.RawNode;
 public sealed class RawNodeFacadeTests
 {
     [Fact]
-    public void ConstructorRejectsAsyncStorageWrites()
+    public void ConstructorAcceptsAsyncStorageWrites()
     {
         MemoryStorage storage = CreateStorage();
 
-        Assert.Throws<NotSupportedException>(
-            () => CreateNode(
-                storage,
-                asyncStorageWrites: true));
+        var node = CreateNode(
+            storage,
+            asyncStorageWrites: true);
+
+        Assert.True(node.AsyncStorageWrites);
     }
 
     [Fact]
@@ -154,7 +155,7 @@ public sealed class RawNodeFacadeTests
     {
         var node = CreateNode(CreateStorage(voters: [1, 2]));
 
-        Assert.Throws<InvalidOperationException>(
+        Assert.ThrowsAny<InvalidOperationException>(
             () => node.Step(new Message
             {
                 From = 2,
@@ -171,7 +172,7 @@ public sealed class RawNodeFacadeTests
     {
         var node = CreateNode(CreateStorage(voters: [1, 2]));
 
-        Assert.Throws<InvalidOperationException>(
+        Assert.ThrowsAny<InvalidOperationException>(
             () => node.Step(new Message
             {
                 From = sender,

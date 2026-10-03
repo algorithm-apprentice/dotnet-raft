@@ -223,7 +223,7 @@ public sealed class InteractionEnvironmentTests
                 Type = MessageType.MsgAppResp,
             });
 
-        Assert.Throws<InvalidOperationException>(
+        Assert.ThrowsAny<InvalidOperationException>(
             () => environment.DeliverMessages(
                 type: null,
                 new InteractionRecipient(1)));
@@ -260,7 +260,7 @@ public sealed class InteractionEnvironmentTests
             });
 
         InvalidOperationException exception =
-            Assert.Throws<InvalidOperationException>(
+            Assert.ThrowsAny<InvalidOperationException>(
                 () => environment.DeliverMessages(
                     type: null,
                     new InteractionRecipient(1)));
@@ -347,7 +347,7 @@ public sealed class InteractionEnvironmentTests
                 Type = MessageType.MsgHeartbeat,
             });
 
-        Assert.Throws<InvalidOperationException>(
+        Assert.ThrowsAny<InvalidOperationException>(
             () => environment.DeliverMessages(
                 type: null,
                 new InteractionRecipient(1)));

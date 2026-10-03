@@ -35,11 +35,6 @@ public sealed partial class RawNode
     {
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(randomOffset);
-        if (config.AsyncStorageWrites)
-        {
-            throw new NotSupportedException(
-                "Asynchronous storage writes are introduced in D25.");
-        }
 
         _core = new RaftCore(
             config,
@@ -49,6 +44,9 @@ public sealed partial class RawNode
     }
 
     internal RaftCore Core => _core;
+
+    public bool AsyncStorageWrites =>
+        _core.AsyncStorageWrites;
 
     internal bool IsFaultedForTesting =>
         IsFaulted;
@@ -202,10 +200,13 @@ public sealed partial class RawNode
             ArgumentNullException.ThrowIfNull(message);
             Message owned = message.Clone();
 
-            if (RaftMessageTargets.IsLocal(owned.From))
+            if (IsStorageResponse(owned.Type)
+                || RaftMessageTargets.IsLocal(owned.From))
             {
-                throw new InvalidOperationException(
-                    $"Messages from reserved local sender {owned.From} cannot be stepped through the network facade.");
+                ValidateStorageResponse(owned);
+                Activate();
+                StepStorageResponseCore(owned);
+                return;
             }
 
             if (MessageClassifier.IsLocal(owned.Type))
@@ -447,7 +448,8 @@ public sealed partial class RawNode
 
     private bool HasReadyCore()
     {
-        if (_outstanding is not null)
+        if (!_core.AsyncStorageWrites
+            && _outstanding is not null)
         {
             return false;
         }
@@ -471,13 +473,17 @@ public sealed partial class RawNode
             || _core.HasMessagesAfterAppend
             || _core.Log.HasNextUnstableEntries
             || _core.Log.HasNextCommittedEntries(
-                allowUnstable: true)
+                allowUnstable:
+                    !_core.AsyncStorageWrites)
             || _core.HasReadStates;
     }
 
     private Ready CreateReady()
     {
-        if (_outstanding is not null)
+        bool asyncStorageWrites =
+            _core.AsyncStorageWrites;
+        if (!asyncStorageWrites
+            && _outstanding is not null)
         {
             throw new InvalidOperationException(
                 "The outstanding Ready must be advanced before requesting another batch.");
@@ -506,7 +512,8 @@ public sealed partial class RawNode
         Entry[] committedEntries =
         [
             .. _core.Log.GetNextCommittedEntries(
-                allowUnstable: true),
+                allowUnstable:
+                    !asyncStorageWrites),
         ];
         Message[] immediateMessages =
             _core.PeekMessages();
@@ -517,17 +524,59 @@ public sealed partial class RawNode
 
         var exposedMessages = new List<Message>(
             immediateMessages.Length
-            + afterAppendMessages.Length);
+            + afterAppendMessages.Length
+            + 2);
         exposedMessages.AddRange(immediateMessages);
-        exposedMessages.AddRange(
-            afterAppendMessages.Where(
-                message => message.To != _core.Id));
-        Message[] selfMessages =
-        [
-            .. afterAppendMessages
-                .Where(message => message.To == _core.Id)
-                .Select(message => message.Clone()),
-        ];
+        Message[] selfMessages;
+        var syntheticMessages = new List<Message>(2);
+        if (asyncStorageWrites)
+        {
+            selfMessages = [];
+            if (NeedsStorageAppendMessage(
+                    emittedHardState,
+                    unstableEntries,
+                    snapshot,
+                    afterAppendMessages))
+            {
+                Message append =
+                    CreateStorageAppendMessage(
+                        emittedHardState,
+                        unstableEntries,
+                        snapshot,
+                        afterAppendMessages);
+                exposedMessages.Add(append);
+                syntheticMessages.Add(append);
+            }
+
+            if (committedEntries.Length > 0)
+            {
+                Message apply =
+                    CreateStorageApplyMessage(
+                        committedEntries);
+                exposedMessages.Add(apply);
+                syntheticMessages.Add(apply);
+            }
+        }
+        else
+        {
+            exposedMessages.AddRange(
+                afterAppendMessages.Where(
+                    message => message.To != _core.Id));
+            selfMessages =
+            [
+                .. afterAppendMessages
+                    .Where(
+                        message =>
+                            message.To == _core.Id)
+                    .Select(
+                        message => message.Clone()),
+            ];
+        }
+
+        foreach (Message message in syntheticMessages)
+        {
+            _core.TraceSyntheticMessageSent(message);
+        }
 
         bool mustSync = MustSync(
             currentHardState,
@@ -542,12 +591,14 @@ public sealed partial class RawNode
             committedEntries,
             exposedMessages,
             mustSync);
-        ReadyAcknowledgement acknowledgement =
-            CreateAcknowledgement(
-                selfMessages,
-                unstableEntries,
-                snapshot,
-                committedEntries);
+        ReadyAcknowledgement? acknowledgement =
+            asyncStorageWrites
+                ? null
+                : CreateAcknowledgement(
+                    selfMessages,
+                    unstableEntries,
+                    snapshot,
+                    committedEntries);
 
         if (emittedSoftState is not null)
         {
@@ -564,22 +615,42 @@ public sealed partial class RawNode
         _core.TakeMessagesAfterAppend();
         _core.TakeReadStates();
         _core.Log.AcceptUnstable();
-        if (acknowledgement.AppliedIndex.HasValue)
+        ulong? appliedIndex =
+            committedEntries.Length == 0
+                ? null
+                : committedEntries[^1].Index;
+        if (appliedIndex.HasValue)
         {
             _core.Log.AcceptApplying(
-                acknowledgement.AppliedIndex.Value,
-                acknowledgement.AppliedEncodedSize,
-                allowUnstable: true);
+                appliedIndex.Value,
+                EntrySizing.EncodedSize(
+                    committedEntries),
+                allowUnstable:
+                    !asyncStorageWrites);
+        }
+
+        if (asyncStorageWrites)
+        {
+            _core.TraceReadyAccepted();
+            return ready;
         }
 
         _outstanding = ready;
-        _acknowledgement = acknowledgement;
+        _acknowledgement = acknowledgement
+            ?? throw new RaftInvariantException(
+                "Synchronous Ready acknowledgement is missing.");
         _core.TraceReadyAccepted();
         return ready;
     }
 
     private void AdvanceCore(Ready ready)
     {
+        if (_core.AsyncStorageWrites)
+        {
+            throw new NotSupportedException(
+                "Advance is replaced by storage response messages when asynchronous storage writes are enabled.");
+        }
+
         ArgumentNullException.ThrowIfNull(ready);
         if (_outstanding is null
             || _acknowledgement is null)
@@ -636,6 +707,112 @@ public sealed partial class RawNode
         _acknowledgement = null;
     }
 
+    private static bool NeedsStorageAppendMessage(
+        HardState? hardState,
+        Entry[] entries,
+        Snapshot? snapshot,
+        Message[] afterAppendMessages)
+    {
+        return hardState is not null
+            || entries.Length > 0
+            || snapshot is not null
+            || afterAppendMessages.Length > 0;
+    }
+
+    private Message CreateStorageAppendMessage(
+        HardState? hardState,
+        Entry[] entries,
+        Snapshot? snapshot,
+        Message[] afterAppendMessages)
+    {
+        var request = new Message
+        {
+            From = _core.Id,
+            To =
+                RaftLocalMessageTargets.AppendThread,
+            Type = MessageType.MsgStorageAppend,
+        };
+        request.Entries.Add(
+            entries.Select(entry => entry.Clone()));
+        if (hardState is not null)
+        {
+            request.Term = hardState.Term;
+            request.Vote = hardState.Vote;
+            request.Commit = hardState.Commit;
+        }
+
+        if (snapshot is not null)
+        {
+            request.Snapshot = snapshot.Clone();
+        }
+
+        request.Responses.Add(
+            afterAppendMessages.Select(
+                message => message.Clone()));
+        if (_core.Log.HasUnstableEntries
+            || snapshot is not null)
+        {
+            request.Responses.Add(
+                CreateStorageAppendResponse(snapshot));
+        }
+
+        return request;
+    }
+
+    private Message CreateStorageAppendResponse(
+        Snapshot? snapshot)
+    {
+        var response = new Message
+        {
+            From =
+                RaftLocalMessageTargets.AppendThread,
+            To = _core.Id,
+            Type =
+                MessageType.MsgStorageAppendResp,
+            Term = _core.Term,
+        };
+        if (_core.Log.HasUnstableEntries)
+        {
+            EntryId last = _core.Log.LastEntryId;
+            response.Index = last.Index;
+            response.LogTerm = last.Term;
+        }
+
+        if (snapshot is not null)
+        {
+            response.Snapshot = snapshot.Clone();
+        }
+
+        return response;
+    }
+
+    private Message CreateStorageApplyMessage(
+        Entry[] entries)
+    {
+        var request = new Message
+        {
+            From = _core.Id,
+            To = RaftLocalMessageTargets.ApplyThread,
+            Type = MessageType.MsgStorageApply,
+            Term = 0,
+        };
+        request.Entries.Add(
+            entries.Select(entry => entry.Clone()));
+
+        var response = new Message
+        {
+            From = RaftLocalMessageTargets.ApplyThread,
+            To = _core.Id,
+            Type =
+                MessageType.MsgStorageApplyResp,
+            Term = 0,
+        };
+        response.Entries.Add(
+            entries.Select(entry => entry.Clone()));
+        request.Responses.Add(response);
+        return request;
+    }
+
     private ConfState ApplyConfChangeCore(
         Func<ConfState> apply)
     {
@@ -647,6 +824,150 @@ public sealed partial class RawNode
         {
             Fault(exception);
             throw;
+        }
+    }
+
+    private void StepStorageResponseCore(
+        Message message)
+    {
+        try
+        {
+            _core.Step(message);
+        }
+        catch (Exception exception)
+        {
+            Fault(exception);
+            throw;
+        }
+    }
+
+    private static bool IsStorageResponse(
+        MessageType type)
+    {
+        return type is
+            MessageType.MsgStorageAppendResp
+            or MessageType.MsgStorageApplyResp;
+    }
+
+    private void ValidateStorageResponse(
+        Message message)
+    {
+        if (!_core.AsyncStorageWrites)
+        {
+            throw new StorageResponseValidationException(
+                "Storage-thread responses require asynchronous storage writes.");
+        }
+
+        if (message.To != _core.Id)
+        {
+            throw new StorageResponseValidationException(
+                $"Storage response target {message.To} does not match local node {_core.Id}.");
+        }
+
+        switch (message.From)
+        {
+            case RaftMessageTargets.LocalAppendThread:
+                ValidateAppendResponse(message);
+                return;
+            case RaftMessageTargets.LocalApplyThread:
+                ValidateApplyResponse(message);
+                return;
+            default:
+                throw new StorageResponseValidationException(
+                    $"Unknown local storage sender {message.From}.");
+        }
+    }
+
+    private static void ValidateAppendResponse(
+        Message message)
+    {
+        if (message.Type
+            != MessageType.MsgStorageAppendResp)
+        {
+            throw new StorageResponseValidationException(
+                $"{RaftLocalMessageTargets.AppendThread} must send MsgStorageAppendResp.");
+        }
+
+        if (!message.HasTerm)
+        {
+            throw new StorageResponseValidationException(
+                "MsgStorageAppendResp must carry a present term.");
+        }
+
+        if (message.HasIndex != message.HasLogTerm
+            || (message.HasIndex && message.Index == 0))
+        {
+            throw new StorageResponseValidationException(
+                "MsgStorageAppendResp must carry a paired nonzero index and log term.");
+        }
+
+        if (message.HasVote
+            || message.HasCommit
+            || message.HasReject
+            || message.HasRejectHint
+            || message.HasContext
+            || message.Entries.Count != 0
+            || message.Responses.Count != 0)
+        {
+            throw new StorageResponseValidationException(
+                "MsgStorageAppendResp contains request-only fields.");
+        }
+
+        if (message.Snapshot is not null
+            && (message.Snapshot.Metadata is null
+                || message.Snapshot.Metadata.Index == 0))
+        {
+            throw new StorageResponseValidationException(
+                "MsgStorageAppendResp snapshot must be nonempty.");
+        }
+    }
+
+    private static void ValidateApplyResponse(
+        Message message)
+    {
+        if (message.Type
+            != MessageType.MsgStorageApplyResp)
+        {
+            throw new StorageResponseValidationException(
+                $"{RaftLocalMessageTargets.ApplyThread} must send MsgStorageApplyResp.");
+        }
+
+        if (!message.HasTerm || message.Term != 0)
+        {
+            throw new StorageResponseValidationException(
+                "MsgStorageApplyResp must carry a present zero term.");
+        }
+
+        if (message.HasIndex
+            || message.HasLogTerm
+            || message.HasVote
+            || message.HasCommit
+            || message.HasReject
+            || message.HasRejectHint
+            || message.HasContext
+            || message.Snapshot is not null
+            || message.Responses.Count != 0
+            || message.Entries.Count == 0)
+        {
+            throw new StorageResponseValidationException(
+                "MsgStorageApplyResp has an invalid field shape.");
+        }
+
+        ulong? previous = null;
+        foreach (Entry entry in message.Entries)
+        {
+            if (entry is null
+                || entry.Index == 0
+                || (previous.HasValue
+                    && (previous.Value == ulong.MaxValue
+                        || entry.Index
+                            != previous.Value + 1)))
+            {
+                throw new StorageResponseValidationException(
+                    "MsgStorageApplyResp entries must be non-null, nonzero, and contiguous.");
+            }
+
+            previous = entry.Index;
         }
     }
 

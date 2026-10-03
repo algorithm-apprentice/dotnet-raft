@@ -105,12 +105,6 @@ internal sealed class InteractionEnvironment
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(
             options.SnapshotData);
-        if (options.AsyncStorageWrites)
-        {
-            throw new NotSupportedException(
-                "Asynchronous storage writes are introduced in D25.");
-        }
-
         if (options.SnapshotIndex == 1)
         {
             throw new ArgumentOutOfRangeException(
@@ -160,6 +154,8 @@ internal sealed class InteractionEnvironment
                 HeartbeatTick = options.HeartbeatTick,
                 Storage = storage,
                 Applied = options.SnapshotIndex,
+                AsyncStorageWrites =
+                    options.AsyncStorageWrites,
                 MaxSizePerMessage = ulong.MaxValue,
                 MaxCommittedSizePerReady =
                     options.MaxCommittedSizePerReady,
@@ -240,6 +236,35 @@ internal sealed class InteractionEnvironment
         _output.Write(
             RaftDescriptions.DescribeReady(ready));
 
+        if (node.Config.AsyncStorageWrites)
+        {
+            foreach (Message message in ready.Messages)
+            {
+                switch (message.To)
+                {
+                    case RaftLocalMessageTargets.AppendThread
+                        when message.Type
+                            == MessageType.MsgStorageAppend:
+                        node.EnqueueAppendWork(message);
+                        break;
+                    case RaftLocalMessageTargets.ApplyThread
+                        when message.Type
+                            == MessageType.MsgStorageApply:
+                        node.EnqueueApplyWork(message);
+                        break;
+                    case RaftLocalMessageTargets.AppendThread:
+                    case RaftLocalMessageTargets.ApplyThread:
+                        throw new InvalidOperationException(
+                            $"Unexpected local storage message {message.Type} for target {message.To}.");
+                    default:
+                        _messages.Add(message.Clone());
+                        break;
+                }
+            }
+
+            return;
+        }
+
         Snapshot? applicationSnapshot =
             ready.Snapshot?.Clone();
         if (ready.Snapshot is not null)
@@ -270,6 +295,118 @@ internal sealed class InteractionEnvironment
             ready.Messages.Select(
                 message => message.Clone()));
         node.RawNode.Advance(ready);
+    }
+
+    internal void ProcessAppendThread(int nodeIndex)
+    {
+        InteractionNode node = GetNode(nodeIndex);
+        if (!node.TryDequeueAppendWork(
+                out Message? request))
+        {
+            _output.Write(
+                "no append work to perform");
+            return;
+        }
+
+        if (request is null)
+        {
+            throw new InvalidOperationException(
+                "Append work queue returned a null message.");
+        }
+        Message[] responses =
+        [
+            .. request.Responses.Select(
+                response => response.Clone()),
+        ];
+        Message described = request.Clone();
+        described.Responses.Clear();
+        _output.WriteLine("Processing:");
+        _output.WriteLine(
+            RaftDescriptions.DescribeMessage(
+                described));
+
+        if (request.Snapshot is not null
+            && request.Snapshot.Metadata.Index != 0)
+        {
+            node.Storage.ApplySnapshot(
+                request.Snapshot);
+            node.SetApplicationSnapshot(
+                request.Snapshot);
+        }
+
+        node.Storage.Append(request.Entries);
+
+        if (request.HasTerm
+            || request.HasVote
+            || request.HasCommit)
+        {
+            if (!request.HasTerm
+                || !request.HasVote
+                || !request.HasCommit)
+            {
+                throw new InvalidOperationException(
+                    "Storage append hard state must be all-or-none.");
+            }
+
+            node.Storage.SetHardState(
+                new HardState
+                {
+                    Term = request.Term,
+                    Vote = request.Vote,
+                    Commit = request.Commit,
+                });
+        }
+
+        _output.WriteLine("Responses:");
+        foreach (Message response in responses)
+        {
+            _output.WriteLine(
+                RaftDescriptions.DescribeMessage(
+                    response));
+            _messages.Add(response.Clone());
+        }
+    }
+
+    internal void ProcessApplyThread(int nodeIndex)
+    {
+        InteractionNode node = GetNode(nodeIndex);
+        if (!node.TryDequeueApplyWork(
+                out Message? request))
+        {
+            _output.Write(
+                "no apply work to perform");
+            return;
+        }
+
+        if (request is null)
+        {
+            throw new InvalidOperationException(
+                "Apply work queue returned a null message.");
+        }
+        Message[] responses =
+        [
+            .. request.Responses.Select(
+                response => response.Clone()),
+        ];
+        Message described = request.Clone();
+        described.Responses.Clear();
+        _output.WriteLine("Processing:");
+        _output.WriteLine(
+            RaftDescriptions.DescribeMessage(
+                described));
+        foreach (Entry entry in request.Entries)
+        {
+            ApplyEntry(node, entry);
+        }
+
+        _output.WriteLine("Responses:");
+        foreach (Message response in responses)
+        {
+            _output.WriteLine(
+                RaftDescriptions.DescribeMessage(
+                    response));
+            _messages.Add(response.Clone());
+        }
     }
 
     internal int DeliverMessages(
@@ -341,6 +478,50 @@ internal sealed class InteractionEnvironment
                         [new InteractionRecipient(
                             node.Config.Id)],
                         ConsumeWork));
+                didWork = true;
+            }
+
+            foreach (int nodeIndex in selected)
+            {
+                InteractionNode node =
+                    GetNode(nodeIndex);
+                if (node.AppendWorkCount == 0)
+                {
+                    continue;
+                }
+
+                _output.WriteLine(
+                    $"> {node.Config.Id} processing append thread");
+                while (node.AppendWorkCount > 0)
+                {
+                    ConsumeWork();
+                    _output.WithIndent(
+                        () => ProcessAppendThread(
+                            nodeIndex));
+                }
+
+                didWork = true;
+            }
+
+            foreach (int nodeIndex in selected)
+            {
+                InteractionNode node =
+                    GetNode(nodeIndex);
+                if (node.ApplyWorkCount == 0)
+                {
+                    continue;
+                }
+
+                _output.WriteLine(
+                    $"> {node.Config.Id} processing apply thread");
+                while (node.ApplyWorkCount > 0)
+                {
+                    ConsumeWork();
+                    _output.WithIndent(
+                        () => ProcessApplyThread(
+                            nodeIndex));
+                }
+
                 didWork = true;
             }
 
@@ -562,6 +743,12 @@ internal sealed class InteractionEnvironment
             case "process-ready":
                 HandleProcessReady(directive);
                 return;
+            case "process-append-thread":
+                HandleProcessAppendThread(directive);
+                return;
+            case "process-apply-thread":
+                HandleProcessApplyThread(directive);
+                return;
             case "log-level":
                 HandleLogLevel(directive);
                 return;
@@ -613,10 +800,6 @@ internal sealed class InteractionEnvironment
             case "report-unreachable":
                 HandleReportUnreachable(directive);
                 return;
-            case "process-append-thread":
-            case "process-apply-thread":
-                throw new NotSupportedException(
-                    $"{directive.Command} is introduced with asynchronous storage writes in D25.");
             default:
                 throw new InvalidOperationException(
                     $"Unknown interaction command {directive.Command}.");
@@ -863,6 +1046,54 @@ internal sealed class InteractionEnvironment
             else
             {
                 ProcessReady(index);
+            }
+        }
+    }
+
+    private void HandleProcessAppendThread(
+        InteractionDirective directive)
+    {
+        HandleWorkerCommand(
+            directive,
+            "processing append thread",
+            ProcessAppendThread);
+    }
+
+    private void HandleProcessApplyThread(
+        InteractionDirective directive)
+    {
+        HandleWorkerCommand(
+            directive,
+            "processing apply thread",
+            ProcessApplyThread);
+    }
+
+    private void HandleWorkerCommand(
+        InteractionDirective directive,
+        string description,
+        Action<int> process)
+    {
+        string[] bare = GetBare(directive);
+        if (bare.Length == 0
+            || GetOptions(directive).Length > 0)
+        {
+            throw new ArgumentException(
+                $"{directive.Command} requires one or more nodes.");
+        }
+
+        foreach (string value in bare)
+        {
+            int index = ParseNodeIndex(value);
+            if (bare.Length > 1)
+            {
+                _output.WriteLine(
+                    $"> {index + 1} {description}");
+                _output.WithIndent(
+                    () => process(index));
+            }
+            else
+            {
+                process(index);
             }
         }
     }
@@ -1206,6 +1437,12 @@ internal sealed class InteractionEnvironment
     {
         Snapshot previous =
             node.GetApplicationSnapshot();
+        if (entry.Index
+            <= previous.Metadata.Index)
+        {
+            return;
+        }
+
         ConfState configuration;
         ByteString update;
         switch (entry.Type)

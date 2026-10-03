@@ -149,6 +149,11 @@ internal sealed class UnstableLog
         return _snapshot?.Clone();
     }
 
+    internal bool HasSnapshotAt(ulong index)
+    {
+        return _snapshot?.Metadata.Index == index;
+    }
+
     internal void AcceptInProgress()
     {
         if (_entries.Count > 0)

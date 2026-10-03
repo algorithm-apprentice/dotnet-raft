@@ -199,6 +199,8 @@ internal sealed class RecordingLogger : IRaftLogger
 
     internal bool ThrowOnWarning { get; set; }
 
+    internal bool ThrowOnInformation { get; set; }
+
     public bool IsEnabled(RaftLogLevel level)
     {
         return true;
@@ -218,6 +220,13 @@ internal sealed class RecordingLogger : IRaftLogger
                 throw new InvalidOperationException(
                     "Injected logger failure.");
             }
+        }
+
+        if (level == RaftLogLevel.Information
+            && ThrowOnInformation)
+        {
+            throw new InvalidOperationException(
+                "Injected information logger failure.");
         }
     }
 }

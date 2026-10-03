@@ -156,6 +156,29 @@ public sealed class RaftNodeLifecycleTests
     }
 
     [Fact]
+    public async Task UnexpectedLoggerFailureFaultsAfterMutation()
+    {
+        var logger = new RecordingLogger();
+        (RaftNode node, _) = RestartNode(
+            logger: logger);
+        logger.ThrowOnInformation = true;
+
+        InvalidOperationException trigger =
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                async () => await node.CampaignAsync()
+                    .AsTask());
+        Assert.Contains(
+            "Injected information",
+            trigger.Message,
+            StringComparison.Ordinal);
+        await Assert.ThrowsAsync<RaftNodeFaultedException>(
+            async () => await node.Completion);
+        Assert.Equal(
+            RaftRole.Candidate,
+            node.TerminalStatus?.Basic.Role);
+    }
+
+    [Fact]
     public async Task EnqueueStopRacesAlwaysComplete()
     {
         for (var iteration = 0;

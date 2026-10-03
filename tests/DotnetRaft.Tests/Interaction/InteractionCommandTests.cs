@@ -125,9 +125,18 @@ public sealed class InteractionCommandTests
     }
 
     [Fact]
-    public void DeferredAsyncCommandsAreExplicit()
+    public void AsyncWorkerCommandsAreAvailable()
     {
         var environment = new InteractionEnvironment();
+        environment.Handle(
+            "log-level none",
+            string.Empty);
+        environment.Handle(
+            "add-nodes 1 async-storage-writes=true",
+            string.Empty);
+        environment.Handle(
+            "log-level debug",
+            string.Empty);
 
         string append = environment.Handle(
             "process-append-thread 1",
@@ -136,8 +145,12 @@ public sealed class InteractionCommandTests
             "process-apply-thread 1",
             string.Empty);
 
-        Assert.Contains("D25", append, StringComparison.Ordinal);
-        Assert.Contains("D25", apply, StringComparison.Ordinal);
+        Assert.Equal(
+            "no append work to perform",
+            append);
+        Assert.Equal(
+            "no apply work to perform",
+            apply);
     }
 
     [Fact]
