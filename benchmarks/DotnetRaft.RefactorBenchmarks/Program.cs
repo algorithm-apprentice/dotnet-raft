@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Runtime;
 using System.Text.Json;
@@ -23,6 +24,7 @@ bool smoke = args.Contains(
 int iterations = smoke ? 1 : 5;
 int proposalOperations = smoke ? 100 : 10_000;
 int dispatchOperations = smoke ? 1_000 : 100_000;
+int readOperations = smoke ? 100 : 10_000;
 
 Run(
     "sync-proposal-cycle",
@@ -40,6 +42,14 @@ Run(
         ? 10682668835992251717UL
         : null,
     BenchmarkFollowerHeartbeat);
+Run(
+    "safe-read-completion",
+    readOperations,
+    iterations,
+    smoke
+        ? 6022984572386408565UL
+        : null,
+    BenchmarkSafeReadCompletion);
 
 static void Run(
     string name,
@@ -214,6 +224,63 @@ static (
         checksum);
 }
 
+static (
+    long Ticks,
+    long AllocatedBytes,
+    ulong Checksum) BenchmarkSafeReadCompletion(
+        int operations)
+{
+    RawNode node = CreateReadLeader();
+    byte[] context =
+        Enumerable.Range(0, 16)
+            .Select(index => (byte)index)
+            .ToArray();
+    ulong checksum = FnvOffset;
+    long allocatedBefore =
+        GC.GetAllocatedBytesForCurrentThread();
+    long started = Stopwatch.GetTimestamp();
+    for (var operation = 0;
+         operation < operations;
+         operation++)
+    {
+        node.ReadIndex(context);
+        Ready pending = node.Ready();
+        Message heartbeat = pending.Messages.Single(
+            message =>
+                message.Type
+                == MessageType.MsgHeartbeat
+                && message.To == 2);
+        checksum = Add(
+            checksum,
+            BinaryPrimitives
+                .ReadUInt64LittleEndian(
+                    heartbeat.Context.Span));
+        node.Advance(pending);
+
+        node.Step(new Message
+        {
+            From = 2,
+            To = 1,
+            Term = heartbeat.Term,
+            Type = MessageType.MsgHeartbeatResp,
+            Context = heartbeat.Context,
+        });
+        Ready completed = node.Ready();
+        ReadState state = completed.ReadStates[0];
+        checksum = Add(checksum, state.Index);
+        checksum = Add(
+            checksum,
+            (ulong)state.RequestContext.Length);
+        node.Advance(completed);
+    }
+
+    return (
+        Stopwatch.GetTimestamp() - started,
+        GC.GetAllocatedBytesForCurrentThread()
+            - allocatedBefore,
+        checksum);
+}
+
 static (RawNode Node, MemoryStorage Storage)
     CreateLeader()
 {
@@ -242,6 +309,66 @@ static (RawNode Node, MemoryStorage Storage)
     Persist(storage, commit);
     node.Advance(commit);
     return (node, storage);
+}
+
+static RawNode CreateReadLeader()
+{
+    MemoryStorage storage = CreateStorage([1, 2]);
+    RawNode node = RawNode.Restart(
+        new RaftConfig
+        {
+            Id = 1,
+            ElectionTick = 10,
+            HeartbeatTick = 1,
+            Storage = storage,
+            Applied = 2,
+            MaxSizePerMessage = ulong.MaxValue,
+            MaxUncommittedEntriesSize =
+                ulong.MaxValue,
+            MaxInflightMessages = 256,
+        });
+    node.Campaign();
+    Ready election = node.Ready();
+    Message voteRequest = election.Messages.Single(
+        message =>
+            message.Type == MessageType.MsgVote
+            && message.To == 2);
+    Persist(storage, election);
+    node.Advance(election);
+
+    node.Step(new Message
+    {
+        From = 2,
+        To = 1,
+        Term = voteRequest.Term,
+        Type = MessageType.MsgVoteResp,
+    });
+    Ready leadership = node.Ready();
+    Message append = leadership.Messages.Single(
+        message =>
+            message.Type == MessageType.MsgApp
+            && message.To == 2);
+    Persist(storage, leadership);
+    node.Advance(leadership);
+
+    node.Step(new Message
+    {
+        From = 2,
+        To = 1,
+        Term = append.Term,
+        Type = MessageType.MsgAppResp,
+        Index = append.Entries.Count == 0
+            ? append.Index
+            : append.Entries[^1].Index,
+    });
+    while (node.HasReady())
+    {
+        Ready ready = node.Ready();
+        Persist(storage, ready);
+        node.Advance(ready);
+    }
+
+    return node;
 }
 
 static RawNode CreateFollower()

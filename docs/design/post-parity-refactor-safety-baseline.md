@@ -197,3 +197,24 @@ killed and two redundant block mutants were ignored.
 
 Stage 4 preserves both checksums, adds no measured allocation, and remains
 within the 10% timing ceiling.
+
+Before Stage 5, the same Stage 4 commit was measured with the new safe-read
+completion benchmark in a detached worktree. Three complete runs reported
+1695.6625, 1671.5333, and 1661.7292 ns/op. The Stage 4 read baseline is
+1671.5333 ns/op, 5432.0248 bytes/op, and checksum 3884428198604542453.
+Its limits are 1838.68663 ns/op and 5486.345048 bytes/op.
+
+### Stage 5: read-index coordinator extraction
+
+`ReadIndexCoordinator` mutation testing scored 100%: all 31 executable mutants
+were killed, 11 redundant block mutants were ignored, and seven syntactically
+invalid count mutants were excluded.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4661.2041 | -6.74% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 296.77875 | -0.98% | 2464.00088 | 10936930208570869669 | Pass |
+| Safe read completion | 1784.4625 | +6.76% | 5432.0248 | 3884428198604542453 | Pass |
+
+Stage 5 preserves all three checksums, adds no measured allocation, and
+remains within every timing ceiling.

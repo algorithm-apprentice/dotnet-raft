@@ -20,9 +20,8 @@ internal sealed class RaftCore
         ByteString.CopyFromUtf8("CampaignTransfer");
     private readonly RaftClock clock;
     private readonly RaftOutput output = new();
+    private readonly ReadIndexCoordinator reads;
     private readonly RaftRoleState roleState = new();
-    private readonly Queue<Message> pendingReadIndexMessages = [];
-    private readonly List<ReadState> readStates = [];
     private readonly IRaftTraceSink? traceSink;
     private readonly bool suppressTransitionTrace = true;
 
@@ -90,7 +89,8 @@ internal sealed class RaftCore
         Tracker = new ProgressTracker(
             validated.MaxInflightMessages,
             validated.MaxInflightBytes);
-        ReadOnly = new ReadOnlyTracker(validated.ReadOnlyOption);
+        reads = new ReadIndexCoordinator(
+            validated.ReadOnlyOption);
 
         ConfigurationChangeResult restored =
             ConfigurationRestore.Restore(
@@ -141,7 +141,8 @@ internal sealed class RaftCore
 
     internal ProgressTracker Tracker { get; }
 
-    internal ReadOnlyTracker ReadOnly { get; private set; }
+    internal ReadOnlyTracker ReadOnly =>
+        reads.ReadOnly;
 
     internal IRaftLogger Logger { get; }
 
@@ -214,10 +215,11 @@ internal sealed class RaftCore
     internal bool HasMessagesAfterAppend =>
         output.HasMessagesAfterAppend;
 
-    internal bool HasReadStates => readStates.Count > 0;
+    internal bool HasReadStates =>
+        reads.HasReadStates;
 
     internal int PendingReadIndexMessageCount =>
-        pendingReadIndexMessages.Count;
+        reads.GatedCount;
 
     internal void BecomeFollower(ulong term, ulong leaderId)
     {
@@ -541,18 +543,12 @@ internal sealed class RaftCore
 
     internal ReadState[] TakeReadStates()
     {
-        return Take(readStates);
+        return reads.TakeReadStates();
     }
 
     internal ReadState[] PeekReadStates()
     {
-        return
-        [
-            .. readStates.Select(
-                state => new ReadState(
-                    state.Index,
-                    state.RequestContext)),
-        ];
+        return reads.PeekReadStates();
     }
 
     internal BasicStatus GetBasicStatus()
@@ -777,13 +773,6 @@ internal sealed class RaftCore
         return message.Type == MessageType.MsgPreVote
             || (message.Type == MessageType.MsgPreVoteResp
                 && !message.Reject);
-    }
-
-    private static T[] Take<T>(List<T> queue)
-    {
-        T[] taken = [.. queue];
-        queue.Clear();
-        return taken;
     }
 
     private void HandleHup()
@@ -1532,7 +1521,7 @@ internal sealed class RaftCore
     private void BroadcastHeartbeat()
     {
         ByteString context =
-            ReadOnly.GetHeartbeatContext();
+            reads.GetHeartbeatContext();
         Tracker.Visit((id, progress) =>
         {
             if (id == Id)
@@ -1587,10 +1576,12 @@ internal sealed class RaftCore
 
         if (!message.Context.IsEmpty)
         {
-            ReadOnly.ReceiveAcknowledgement(
+            ReadIndexRequest[] completed =
+                reads.Acknowledge(
                 message.From,
-                message.Context);
-            AdvanceReadOnly();
+                message.Context,
+                Tracker.Config.Voters);
+            CompleteReadIndexRequests(completed);
         }
     }
 
@@ -1704,7 +1695,7 @@ internal sealed class RaftCore
 
     private void HandleLeaderReadIndex(Message message)
     {
-        ValidateReadIndexRequest(message);
+        ReadIndexCoordinator.ValidateRequest(message);
         if (IsLocalSingleton())
         {
             RespondToReadIndex(
@@ -1715,12 +1706,11 @@ internal sealed class RaftCore
 
         if (!HasCommittedEntryInCurrentTerm())
         {
-            pendingReadIndexMessages.Enqueue(
-                message.Clone());
+            reads.Gate(message);
             return;
         }
 
-        if (ReadOnly.Option ==
+        if (reads.Option ==
                 ReadOnlyOption.LeaseBased
             && IsLocalVoter())
         {
@@ -1736,41 +1726,36 @@ internal sealed class RaftCore
 
     private void HandleReadIndexResponse(Message message)
     {
-        if (message.Entries.Count != 1)
+        if (!reads.TryCompleteResponse(message))
         {
             LogError(
                 $"{Id:x} ignored {MessageType.MsgReadIndexResp} " +
                 $"with {message.Entries.Count} entries; expected exactly one entry.");
             return;
         }
-
-        readStates.Add(new ReadState(
-            message.Index,
-            message.Entries[0].Data));
     }
 
     private void TrackReadIndex(Message message)
     {
-        ReadOnly.AddRequest(
-            Log.Committed,
-            message);
-        ByteString context =
-            ReadOnly.GetHeartbeatContext();
-        ReadOnly.ReceiveAcknowledgement(
-            Id,
-            context);
-        AdvanceReadOnly();
-        if (ReadOnly.PendingCount > 0)
+        ReadIndexAdvanceResult result =
+            reads.TrackSafeRead(
+                Log.Committed,
+                message,
+                Id,
+                Tracker.Config.Voters);
+        CompleteReadIndexRequests(
+            result.Completed);
+        if (result.HeartbeatRequired)
         {
             BroadcastHeartbeat();
         }
     }
 
-    private void AdvanceReadOnly()
+    private void CompleteReadIndexRequests(
+        ReadIndexRequest[] requests)
     {
         foreach (ReadIndexRequest request in
-                 ReadOnly.Advance(
-                     Tracker.Config.Voters))
+                 requests)
         {
             RespondToReadIndex(
                 request.Request,
@@ -1782,25 +1767,14 @@ internal sealed class RaftCore
         Message request,
         ulong index)
     {
-        if (request.From == RaftMessageTargets.None
-            || request.From == Id)
+        Message? response = reads.Complete(
+            request,
+            index,
+            Id);
+        if (response is not null)
         {
-            readStates.Add(new ReadState(
-                index,
-                request.Entries[0].Data));
-            return;
+            Send(response);
         }
-
-        var response = new Message
-        {
-            To = request.From,
-            Type = MessageType.MsgReadIndexResp,
-            Index = index,
-        };
-        response.Entries.Add(
-            request.Entries.Select(
-                entry => entry.Clone()));
-        Send(response);
     }
 
     private void ReleasePendingReadIndexMessages()
@@ -1811,7 +1785,7 @@ internal sealed class RaftCore
             return;
         }
 
-        while (pendingReadIndexMessages.TryDequeue(
+        while (reads.TryDequeueGated(
                    out Message? request))
         {
             HandleLeaderReadIndex(request);
@@ -1842,16 +1816,6 @@ internal sealed class RaftCore
     private bool IsLocalVoter()
     {
         return Tracker.IsVoter(Id);
-    }
-
-    private static void ValidateReadIndexRequest(
-        Message message)
-    {
-        if (message.Entries.Count != 1)
-        {
-            throw new RaftInvariantException(
-                $"{MessageType.MsgReadIndex} must contain exactly one entry.");
-        }
     }
 
     private void HandleUnreachable(Message message)
@@ -2070,8 +2034,12 @@ internal sealed class RaftCore
 
     private void ReevaluateReadOnlyAfterConfigurationChange()
     {
-        AdvanceReadOnly();
-        if (ReadOnly.PendingCount > 0)
+        ReadIndexAdvanceResult result =
+            reads.Reevaluate(
+                Tracker.Config.Voters);
+        CompleteReadIndexRequests(
+            result.Completed);
+        if (result.HeartbeatRequired)
         {
             BroadcastHeartbeat();
         }
@@ -2102,7 +2070,7 @@ internal sealed class RaftCore
         switch (Role)
         {
             case RaftRole.Follower:
-                if (ReadOnly.Option ==
+                if (reads.Option ==
                     ReadOnlyOption.LeaseBased)
                 {
                     LogError(
@@ -2299,7 +2267,7 @@ internal sealed class RaftCore
 
         PendingConfigurationIndex = 0;
         UncommittedSize = 0;
-        ReadOnly = new ReadOnlyTracker(ReadOnly.Option);
+        reads.Reset();
     }
 
     private void LoadHardState(HardState state)

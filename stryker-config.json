@@ -9,6 +9,7 @@
     "mutate": [
       "**/Core/RaftCore.cs",
       "**/Core/RaftClock.cs",
+      "**/Core/ReadIndexCoordinator.cs",
       "**/Core/RaftLog.cs",
       "**/Core/RaftOutput.cs",
       "**/Core/RaftRoleState.cs",
