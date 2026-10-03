@@ -157,3 +157,16 @@ expressions in `IsSingleton`.
 
 Stage 1 preserves both checksums, adds no measured allocation, and remains
 within the 10% timing ceiling.
+
+### Stage 2: Raft clock extraction
+
+`RaftClock` mutation testing scored 100%: all 42 executable mutants were
+killed and 12 redundant block mutants were ignored.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---|
+| Sync proposal cycle | 5038.2875 | +0.81% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 301.41959 | +0.57% | 2464.00088 | 10936930208570869669 | Pass |
+
+Stage 2 preserves both checksums, adds no measured allocation, and remains
+within the 10% timing ceiling.

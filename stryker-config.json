@@ -8,6 +8,7 @@
     "configuration": "Release",
     "mutate": [
       "**/Core/RaftCore.cs",
+      "**/Core/RaftClock.cs",
       "**/Core/RaftLog.cs",
       "**/Core/UnstableLog.cs",
       "**/Tracker/ProgressTracker.cs"

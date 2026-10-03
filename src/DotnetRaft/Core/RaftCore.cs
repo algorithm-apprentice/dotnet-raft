@@ -18,14 +18,12 @@ internal sealed class RaftCore
 {
     private static readonly ByteString CampaignTransferContext =
         ByteString.CopyFromUtf8("CampaignTransfer");
-    private readonly Func<int, int> randomOffset;
+    private readonly RaftClock clock;
     private readonly List<Message> messages = [];
     private readonly List<Message> messagesAfterAppend = [];
     private readonly Queue<Message> pendingReadIndexMessages = [];
     private readonly List<ReadState> readStates = [];
     private readonly IRaftTraceSink? traceSink;
-    private int electionElapsed;
-    private int heartbeatElapsed;
     private readonly bool suppressTransitionTrace = true;
 
     internal RaftCore(RaftConfig config)
@@ -43,11 +41,12 @@ internal sealed class RaftCore
         ArgumentNullException.ThrowIfNull(randomOffset);
 
         ValidatedRaftConfig validated = config.ValidateAndNormalize();
-        this.randomOffset = randomOffset;
+        clock = new RaftClock(
+            validated.ElectionTick,
+            validated.HeartbeatTick,
+            randomOffset);
 
         Id = validated.Id;
-        ElectionTick = validated.ElectionTick;
-        HeartbeatTick = validated.HeartbeatTick;
         AsyncStorageWrites = validated.AsyncStorageWrites;
         MaxMessageSize = validated.MaxSizePerMessage;
         MaxCommittedSizePerReady =
@@ -142,23 +141,26 @@ internal sealed class RaftCore
 
     internal IRaftLogger Logger { get; }
 
-    internal int ElectionTick { get; }
+    internal int ElectionTick =>
+        clock.ElectionTick;
 
-    internal int HeartbeatTick { get; }
+    internal int HeartbeatTick =>
+        clock.HeartbeatTick;
 
     internal int ElectionElapsed
     {
-        get => electionElapsed;
-        set => electionElapsed = value;
+        get => clock.ElectionElapsed;
+        set => clock.ElectionElapsed = value;
     }
 
     internal int HeartbeatElapsed
     {
-        get => heartbeatElapsed;
-        set => heartbeatElapsed = value;
+        get => clock.HeartbeatElapsed;
+        set => clock.HeartbeatElapsed = value;
     }
 
-    internal int RandomizedElectionTimeout { get; private set; }
+    internal int RandomizedElectionTimeout =>
+        clock.RandomizedElectionTimeout;
 
     internal bool AsyncStorageWrites { get; }
 
@@ -190,7 +192,7 @@ internal sealed class RaftCore
         && !Log.HasUnstableSnapshot;
 
     internal bool PastElectionTimeout =>
-        ElectionElapsed >= RandomizedElectionTimeout;
+        clock.PastElectionTimeout;
 
     internal SoftState SoftState => new(LeaderId, Role);
 
@@ -312,16 +314,7 @@ internal sealed class RaftCore
                 "Leader state must use leader clocks.");
         }
 
-        electionElapsed = IncrementElapsed(
-            electionElapsed,
-            "election");
-        if (!Promotable || !PastElectionTimeout)
-        {
-            return false;
-        }
-
-        electionElapsed = 0;
-        return true;
+        return clock.TickElection(Promotable);
     }
 
     internal LeaderClockTick TickLeaderClocks()
@@ -332,18 +325,7 @@ internal sealed class RaftCore
                 "Only a leader can tick leader clocks.");
         }
 
-        int nextElectionElapsed = IncrementElapsed(
-            electionElapsed,
-            "election");
-        int nextHeartbeatElapsed = IncrementElapsed(
-            heartbeatElapsed,
-            "heartbeat");
-
-        bool electionDue = nextElectionElapsed >= ElectionTick;
-        bool heartbeatDue = nextHeartbeatElapsed >= HeartbeatTick;
-        electionElapsed = electionDue ? 0 : nextElectionElapsed;
-        heartbeatElapsed = heartbeatDue ? 0 : nextHeartbeatElapsed;
-        return new LeaderClockTick(electionDue, heartbeatDue);
+        return clock.TickLeader();
     }
 
     internal void TickElection()
@@ -708,15 +690,8 @@ internal sealed class RaftCore
     internal void SetRandomizedElectionTimeoutForTesting(
         int timeout)
     {
-        if (timeout <= 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(timeout),
-                timeout,
-                "Randomized election timeout must be positive.");
-        }
-
-        RandomizedElectionTimeout = timeout;
+        clock.SetRandomizedElectionTimeoutForTesting(
+            timeout);
     }
 
     internal void ReduceUncommittedSize(ulong payloadSize)
@@ -870,19 +845,6 @@ internal sealed class RaftCore
         ];
     }
 
-    private static int IncrementElapsed(
-        int elapsed,
-        string clockName)
-    {
-        if (elapsed == int.MaxValue)
-        {
-            throw new RaftInvariantException(
-                $"{clockName} elapsed counter overflowed.");
-        }
-
-        return elapsed + 1;
-    }
-
     private void HandleHup()
     {
         HandleHup(
@@ -965,7 +927,7 @@ internal sealed class RaftCore
             });
             if (message.Type == MessageType.MsgVote)
             {
-                electionElapsed = 0;
+                ElectionElapsed = 0;
                 Vote = message.From;
             }
 
@@ -1099,7 +1061,7 @@ internal sealed class RaftCore
         switch (Role)
         {
             case RaftRole.Follower:
-                electionElapsed = 0;
+                ElectionElapsed = 0;
                 LeaderId = message.From;
                 return true;
             case RaftRole.PreCandidate:
@@ -2229,7 +2191,7 @@ internal sealed class RaftCore
                 MessageType.MsgPreVote
             && CheckQuorum
             && LeaderId != RaftMessageTargets.None
-            && electionElapsed < ElectionTick
+            && ElectionElapsed < ElectionTick
             && message.Context != CampaignTransferContext;
     }
 
@@ -2382,7 +2344,7 @@ internal sealed class RaftCore
                 $"Raft term cannot decrease from {Term} to {term}.");
         }
 
-        int randomizedTimeout = NextRandomizedElectionTimeout();
+        clock.Reset();
 
         if (Term != term)
         {
@@ -2391,9 +2353,6 @@ internal sealed class RaftCore
         }
 
         LeaderId = RaftMessageTargets.None;
-        electionElapsed = 0;
-        heartbeatElapsed = 0;
-        RandomizedElectionTimeout = randomizedTimeout;
         LeaderTransferee = RaftMessageTargets.None;
         Tracker.ResetVotes();
 
@@ -2409,26 +2368,6 @@ internal sealed class RaftCore
         PendingConfigurationIndex = 0;
         UncommittedSize = 0;
         ReadOnly = new ReadOnlyTracker(ReadOnly.Option);
-    }
-
-    private int NextRandomizedElectionTimeout()
-    {
-        int offset = randomOffset(ElectionTick);
-        if (offset < 0 || offset >= ElectionTick)
-        {
-            throw new RaftInvariantException(
-                $"Random election offset {offset} is outside [0, {ElectionTick}).");
-        }
-
-        try
-        {
-            return checked(ElectionTick + offset);
-        }
-        catch (OverflowException exception)
-        {
-            throw new RaftInvariantException(
-                $"Randomized election timeout overflowed: {exception.Message}");
-        }
     }
 
     private void LoadHardState(HardState state)
