@@ -926,17 +926,11 @@ internal sealed class RaftCore
 
                 return;
             case MessageType.MsgForgetLeader:
-                HandleForgetLeader();
                 return;
             case MessageType.MsgTransferLeader:
-                HandleTransferLeader(message);
+                HandleLeaderTransfer(message.From);
                 return;
             case MessageType.MsgTimeoutNow:
-                if (Role == RaftRole.Follower)
-                {
-                    HandleHup(CampaignType.Transfer);
-                }
-
                 return;
             case MessageType.MsgAppResp:
                 if (Role == RaftRole.Leader)
@@ -953,14 +947,9 @@ internal sealed class RaftCore
 
                 return;
             case MessageType.MsgReadIndex:
-                HandleReadIndexMessage(message);
+                HandleLeaderReadIndex(message);
                 return;
             case MessageType.MsgReadIndexResp:
-                if (Role == RaftRole.Follower)
-                {
-                    HandleReadIndexResponse(message);
-                }
-
                 return;
             case MessageType.MsgUnreachable:
                 if (Role == RaftRole.Leader)
@@ -979,36 +968,93 @@ internal sealed class RaftCore
             case MessageType.MsgApp:
             case MessageType.MsgHeartbeat:
             case MessageType.MsgSnap:
-                if (!HandleLeaderMessage(message))
-                {
-                    return;
-                }
-
-                break;
+                return;
         }
+    }
 
-        switch (message.Type)
+    internal void HandleFollowerProposal(
+        Message message)
+    {
+        ValidateProposal(message);
+        if (LeaderId == RaftMessageTargets.None)
         {
-            case MessageType.MsgApp:
-                HandleAppendEntries(message);
-                return;
-            case MessageType.MsgHeartbeat:
-                HandleHeartbeat(message);
-                return;
-            case MessageType.MsgSnap:
-                HandleSnapshot(message);
-                return;
+            throw new ProposalDroppedException(
+                "The follower has no known leader.");
         }
+
+        if (DisableProposalForwarding)
+        {
+            throw new ProposalDroppedException(
+                "Proposal forwarding is disabled.");
+        }
+
+        Message forwarded = message.Clone();
+        forwarded.To = LeaderId;
+        Send(forwarded);
+    }
+
+    internal void HandleFollowerForgetLeader()
+    {
+        if (reads.Option ==
+            ReadOnlyOption.LeaseBased)
+        {
+            LogError(
+                "Ignoring MsgForgetLeader in lease-based read mode.");
+            return;
+        }
+
+        roleState.ForgetLeader();
+    }
+
+    internal void HandleFollowerTransferLeader(
+        Message message)
+    {
+        if (LeaderId == RaftMessageTargets.None)
+        {
+            return;
+        }
+
+        Message forwarded = message.Clone();
+        forwarded.To = LeaderId;
+        Send(forwarded);
+    }
+
+    internal void HandleFollowerTimeoutNow()
+    {
+        HandleHup(CampaignType.Transfer);
+    }
+
+    internal void HandleFollowerReadIndex(
+        Message message)
+    {
+        if (LeaderId == RaftMessageTargets.None)
+        {
+            return;
+        }
+
+        Message forwarded = message.Clone();
+        forwarded.To = LeaderId;
+        Send(forwarded);
+    }
+
+    internal void HandleFollowerReadIndexResponse(
+        Message message)
+    {
+        HandleReadIndexResponse(message);
+    }
+
+    internal void HandleFollowerLeaderMessage(
+        Message message)
+    {
+        ElectionElapsed = 0;
+        roleState.SetLeader(message.From);
+        HandleAcceptedLeaderMessage(message);
     }
 
     internal void HandleCampaigningProposal(
         Message message)
     {
-        if (message.Entries.Count == 0)
-        {
-            throw new RaftInvariantException(
-                "A proposal must contain at least one entry.");
-        }
+        ValidateProposal(message);
 
         throw new ProposalDroppedException(
             $"A {Role} cannot process proposals.");
@@ -1057,26 +1103,6 @@ internal sealed class RaftCore
         }
     }
 
-    private bool HandleLeaderMessage(Message message)
-    {
-        switch (Role)
-        {
-            case RaftRole.Follower:
-                ElectionElapsed = 0;
-                roleState.SetLeader(message.From);
-                return true;
-            case RaftRole.PreCandidate:
-            case RaftRole.Candidate:
-                BecomeFollower(Term, message.From);
-                return true;
-            case RaftRole.Leader:
-                return false;
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown Raft role {Role}.");
-        }
-    }
-
     private void HandleVoteResponse(
         Message message,
         bool preCandidate)
@@ -1108,74 +1134,50 @@ internal sealed class RaftCore
         }
     }
 
-    private void HandleProposal(Message message)
+    private static void ValidateProposal(
+        Message message)
     {
         if (message.Entries.Count == 0)
         {
             throw new RaftInvariantException(
                 "A proposal must contain at least one entry.");
         }
+    }
 
-        switch (Role)
+    private void HandleProposal(Message message)
+    {
+        ValidateProposal(message);
+        if (!Tracker.Progress.ContainsKey(Id))
         {
-            case RaftRole.Leader:
-                if (!Tracker.Progress.ContainsKey(Id))
-                {
-                    throw new ProposalDroppedException(
-                        "The leader has no local replication progress.");
-                }
-
-                if (LeaderTransferee !=
-                    RaftMessageTargets.None)
-                {
-                    throw new ProposalDroppedException(
-                        "The leader is transferring leadership.");
-                }
-
-                (
-                    Entry[] entries,
-                    ulong pendingConfigurationIndex) =
-                    PrepareProposalEntries(
-                        message.Entries);
-                ProposalAdmissionPlan plan =
-                    AppendLeaderEntries(
-                        entries,
-                        pendingConfigurationIndex,
-                        traceConfigurationProposals: true);
-                if (!plan.Accepted)
-                {
-                    throw new ProposalDroppedException(
-                        "The proposal exceeds the uncommitted entry size limit.");
-                }
-
-                proposals.PublishPending(plan);
-                BroadcastAppend();
-                return;
-            case RaftRole.Follower:
-                if (LeaderId == RaftMessageTargets.None)
-                {
-                    throw new ProposalDroppedException(
-                        "The follower has no known leader.");
-                }
-
-                if (DisableProposalForwarding)
-                {
-                    throw new ProposalDroppedException(
-                        "Proposal forwarding is disabled.");
-                }
-
-                Message forwarded = message.Clone();
-                forwarded.To = LeaderId;
-                Send(forwarded);
-                return;
-            case RaftRole.PreCandidate:
-            case RaftRole.Candidate:
-                throw new ProposalDroppedException(
-                    $"A {Role} cannot process proposals.");
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown Raft role {Role}.");
+            throw new ProposalDroppedException(
+                "The leader has no local replication progress.");
         }
+
+        if (LeaderTransferee !=
+            RaftMessageTargets.None)
+        {
+            throw new ProposalDroppedException(
+                "The leader is transferring leadership.");
+        }
+
+        (
+            Entry[] entries,
+            ulong pendingConfigurationIndex) =
+            PrepareProposalEntries(
+                message.Entries);
+        ProposalAdmissionPlan plan =
+            AppendLeaderEntries(
+                entries,
+                pendingConfigurationIndex,
+                traceConfigurationProposals: true);
+        if (!plan.Accepted)
+        {
+            throw new ProposalDroppedException(
+                "The proposal exceeds the uncommitted entry size limit.");
+        }
+
+        proposals.PublishPending(plan);
+        BroadcastAppend();
     }
 
     private ProposalAdmissionPlan AppendLeaderEntries(
@@ -1629,33 +1631,6 @@ internal sealed class RaftCore
         }
     }
 
-    private void HandleTransferLeader(
-        Message message)
-    {
-        switch (Role)
-        {
-            case RaftRole.Follower:
-                if (LeaderId == RaftMessageTargets.None)
-                {
-                    return;
-                }
-
-                Message forwarded = message.Clone();
-                forwarded.To = LeaderId;
-                Send(forwarded);
-                return;
-            case RaftRole.PreCandidate:
-            case RaftRole.Candidate:
-                return;
-            case RaftRole.Leader:
-                HandleLeaderTransfer(message.From);
-                return;
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown Raft role {Role}.");
-        }
-    }
-
     private void HandleLeaderTransfer(
         ulong transferee)
     {
@@ -1709,32 +1684,6 @@ internal sealed class RaftCore
     private void AbortLeaderTransfer()
     {
         roleState.AbortTransfer();
-    }
-
-    private void HandleReadIndexMessage(Message message)
-    {
-        switch (Role)
-        {
-            case RaftRole.Leader:
-                HandleLeaderReadIndex(message);
-                return;
-            case RaftRole.Follower:
-                if (LeaderId == RaftMessageTargets.None)
-                {
-                    return;
-                }
-
-                Message forwarded = message.Clone();
-                forwarded.To = LeaderId;
-                Send(forwarded);
-                return;
-            case RaftRole.PreCandidate:
-            case RaftRole.Candidate:
-                return;
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown Raft role {Role}.");
-        }
     }
 
     private void HandleLeaderReadIndex(Message message)
@@ -2107,31 +2056,6 @@ internal sealed class RaftCore
                 progress.RecentActive = false;
             }
         });
-    }
-
-    private void HandleForgetLeader()
-    {
-        switch (Role)
-        {
-            case RaftRole.Follower:
-                if (reads.Option ==
-                    ReadOnlyOption.LeaseBased)
-                {
-                    LogError(
-                        "Ignoring MsgForgetLeader in lease-based read mode.");
-                    return;
-                }
-
-                roleState.ForgetLeader();
-                return;
-            case RaftRole.PreCandidate:
-            case RaftRole.Candidate:
-            case RaftRole.Leader:
-                return;
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown Raft role {Role}.");
-        }
     }
 
     private bool ShouldIgnoreElectionRequestWithinLease(

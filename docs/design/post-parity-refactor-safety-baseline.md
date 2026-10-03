@@ -265,3 +265,19 @@ were killed and five redundant block mutants were ignored.
 
 Stage 7.2 preserves all three checksums, adds no measured allocation, and
 remains within every timing ceiling.
+
+### Stage 7.3: follower strategy routing
+
+Follower routing moved into `FollowerRoleStrategy`, and unreachable follower
+branches were removed from the legacy leader path. The strategy target retained
+100% mutation coverage: all 18 executable mutants were killed and five
+redundant block mutants were ignored.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4763.6041 | -4.69% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 283.31417 | -5.47% | 2464.00088 | 10936930208570869669 | Pass |
+| Safe read completion | 1703.7208 | +1.93% | 5432.0248 | 3884428198604542453 | Pass |
+
+Stage 7.3 preserves all three checksums, adds no measured allocation, and
+remains within every timing ceiling.

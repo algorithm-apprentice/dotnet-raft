@@ -44,7 +44,38 @@ internal sealed class FollowerRoleStrategy
         RaftCore core,
         Message message)
     {
-        core.HandleRoleMessageLegacy(message);
+        switch (message.Type)
+        {
+            case MessageType.MsgHup:
+                core.HandleHup();
+                return;
+            case MessageType.MsgProp:
+                core.HandleFollowerProposal(message);
+                return;
+            case MessageType.MsgForgetLeader:
+                core.HandleFollowerForgetLeader();
+                return;
+            case MessageType.MsgTransferLeader:
+                core.HandleFollowerTransferLeader(
+                    message);
+                return;
+            case MessageType.MsgTimeoutNow:
+                core.HandleFollowerTimeoutNow();
+                return;
+            case MessageType.MsgReadIndex:
+                core.HandleFollowerReadIndex(message);
+                return;
+            case MessageType.MsgReadIndexResp:
+                core.HandleFollowerReadIndexResponse(
+                    message);
+                return;
+            case MessageType.MsgApp:
+            case MessageType.MsgHeartbeat:
+            case MessageType.MsgSnap:
+                core.HandleFollowerLeaderMessage(
+                    message);
+                return;
+        }
     }
 }
 
