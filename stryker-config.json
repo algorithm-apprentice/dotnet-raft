@@ -12,6 +12,7 @@
       "**/Core/ReadIndexCoordinator.cs",
       "**/Core/RaftLog.cs",
       "**/Core/RaftOutput.cs",
+      "**/Core/ProposalAdmission.cs",
       "**/Core/RaftRoleState.cs",
       "**/Core/UnstableLog.cs",
       "**/Tracker/ProgressTracker.cs"

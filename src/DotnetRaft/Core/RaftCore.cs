@@ -20,6 +20,7 @@ internal sealed class RaftCore
         ByteString.CopyFromUtf8("CampaignTransfer");
     private readonly RaftClock clock;
     private readonly RaftOutput output = new();
+    private readonly ProposalAdmission proposals;
     private readonly ReadIndexCoordinator reads;
     private readonly RaftRoleState roleState = new();
     private readonly IRaftTraceSink? traceSink;
@@ -50,8 +51,8 @@ internal sealed class RaftCore
         MaxMessageSize = validated.MaxSizePerMessage;
         MaxCommittedSizePerReady =
             validated.MaxCommittedSizePerReady;
-        MaxUncommittedEntriesSize =
-            validated.MaxUncommittedEntriesSize;
+        proposals = new ProposalAdmission(
+            validated.MaxUncommittedEntriesSize);
         CheckQuorum = validated.CheckQuorum;
         PreVote = validated.PreVote;
         DisableProposalForwarding =
@@ -173,7 +174,8 @@ internal sealed class RaftCore
 
     internal ulong MaxCommittedSizePerReady { get; }
 
-    internal ulong MaxUncommittedEntriesSize { get; }
+    internal ulong MaxUncommittedEntriesSize =>
+        proposals.MaxUncommittedSize;
 
     internal bool CheckQuorum { get; }
 
@@ -191,9 +193,20 @@ internal sealed class RaftCore
         set => roleState.StartTransfer(value);
     }
 
-    internal ulong PendingConfigurationIndex { get; set; }
+    internal ulong PendingConfigurationIndex
+    {
+        get =>
+            proposals.PendingConfigurationIndex;
+        set =>
+            proposals.SetPendingConfigurationIndex(
+                value);
+    }
 
-    internal ulong UncommittedSize { get; set; }
+    internal ulong UncommittedSize
+    {
+        get => proposals.UncommittedSize;
+        set => proposals.SetUncommittedSize(value);
+    }
 
     internal bool Promotable =>
         Tracker.Contains(Id)
@@ -298,9 +311,14 @@ internal sealed class RaftCore
 
         localProgress.BecomeReplicate();
         localProgress.RecentActive = true;
-        PendingConfigurationIndex = lastIndex;
+        proposals.SetPendingConfigurationIndex(
+            lastIndex);
         Trace(RaftTraceEventType.BecameLeader);
-        if (!AppendLeaderEntries([new Entry()]))
+        ProposalAdmissionPlan plan =
+            AppendLeaderEntries(
+                [new Entry()],
+                proposals.PendingConfigurationIndex);
+        if (!plan.Accepted)
         {
             throw new RaftInvariantException(
                 "The leader no-op cannot be rejected by the uncommitted-size quota.");
@@ -651,9 +669,7 @@ internal sealed class RaftCore
 
     internal void ReduceUncommittedSize(ulong payloadSize)
     {
-        UncommittedSize = payloadSize >= UncommittedSize
-            ? 0
-            : UncommittedSize - payloadSize;
+        proposals.Release(payloadSize);
     }
 
     internal ConfState ApplyConfigurationChange(
@@ -1064,16 +1080,18 @@ internal sealed class RaftCore
                     ulong pendingConfigurationIndex) =
                     PrepareProposalEntries(
                         message.Entries);
-                if (!AppendLeaderEntries(
+                ProposalAdmissionPlan plan =
+                    AppendLeaderEntries(
                         entries,
-                        traceConfigurationProposals: true))
+                        pendingConfigurationIndex,
+                        traceConfigurationProposals: true);
+                if (!plan.Accepted)
                 {
                     throw new ProposalDroppedException(
                         "The proposal exceeds the uncommitted entry size limit.");
                 }
 
-                PendingConfigurationIndex =
-                    pendingConfigurationIndex;
+                proposals.PublishPending(plan);
                 BroadcastAppend();
                 return;
             case RaftRole.Follower:
@@ -1103,8 +1121,9 @@ internal sealed class RaftCore
         }
     }
 
-    private bool AppendLeaderEntries(
+    private ProposalAdmissionPlan AppendLeaderEntries(
         IEnumerable<Entry> entries,
+        ulong pendingConfigurationIndex,
         bool traceConfigurationProposals = false)
     {
         Entry[] appended = ProtocolCloning.CloneEntries(entries);
@@ -1129,38 +1148,13 @@ internal sealed class RaftCore
                 $"Appending {appended.Length} entries after index {lastIndex} would leave no representable successor.");
         }
 
-        ulong payloadSize = 0;
-        try
+        ProposalAdmissionPlan plan =
+            proposals.Prepare(
+                appended,
+                pendingConfigurationIndex);
+        if (!plan.Accepted)
         {
-            payloadSize = EntrySizing.PayloadSize(appended);
-        }
-        catch (OverflowException exception)
-        {
-            throw new RaftInvariantException(
-                $"Proposal payload size overflowed: {exception.Message}");
-        }
-
-        ulong nextUncommittedSize = UncommittedSize;
-        if (UncommittedSize > 0 && payloadSize > 0)
-        {
-            if (payloadSize > ulong.MaxValue - UncommittedSize)
-            {
-                return false;
-            }
-
-            nextUncommittedSize =
-                UncommittedSize + payloadSize;
-            if (nextUncommittedSize >
-                MaxUncommittedEntriesSize)
-            {
-                return false;
-            }
-        }
-        else
-        {
-            nextUncommittedSize = payloadSize == 0
-                ? UncommittedSize
-                : payloadSize;
+            return plan;
         }
 
         for (var offset = 0; offset < appended.Length; offset++)
@@ -1177,7 +1171,7 @@ internal sealed class RaftCore
         }
 
         ulong newLastIndex = Log.Append(appended);
-        UncommittedSize = nextUncommittedSize;
+        proposals.CommitQuota(plan);
         TraceEntriesAppended(appended);
         Send(new Message
         {
@@ -1185,7 +1179,7 @@ internal sealed class RaftCore
             Type = MessageType.MsgAppResp,
             Index = newLastIndex,
         });
-        return true;
+        return plan;
     }
 
     private (
@@ -1196,7 +1190,7 @@ internal sealed class RaftCore
     {
         Entry[] owned = ProtocolCloning.CloneEntries(entries);
         ulong candidatePending =
-            PendingConfigurationIndex;
+            proposals.PendingConfigurationIndex;
         ulong lastIndex = Log.LastIndex;
 
         for (var offset = 0; offset < owned.Length; offset++)
@@ -1218,33 +1212,26 @@ internal sealed class RaftCore
                 continue;
             }
 
-            bool alreadyPending =
-                candidatePending > Log.Applied;
             bool alreadyJoint =
                 Tracker.Config.Voters.Outgoing.Count > 0;
             bool wantsLeaveJoint =
                 change.Changes.Count == 0;
-            bool incompatible =
-                alreadyPending
-                || (alreadyJoint && !wantsLeaveJoint)
-                || (!alreadyJoint && wantsLeaveJoint);
-            if (incompatible
+            if (!ProposalAdmission.CanAcceptConfiguration(
+                    candidatePending,
+                    Log.Applied,
+                    alreadyJoint,
+                    wantsLeaveJoint)
                 && !DisableConfChangeValidation)
             {
                 owned[offset] = new Entry();
                 continue;
             }
 
-            try
-            {
-                candidatePending = checked(
-                    lastIndex + (ulong)offset + 1);
-            }
-            catch (OverflowException exception)
-            {
-                throw new RaftInvariantException(
-                    $"Configuration entry at offset {offset} has no representable log index: {exception.Message}");
-            }
+            candidatePending =
+                ProposalAdmission
+                    .PrepareConfigurationIndex(
+                    lastIndex,
+                    offset);
         }
 
         return (owned, candidatePending);
@@ -2213,8 +2200,8 @@ internal sealed class RaftCore
     private void MaybeAutoLeave()
     {
         if (!Tracker.Config.AutoLeave
-            || Log.Applied <
-                PendingConfigurationIndex
+            || !proposals.IsPendingApplied(
+                Log.Applied)
             || Role != RaftRole.Leader)
         {
             return;
@@ -2265,8 +2252,7 @@ internal sealed class RaftCore
                 next);
         });
 
-        PendingConfigurationIndex = 0;
-        UncommittedSize = 0;
+        proposals.Reset();
         reads.Reset();
     }
 
