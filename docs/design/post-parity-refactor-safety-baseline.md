@@ -235,3 +235,18 @@ the same zero result.
 
 Stage 6 preserves all three checksums, adds no measured allocation, and
 remains within every timing ceiling.
+
+### Stage 7.1: role strategy delegation shell
+
+The stateless role strategy resolver and four cached delegating strategies
+scored 100% mutation coverage: all five executable mutants were killed and
+five redundant block mutants were ignored.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4756.0833 | -4.84% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 285.28834 | -4.81% | 2464.00088 | 10936930208570869669 | Pass |
+| Safe read completion | 1744.1792 | +4.35% | 5432.0248 | 3884428198604542453 | Pass |
+
+Stage 7.1 preserves all three checksums, adds no measured allocation, and
+remains within every timing ceiling.

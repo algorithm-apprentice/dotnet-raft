@@ -891,6 +891,13 @@ internal sealed class RaftCore
 
     private void HandleRoleMessage(Message message)
     {
+        RaftRoleStrategies.Resolve(Role)
+            .Handle(this, message);
+    }
+
+    internal void HandleRoleMessageLegacy(
+        Message message)
+    {
         switch (message.Type)
         {
             case MessageType.MsgProp:

@@ -13,6 +13,7 @@
       "**/Core/RaftLog.cs",
       "**/Core/RaftOutput.cs",
       "**/Core/ProposalAdmission.cs",
+      "**/Core/RaftRoleStrategies.cs",
       "**/Core/RaftRoleState.cs",
       "**/Core/UnstableLog.cs",
       "**/Tracker/ProgressTracker.cs"
