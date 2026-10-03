@@ -18,7 +18,7 @@ public sealed class RaftCoreSafetyGapTests
             CreateConfig(electionTick: 5));
 
         Assert.InRange(
-            core.RandomizedElectionTimeout,
+            core.GetClockStateForTesting().RandomizedElectionTimeout,
             5,
             9);
     }
@@ -76,7 +76,7 @@ public sealed class RaftCoreSafetyGapTests
             });
         core.Step(request);
         core.TakeMessages();
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
 
         core.ApplyConfigurationChange(
             new ProtocolConfChange
@@ -145,9 +145,9 @@ public sealed class RaftCoreSafetyGapTests
         var logger = new RecordingLogger();
         RaftCore core = CreateLeader(logger: logger);
         core.Tracker.Config.AutoLeave = true;
-        core.PendingConfigurationIndex =
-            core.Log.Applied;
-        core.LeaderTransferee = 2;
+        core.SetPendingConfigurationIndexForTesting(
+            core.Log.Applied);
+        core.SetLeaderTransfereeForTesting(2);
 
         core.AppliedTo(core.Log.Applied, 0);
 

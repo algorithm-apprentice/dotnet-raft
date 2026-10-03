@@ -12,7 +12,7 @@ public sealed class ProposalAdmissionTests
     {
         var admission = new ProposalAdmission(
             maxUncommittedSize: 10);
-        admission.SetUncommittedSize(4);
+        admission.SetUncommittedSizeForTesting(4);
         admission.SetPendingConfigurationIndex(7);
         Entry[] entries =
         [
@@ -55,7 +55,7 @@ public sealed class ProposalAdmissionTests
     {
         var bounded = new ProposalAdmission(
             maxUncommittedSize: 5);
-        bounded.SetUncommittedSize(4);
+        bounded.SetUncommittedSizeForTesting(4);
         ProposalAdmissionPlan rejected =
             bounded.Prepare(
                 [EntryWithPayload(2)],
@@ -76,7 +76,7 @@ public sealed class ProposalAdmissionTests
 
         var overflow = new ProposalAdmission(
             maxUncommittedSize: ulong.MaxValue);
-        overflow.SetUncommittedSize(
+        overflow.SetUncommittedSizeForTesting(
             ulong.MaxValue);
         ProposalAdmissionPlan overflowed =
             overflow.Prepare(
@@ -86,7 +86,7 @@ public sealed class ProposalAdmissionTests
 
         var exact = new ProposalAdmission(
             maxUncommittedSize: ulong.MaxValue);
-        exact.SetUncommittedSize(
+        exact.SetUncommittedSizeForTesting(
             ulong.MaxValue - 1);
         ProposalAdmissionPlan exactMaximum =
             exact.Prepare(
@@ -153,7 +153,7 @@ public sealed class ProposalAdmissionTests
     {
         var admission = new ProposalAdmission(
             maxUncommittedSize: 10);
-        admission.SetUncommittedSize(7);
+        admission.SetUncommittedSizeForTesting(7);
         admission.SetPendingConfigurationIndex(9);
 
         admission.Release(3);

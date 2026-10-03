@@ -194,7 +194,7 @@ public sealed class RaftCoreMutationSafetyTests
     public void ExactUncommittedReductionClearsQuota()
     {
         RaftCore core = Create(voters: [1]).Core;
-        core.UncommittedSize = 7;
+        core.SetUncommittedSizeForTesting(7);
 
         core.ReduceUncommittedSize(7);
 
@@ -455,8 +455,8 @@ public sealed class RaftCoreMutationSafetyTests
             term: 1,
             commit: 3,
             applied: 2).Core;
-        core.UncommittedSize =
-            EntrySizing.PayloadSize([applied]);
+        core.SetUncommittedSizeForTesting(
+            EntrySizing.PayloadSize([applied]));
         var response = new Message
         {
             From = RaftLocalMessageTargets.ApplyThread,

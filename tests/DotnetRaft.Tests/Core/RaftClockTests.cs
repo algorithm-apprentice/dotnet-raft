@@ -62,8 +62,9 @@ public sealed class RaftClockTests
             heartbeatTick: 2,
             _ => 0);
         clock.Reset();
-        clock.ElectionElapsed = 2;
-        clock.HeartbeatElapsed = int.MaxValue;
+        clock.SetElapsedForTesting(
+            2,
+            int.MaxValue);
 
         RaftInvariantException exception =
             Assert.Throws<RaftInvariantException>(
@@ -86,7 +87,9 @@ public sealed class RaftClockTests
             heartbeatTick: 2,
             _ => 0);
         clock.Reset();
-        clock.ElectionElapsed = int.MaxValue;
+        clock.SetElapsedForTesting(
+            int.MaxValue,
+            heartbeatElapsed: 0);
 
         RaftInvariantException election =
             Assert.Throws<RaftInvariantException>(
@@ -113,8 +116,7 @@ public sealed class RaftClockTests
             heartbeatTick: 2,
             _ => offset);
         clock.Reset();
-        clock.ElectionElapsed = 3;
-        clock.HeartbeatElapsed = 1;
+        clock.SetElapsedForTesting(3, 1);
         offset = 5;
 
         RaftInvariantException exception =

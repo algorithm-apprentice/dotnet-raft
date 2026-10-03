@@ -1,6 +1,6 @@
 # Post-Parity RaftCore Refactor Plan
 
-- **Status:** Accepted
+- **Status:** Implemented
 - **Date:** 2026-10-03
 - **Scope:** behavior-preserving refactor after D26
 - **Related decision:** ADR 0003
@@ -12,6 +12,10 @@ refactoring techniques while preserving every D26 behavior, API, wire,
 package, diagnostic, and performance contract.
 
 This is not a partial-class/file-organization exercise.
+
+The plan was completed through sequential reviewed commits. Final validation
+and per-stage mutation/allocation results are recorded in
+`post-parity-refactor-safety-baseline.md`.
 
 ## Safety baseline
 

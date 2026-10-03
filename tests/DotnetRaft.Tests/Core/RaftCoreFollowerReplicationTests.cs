@@ -191,7 +191,7 @@ public sealed class RaftCoreFollowerReplicationTests
             entries: [EntryAt(1, 1)],
             term: 4).Core;
         core.BecomeCandidate();
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
 
         core.Step(Append(
             core,
@@ -204,7 +204,7 @@ public sealed class RaftCoreFollowerReplicationTests
         Assert.Equal(RaftRole.Follower, core.Role);
         Assert.Equal(5UL, core.Term);
         Assert.Equal(2UL, core.LeaderId);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Equal(2UL, core.Log.LastIndex);
         Message response = Assert.Single(
             core.TakeMessagesAfterAppend());
@@ -269,7 +269,7 @@ public sealed class RaftCoreFollowerReplicationTests
 
         Assert.Equal(original, heartbeat);
         Assert.Equal(3UL, core.Log.Committed);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Message response = Assert.Single(core.TakeMessages());
         Assert.Equal(MessageType.MsgHeartbeatResp, response.Type);
         Assert.Equal(1UL, response.From);
@@ -287,7 +287,7 @@ public sealed class RaftCoreFollowerReplicationTests
             entries: [EntryAt(1, 1)],
             term: 4).Core;
         core.BecomeCandidate();
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
 
         core.Step(new Message
         {
@@ -301,7 +301,7 @@ public sealed class RaftCoreFollowerReplicationTests
         Assert.Equal(RaftRole.Follower, core.Role);
         Assert.Equal(5UL, core.Term);
         Assert.Equal(2UL, core.LeaderId);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Equal(1UL, core.Log.Committed);
         Assert.Single(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());

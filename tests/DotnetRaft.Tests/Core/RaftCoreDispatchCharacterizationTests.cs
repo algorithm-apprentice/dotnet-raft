@@ -119,7 +119,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
             core.PendingConfigurationIndex,
             core.UncommittedSize,
             pendingReads =
-                core.PendingReadIndexMessageCount,
+                core.GatedReadCountForTesting,
             immediate = core.PeekMessages()
                 .Select(message =>
                     RaftDescriptions.DescribeMessage(

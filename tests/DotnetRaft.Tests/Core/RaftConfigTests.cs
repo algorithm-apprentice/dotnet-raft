@@ -88,7 +88,10 @@ public sealed class RaftConfigTests
             },
             maximum => maximum - 1);
 
-        Assert.Equal(int.MaxValue, valid.RandomizedElectionTimeout);
+        Assert.Equal(
+            int.MaxValue,
+            valid.GetClockStateForTesting()
+                .RandomizedElectionTimeout);
 
         var invalidStorage = new CoreTestStorage();
         var invalid = new RaftConfig
@@ -203,7 +206,7 @@ public sealed class RaftConfigTests
         Assert.Equal(400UL, core.Tracker.MaxInflightBytes);
         Assert.True(core.CheckQuorum);
         Assert.True(core.PreVote);
-        Assert.Equal(ReadOnlyOption.LeaseBased, core.ReadOnly.Option);
+        Assert.Equal(ReadOnlyOption.LeaseBased, core.ReadOnlyOption);
         Assert.True(core.DisableProposalForwarding);
         Assert.True(core.DisableConfChangeValidation);
         Assert.True(core.StepDownOnRemoval);

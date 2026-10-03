@@ -26,14 +26,18 @@ public sealed class InteractionEnvironmentTests
             Assert.Single(environment.Nodes);
         Assert.Equal(
             node.Config.ElectionTick,
-            node.RawNode.Core.RandomizedElectionTimeout);
+            node.RawNode.Core
+                .GetClockStateForTesting()
+                .RandomizedElectionTimeout);
 
         node.RawNode
             .SetRandomizedElectionTimeoutForTesting(7);
 
         Assert.Equal(
             7,
-            node.RawNode.Core.RandomizedElectionTimeout);
+            node.RawNode.Core
+                .GetClockStateForTesting()
+                .RandomizedElectionTimeout);
     }
 
     [Fact]

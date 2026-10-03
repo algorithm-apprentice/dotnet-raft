@@ -301,3 +301,46 @@ absolute ceilings.
 
 Stage 7.4 preserves all three checksums, adds no measured allocation, and
 remains within every timing ceiling.
+
+### Stage 8: migration-shim cleanup
+
+Writable forwarding properties, the `RaftCore.IsLearner` alias, the raw
+`ReadOnlyTracker` alias, and the legacy role handler were removed. Integrated
+tests now use explicit `ForTesting` hooks; component tests mutate component
+fixtures directly. The final suite contains 933 tests.
+
+The final complete Stryker configuration scored 87.88%: 1277 mutants were
+killed, 14 timed out, 120 survived, 58 had no coverage, 115 were syntactically
+invalid, and 444 redundant mutants were ignored. Extracted clocks, output,
+role state, role strategies, and read coordination scored 100%;
+`ProgressTracker` scored 97.14%; the remaining survivors are the documented
+defensive/equivalent cases in `RaftCore`, `RaftLog`, `UnstableLog`, and
+`ProposalAdmission`.
+
+Final timings were measured in an interleaved same-host comparison with the
+Stage 7.4 commit because the host continued to show bimodal short-loop timing.
+The current medians also satisfy the original absolute ceilings.
+
+| Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
+|---|---:|---:|---:|---:|---:|---|
+| Sync proposal cycle | 4557.475 | -8.81% | 6050.2424 | 9240325797370691861 | Pass |
+| Follower heartbeat dispatch | 299.74583 | +0.01% | 2464.00088 | 10936930208570869669 | Pass |
+| Safe read completion | 1631.4667 | -2.40% | 5432.0248 | 3884428198604542453 | Pass |
+
+Stage 8 preserves all three checksums, adds no measured allocation, and
+completes the refactor without a migration shim or duplicated mutable owner.
+
+Final Release coverage:
+
+| Scope | Line | Branch |
+|---|---:|---:|
+| All instrumented code, including generated protobuf | 87.67% | 77.55% |
+| `RaftCore` | 97.90% | 96.72% |
+| `RaftClock` | 100.00% | 100.00% |
+| `RaftOutput` | 100.00% | 100.00% |
+| `RaftRoleState` | 100.00% | 100.00% |
+| `ReadIndexCoordinator` | 100.00% | 100.00% |
+| `ProposalAdmission` | 95.71% | 100.00% |
+| `ProgressTracker` | 100.00% | 100.00% |
+| `RaftLog` | 89.91% | 91.54% |
+| `UnstableLog` | 100.00% | 99.07% |

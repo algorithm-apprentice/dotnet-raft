@@ -221,7 +221,7 @@ public sealed class RaftCoreReplicationInteractionTests
 
         Assert.Equal(RaftRole.Leader, leader.Core.Role);
         Assert.Equal(1, network.SnapshotMessageCount);
-        Assert.True(learner.Core.IsLearner);
+        Assert.True(learner.Core.Tracker.IsLearner(learner.Core.Id));
         Assert.Equal(5UL, learner.Storage.LogStorage
             .GetSnapshot().Metadata.Index);
         Assert.False(learner.Core.Log.HasUnstableSnapshot);

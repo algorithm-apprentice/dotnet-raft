@@ -25,10 +25,10 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
             checkQuorum: true,
             preVote: true).Core;
         core.BecomeFollower(5, leaderId: 1);
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
         HardState hardState = core.HardState;
         RaftRole role = core.Role;
-        int timeout = core.RandomizedElectionTimeout;
+        int timeout = core.GetClockStateForTesting().RandomizedElectionTimeout;
         Progress progress = core.Tracker.Progress[2];
 
         core.Step(new Message
@@ -39,8 +39,8 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
         Assert.Equal(0UL, core.LeaderId);
         Assert.Equal(hardState, core.HardState);
         Assert.Equal(role, core.Role);
-        Assert.Equal(4, core.ElectionElapsed);
-        Assert.Equal(timeout, core.RandomizedElectionTimeout);
+        Assert.Equal(4, core.GetClockStateForTesting().ElectionElapsed);
+        Assert.Equal(timeout, core.GetClockStateForTesting().RandomizedElectionTimeout);
         Assert.Same(progress, core.Tracker.Progress[2]);
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
@@ -184,7 +184,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
             message =>
                 message.Type ==
                     MessageType.MsgHeartbeat);
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]
@@ -239,7 +239,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
         Assert.All(
             states,
             state => Assert.Equal(1UL, state.Index));
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
         Assert.DoesNotContain(
             core.TakeMessages(),
             message =>
@@ -325,7 +325,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
         Assert.Equal(
             "outgoing",
             state.RequestContext.ToStringUtf8());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
         Assert.DoesNotContain(
             core.TakeMessages(),
             message =>

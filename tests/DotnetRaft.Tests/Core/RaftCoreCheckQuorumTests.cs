@@ -164,7 +164,7 @@ public sealed class RaftCoreCheckQuorumTests
     private static void TickElectionWindow(
         RaftCore core)
     {
-        for (var tick = 0; tick < core.ElectionTick; tick++)
+        for (var tick = 0; tick < core.GetClockStateForTesting().ElectionTick; tick++)
         {
             core.TickLeader();
         }

@@ -49,7 +49,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             ByteString.CopyFrom([1])));
 
         Assert.Empty(core.TakeReadStates());
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Theory]
@@ -80,7 +80,7 @@ public sealed class RaftCoreReadIndexQuorumTests
                 context)));
 
         Assert.Empty(core.TakeReadStates());
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]
@@ -99,7 +99,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             context));
 
         Assert.Empty(core.TakeReadStates());
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
 
         core.Step(HeartbeatResponse(
             core,
@@ -107,7 +107,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             context));
 
         Assert.Single(core.TakeReadStates());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]
@@ -156,7 +156,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             "local-joint",
             state.RequestContext.ToStringUtf8());
         Assert.Empty(core.TakeMessages());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Theory]
@@ -197,7 +197,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         RaftCore core = NewLeader(voters: [1, 2]);
         core.Step(ReadRequest("reconfigure"));
         core.TakeMessages();
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
 
         core.ApplyConfigurationChange(V2(Remove(2)));
 
@@ -207,7 +207,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         Assert.Equal(
             "reconfigure",
             state.RequestContext.ToStringUtf8());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]
@@ -237,11 +237,11 @@ public sealed class RaftCoreReadIndexQuorumTests
         RaftCore core = NewLeader(voters: [1, 2, 3]);
         core.Step(ReadRequest("active"));
         core.TakeMessages();
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
 
         core.BecomeFollower(core.Term, leaderId: 2);
 
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
         Assert.Empty(core.TakeReadStates());
     }
 
@@ -313,7 +313,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             term: oldTerm));
 
         Assert.Empty(core.TakeReadStates());
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
 
         core.Step(HeartbeatResponse(
             core,
@@ -354,7 +354,7 @@ public sealed class RaftCoreReadIndexQuorumTests
 
         Assert.Empty(core.TakeReadStates());
         Assert.Empty(core.TakeMessages());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]

@@ -25,7 +25,7 @@ public sealed class RaftCoreVoteTests
             core.TakeMessagesAfterAppend();
         }
 
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
         ulong lastIndex = core.Log.LastIndex;
         ulong committed = core.Log.Committed;
         Message message = LeaderMessage(
@@ -40,7 +40,7 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(RaftRole.Follower, core.Role);
         Assert.Equal(original.Term, core.Term);
         Assert.Equal(2UL, core.LeaderId);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Equal(lastIndex, core.Log.LastIndex);
         Assert.Equal(committed, core.Log.Committed);
         AssertLeaderMessageResponse(core, type, lastIndex);
@@ -90,7 +90,7 @@ public sealed class RaftCoreVoteTests
             entries: [EntryAt(1, 1)],
             term: 4).Core;
         core.BecomeCandidate();
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
         ulong lastIndex = core.Log.LastIndex;
         ulong committed = core.Log.Committed;
         Message message = LeaderMessage(
@@ -103,7 +103,7 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(RaftRole.Follower, core.Role);
         Assert.Equal(5UL, core.Term);
         Assert.Equal(2UL, core.LeaderId);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Equal(lastIndex, core.Log.LastIndex);
         Assert.Equal(committed, core.Log.Committed);
         AssertLeaderMessageResponse(core, type, lastIndex);
@@ -121,7 +121,7 @@ public sealed class RaftCoreVoteTests
             entries: [EntryAt(1, 1)],
             term: 5).Core;
         core.BecomeFollower(5, 3);
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
         ulong lastIndex = core.Log.LastIndex;
         ulong committed = core.Log.Committed;
 
@@ -130,7 +130,7 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(RaftRole.Follower, core.Role);
         Assert.Equal(5UL, core.Term);
         Assert.Equal(2UL, core.LeaderId);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Equal(lastIndex, core.Log.LastIndex);
         Assert.Equal(committed, core.Log.Committed);
         AssertLeaderMessageResponse(core, type, lastIndex);
@@ -150,7 +150,7 @@ public sealed class RaftCoreVoteTests
         core.BecomeCandidate();
         core.BecomeLeader();
         core.TakeMessagesAfterAppend();
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
         ulong lastIndex = core.Log.LastIndex;
         ulong committed = core.Log.Committed;
 
@@ -158,7 +158,7 @@ public sealed class RaftCoreVoteTests
 
         Assert.Equal(RaftRole.Leader, core.Role);
         Assert.Equal(core.Id, core.LeaderId);
-        Assert.Equal(4, core.ElectionElapsed);
+        Assert.Equal(4, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Equal(lastIndex, core.Log.LastIndex);
         Assert.Equal(committed, core.Log.Committed);
         Assert.Empty(core.TakeMessages());
@@ -180,7 +180,7 @@ public sealed class RaftCoreVoteTests
         core.BecomeCandidate();
         core.BecomeLeader();
         core.TakeMessagesAfterAppend();
-        core.ElectionElapsed = 3;
+        core.SetClockElapsedForTesting(3);
         SoftState beforeSoftState = core.SoftState;
         HardState beforeHardState = core.HardState;
         ulong beforeLastIndex = core.Log.LastIndex;
@@ -200,7 +200,7 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(beforeSoftState, core.SoftState);
         Assert.Equal(beforeHardState, core.HardState);
         Assert.Equal(beforeLastIndex, core.Log.LastIndex);
-        Assert.Equal(3, core.ElectionElapsed);
+        Assert.Equal(3, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
     }
@@ -334,7 +334,7 @@ public sealed class RaftCoreVoteTests
             term: 5,
             vote: existingVote).Core;
         core.BecomeFollower(5, leaderId);
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
 
         core.Step(new Message
         {
@@ -352,7 +352,7 @@ public sealed class RaftCoreVoteTests
         Assert.Equal(
             reject ? existingVote : candidateId,
             core.Vote);
-        Assert.Equal(reject ? 4 : 0, core.ElectionElapsed);
+        Assert.Equal(reject ? 4 : 0, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Empty(core.TakeMessages());
     }
 
@@ -412,7 +412,7 @@ public sealed class RaftCoreVoteTests
             LogTerm = 1,
         });
 
-        Assert.True(core.IsLearner);
+        Assert.True(core.Tracker.IsLearner(core.Id));
         Assert.Equal(2UL, core.Vote);
         Message response = Assert.Single(
             core.TakeMessagesAfterAppend());

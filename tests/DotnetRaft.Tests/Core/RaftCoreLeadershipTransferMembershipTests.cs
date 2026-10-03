@@ -104,7 +104,7 @@ public sealed class RaftCoreLeadershipTransferMembershipTests
 
         core.Step(Transfer(2));
         Assert.Equal(2UL, core.LeaderTransferee);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
     }
 
     [Fact]
@@ -133,7 +133,7 @@ public sealed class RaftCoreLeadershipTransferMembershipTests
         enter.Changes.Add(AddLearner(5));
         core.ApplyConfigurationChange(enter);
         core.TakeMessages();
-        core.PendingConfigurationIndex = 2;
+        core.SetPendingConfigurationIndexForTesting(2);
         core.Step(Transfer(3));
         core.TakeMessages();
 
@@ -143,7 +143,7 @@ public sealed class RaftCoreLeadershipTransferMembershipTests
         Assert.Equal(2UL, core.PendingConfigurationIndex);
 
         for (var tick = 0;
-             tick < core.ElectionTick;
+             tick < core.GetClockStateForTesting().ElectionTick;
              tick++)
         {
             core.TickLeader();

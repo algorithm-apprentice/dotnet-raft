@@ -111,7 +111,7 @@ public sealed class RaftCoreUncommittedQuotaTests
     {
         RaftCore core = NewLeader(
             maxUncommittedSize: ulong.MaxValue);
-        core.UncommittedSize = ulong.MaxValue;
+        core.SetUncommittedSizeForTesting(ulong.MaxValue);
         ulong lastIndex = core.Log.LastIndex;
 
         Assert.Throws<ProposalDroppedException>(

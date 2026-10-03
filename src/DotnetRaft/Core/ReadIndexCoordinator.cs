@@ -16,17 +16,19 @@ internal sealed class ReadIndexCoordinator
 {
     private readonly Queue<Message> gatedRequests = [];
     private readonly List<ReadState> readStates = [];
+    private ReadOnlyTracker readOnly;
 
     internal ReadIndexCoordinator(
         ReadOnlyOption option)
     {
-        ReadOnly = new ReadOnlyTracker(option);
+        readOnly = new ReadOnlyTracker(option);
     }
 
-    internal ReadOnlyTracker ReadOnly { get; private set; }
-
     internal ReadOnlyOption Option =>
-        ReadOnly.Option;
+        readOnly.Option;
+
+    internal int PendingCount =>
+        readOnly.PendingCount;
 
     internal int GatedCount =>
         gatedRequests.Count;
@@ -64,19 +66,19 @@ internal sealed class ReadIndexCoordinator
         ulong localId,
         JointConfig voters)
     {
-        ReadOnly.AddRequest(
+        readOnly.AddRequest(
             commitIndex,
             message);
         ByteString context =
-            ReadOnly.GetHeartbeatContext();
-        ReadOnly.ReceiveAcknowledgement(
+            readOnly.GetHeartbeatContext();
+        readOnly.ReceiveAcknowledgement(
             localId,
             context);
         ReadIndexRequest[] completed =
-            ReadOnly.Advance(voters);
+            readOnly.Advance(voters);
         return new ReadIndexAdvanceResult(
             completed,
-            ReadOnly.PendingCount > 0);
+            readOnly.PendingCount > 0);
     }
 
     internal ReadIndexRequest[] Acknowledge(
@@ -84,20 +86,20 @@ internal sealed class ReadIndexCoordinator
         ByteString context,
         JointConfig voters)
     {
-        ReadOnly.ReceiveAcknowledgement(
+        readOnly.ReceiveAcknowledgement(
             from,
             context);
-        return ReadOnly.Advance(voters);
+        return readOnly.Advance(voters);
     }
 
     internal ReadIndexAdvanceResult Reevaluate(
         JointConfig voters)
     {
         ReadIndexRequest[] completed =
-            ReadOnly.Advance(voters);
+            readOnly.Advance(voters);
         return new ReadIndexAdvanceResult(
             completed,
-            ReadOnly.PendingCount > 0);
+            readOnly.PendingCount > 0);
     }
 
     internal Message? Complete(
@@ -144,13 +146,22 @@ internal sealed class ReadIndexCoordinator
 
     internal ByteString GetHeartbeatContext()
     {
-        return ReadOnly.GetHeartbeatContext();
+        return readOnly.GetHeartbeatContext();
     }
 
     internal void Reset()
     {
-        ReadOnly =
-            new ReadOnlyTracker(ReadOnly.Option);
+        readOnly =
+            new ReadOnlyTracker(readOnly.Option);
+    }
+
+    internal void AddRequestForTesting(
+        ulong commitIndex,
+        Message request)
+    {
+        readOnly.AddRequest(
+            commitIndex,
+            request);
     }
 
     internal ReadState[] TakeReadStates()

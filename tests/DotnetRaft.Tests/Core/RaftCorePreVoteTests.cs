@@ -138,7 +138,7 @@ public sealed class RaftCorePreVoteTests
         EnterRole(core, role);
         core.TakeMessages();
         core.TakeMessagesAfterAppend();
-        core.ElectionElapsed = 3;
+        core.SetClockElapsedForTesting(3);
         SoftState softState = core.SoftState;
         HardState hardState = core.HardState;
 
@@ -154,7 +154,7 @@ public sealed class RaftCorePreVoteTests
 
         Assert.Equal(softState, core.SoftState);
         Assert.Equal(hardState, core.HardState);
-        Assert.Equal(3, core.ElectionElapsed);
+        Assert.Equal(3, core.GetClockStateForTesting().ElectionElapsed);
         Message response = Assert.Single(
             core.TakeMessagesAfterAppend());
         Assert.Equal(MessageType.MsgPreVoteResp, response.Type);

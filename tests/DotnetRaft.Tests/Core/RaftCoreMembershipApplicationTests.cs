@@ -65,12 +65,12 @@ public sealed class RaftCoreMembershipApplicationTests
             V2(AddLearner(1)));
         Assert.Equal([2UL, 3UL], demoted.Voters);
         Assert.Equal([1UL], demoted.Learners);
-        Assert.True(core.IsLearner);
+        Assert.True(core.Tracker.IsLearner(core.Id));
         Assert.True(core.Tracker.Progress[1].IsLearner);
 
         core.ApplyConfigurationChange(V2(AddVoter(1)));
 
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Tracker.Progress[1].IsLearner);
     }
 
@@ -93,7 +93,7 @@ public sealed class RaftCoreMembershipApplicationTests
         Assert.Equal([1UL, 2UL], joint.VotersOutgoing);
         Assert.Equal([1UL], joint.LearnersNext);
         Assert.Empty(joint.Learners);
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Tracker.Progress[1].IsLearner);
 
         ConfState final = core.ApplyConfigurationChange(
@@ -103,7 +103,7 @@ public sealed class RaftCoreMembershipApplicationTests
         Assert.Empty(final.VotersOutgoing);
         Assert.Equal([1UL], final.Learners);
         Assert.Empty(final.LearnersNext);
-        Assert.True(core.IsLearner);
+        Assert.True(core.Tracker.IsLearner(core.Id));
         Assert.True(core.Tracker.Progress[1].IsLearner);
     }
 
@@ -125,7 +125,7 @@ public sealed class RaftCoreMembershipApplicationTests
         Assert.Same(local, core.Tracker.Progress[1]);
         Assert.Equal(softState, core.SoftState);
         Assert.Equal(committed, core.Log.Committed);
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
     }
@@ -208,7 +208,7 @@ public sealed class RaftCoreMembershipApplicationTests
         });
         core.Step(request);
         core.TakeMessages();
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
 
         core.ApplyConfigurationChange(V2(Remove(1)));
 
@@ -232,7 +232,7 @@ public sealed class RaftCoreMembershipApplicationTests
 
         Assert.Equal(RaftRole.Leader, core.Role);
         Assert.Equal(term, core.Term);
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Promotable);
         Assert.False(core.Tracker.Progress.ContainsKey(1));
         Assert.Throws<ProposalDroppedException>(
@@ -251,7 +251,7 @@ public sealed class RaftCoreMembershipApplicationTests
         core.Step(Proposal("accepted"));
 
         Assert.Equal(RaftRole.Leader, core.Role);
-        Assert.True(core.IsLearner);
+        Assert.True(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Promotable);
         Assert.True(core.Tracker.Progress.ContainsKey(1));
         Assert.Equal(lastIndex + 1, core.Log.LastIndex);
@@ -279,7 +279,7 @@ public sealed class RaftCoreMembershipApplicationTests
         Assert.Equal(0UL, core.LeaderId);
         Assert.Equal(
             demote,
-            core.IsLearner);
+            core.Tracker.IsLearner(core.Id));
     }
 
     [Fact]
@@ -297,13 +297,13 @@ public sealed class RaftCoreMembershipApplicationTests
         core.ApplyConfigurationChange(enter);
 
         Assert.Equal(RaftRole.Leader, core.Role);
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.Contains(1UL, core.Tracker.Config.LearnersNext);
 
         core.ApplyConfigurationChange(new ConfChangeV2());
 
         Assert.Equal(RaftRole.Follower, core.Role);
-        Assert.True(core.IsLearner);
+        Assert.True(core.Tracker.IsLearner(core.Id));
         Assert.Empty(core.Tracker.Config.LearnersNext);
     }
 
@@ -311,7 +311,7 @@ public sealed class RaftCoreMembershipApplicationTests
     public void TransferTargetClearsOnlyAfterJointDemotionCompletes()
     {
         RaftCore core = NewLeader(voters: [1, 2, 3]);
-        core.LeaderTransferee = 3;
+        core.SetLeaderTransfereeForTesting(3);
         var enter = new ConfChangeV2();
         enter.Changes.Add(Remove(3));
         enter.Changes.Add(AddLearner(3));

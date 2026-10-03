@@ -86,6 +86,25 @@ Apply the refactor incrementally with these techniques:
 - The refactor requires stronger characterization and mutation tests before
   implementation.
 
+## Outcome
+
+Implemented in sequential reviewed stages.
+
+- `RaftClock` owns every logical clock value and timeout randomization.
+- `RaftOutput` owns both message queues and outbound normalization.
+- `RaftRoleState` owns term, vote, leader, role, and transfer state.
+- `ReadIndexCoordinator` owns safe-read tracking, gated reads, and completed
+  read states.
+- `ProposalAdmission` owns uncommitted quota and pending configuration state.
+- `ProgressTracker.Install` is the only replacement boundary for tracker
+  configuration and progress maps.
+- Four cached stateless role strategies own role-conditioned message routing.
+- `RaftCore` remains the sequencing aggregate for cross-component commit
+  points, log mutation, reset orchestration, tracing, and diagnostics.
+
+No mutable value is duplicated, no strategy instance is stored separately from
+the authoritative role, and no migration forwarding setter remains.
+
 ## Rejected alternatives
 
 - **Partial-class-only split:** cosmetic; does not change responsibilities.

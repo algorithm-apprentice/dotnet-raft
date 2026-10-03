@@ -84,7 +84,9 @@ public sealed class RaftCoreLeadershipTransferInteractionTests
 
         Assert.Equal(3UL, network[1].LeaderTransferee);
         for (var tick = 0;
-             tick < network[1].ElectionTick - 1;
+             tick < network[1]
+                 .GetClockStateForTesting()
+                 .ElectionTick - 1;
              tick++)
         {
             network.TickLeader(1);
@@ -128,7 +130,9 @@ public sealed class RaftCoreLeadershipTransferInteractionTests
         Assert.Single(network.HeldMessages);
         Assert.Equal(2UL, network[1].LeaderTransferee);
         for (var tick = 0;
-             tick < network[1].ElectionTick;
+             tick < network[1]
+                 .GetClockStateForTesting()
+                 .ElectionTick;
              tick++)
         {
             network.TickLeader(1);

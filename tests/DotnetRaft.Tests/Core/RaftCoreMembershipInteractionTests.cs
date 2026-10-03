@@ -125,7 +125,7 @@ public sealed class RaftCoreMembershipInteractionTests
         Assert.Equal(
             exit.Index,
             leader.Core.PendingConfigurationIndex);
-        Assert.True(learner.Core.IsLearner);
+        Assert.True(learner.Core.Tracker.IsLearner(learner.Core.Id));
     }
 
     [Fact]

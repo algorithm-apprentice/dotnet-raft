@@ -40,22 +40,22 @@ public sealed class RaftCoreStateTests
             lastIndex: 2);
         core.BecomeFollower(5, 2);
         core.Tracker.RecordVote(2, true);
-        core.ReadOnly.AddRequest(2, ReadRequest("pending"));
-        core.ElectionElapsed = 2;
+        core.AddReadOnlyRequestForTesting(2, ReadRequest("pending"));
+        core.SetClockElapsedForTesting(2);
         Progress beforeProgress = core.Tracker.Progress[1];
         SoftState beforeSoftState = core.SoftState;
         HardState beforeHardState = core.HardState;
-        int beforeTimeout = core.RandomizedElectionTimeout;
+        int beforeTimeout = core.GetClockStateForTesting().RandomizedElectionTimeout;
 
         Assert.Throws<RaftInvariantException>(
             () => core.BecomeFollower(4, 3));
 
         Assert.Equal(beforeSoftState, core.SoftState);
         Assert.Equal(beforeHardState, core.HardState);
-        Assert.Equal(2, core.ElectionElapsed);
-        Assert.Equal(beforeTimeout, core.RandomizedElectionTimeout);
+        Assert.Equal(2, core.GetClockStateForTesting().ElectionElapsed);
+        Assert.Equal(beforeTimeout, core.GetClockStateForTesting().RandomizedElectionTimeout);
         Assert.Single(core.Tracker.Votes);
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
         Assert.Same(beforeProgress, core.Tracker.Progress[1]);
     }
 
@@ -69,8 +69,8 @@ public sealed class RaftCoreStateTests
             lastIndex: 2);
         core.BecomeFollower(5, 2);
         core.Tracker.RecordVote(2, true);
-        core.ReadOnly.AddRequest(2, ReadRequest("pending"));
-        core.ElectionElapsed = 3;
+        core.AddReadOnlyRequestForTesting(2, ReadRequest("pending"));
+        core.SetClockElapsedForTesting(3);
 
         core.BecomeCandidate();
 
@@ -78,10 +78,10 @@ public sealed class RaftCoreStateTests
         Assert.Equal(1UL, core.Vote);
         Assert.Equal(0UL, core.LeaderId);
         Assert.Equal(RaftRole.Candidate, core.Role);
-        Assert.Equal(0, core.ElectionElapsed);
-        Assert.Equal(0, core.HeartbeatElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().HeartbeatElapsed);
         Assert.Empty(core.Tracker.Votes);
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
         Assert.Equal(2UL, core.Tracker.Progress[1].Match);
         Assert.Equal(3UL, core.Tracker.Progress[1].Next);
     }
@@ -132,13 +132,12 @@ public sealed class RaftCoreStateTests
             lastIndex: 2);
         core.BecomeFollower(5, 2);
         core.Tracker.RecordVote(2, true);
-        core.ReadOnly.AddRequest(2, ReadRequest("pending"));
-        core.ElectionElapsed = 2;
-        core.HeartbeatElapsed = 1;
-        core.PendingConfigurationIndex = 7;
-        core.UncommittedSize = 99;
-        core.LeaderTransferee = 2;
-        int timeout = core.RandomizedElectionTimeout;
+        core.AddReadOnlyRequestForTesting(2, ReadRequest("pending"));
+        core.SetClockElapsedForTesting(2, 1);
+        core.SetPendingConfigurationIndexForTesting(7);
+        core.SetUncommittedSizeForTesting(99);
+        core.SetLeaderTransfereeForTesting(2);
+        int timeout = core.GetClockStateForTesting().RandomizedElectionTimeout;
         Progress progress = core.Tracker.Progress[2];
         progress.MaybeUpdate(1);
         progress.BecomeReplicate();
@@ -150,13 +149,13 @@ public sealed class RaftCoreStateTests
         Assert.Equal(2UL, core.Vote);
         Assert.Equal(0UL, core.LeaderId);
         Assert.Empty(core.Tracker.Votes);
-        Assert.Equal(2, core.ElectionElapsed);
-        Assert.Equal(1, core.HeartbeatElapsed);
-        Assert.Equal(timeout, core.RandomizedElectionTimeout);
+        Assert.Equal(2, core.GetClockStateForTesting().ElectionElapsed);
+        Assert.Equal(1, core.GetClockStateForTesting().HeartbeatElapsed);
+        Assert.Equal(timeout, core.GetClockStateForTesting().RandomizedElectionTimeout);
         Assert.Equal(7UL, core.PendingConfigurationIndex);
         Assert.Equal(99UL, core.UncommittedSize);
         Assert.Equal(2UL, core.LeaderTransferee);
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
         Assert.Same(progress, core.Tracker.Progress[2]);
         Assert.Equal(ProgressState.Replicate, progress.State);
         Assert.Equal(1UL, progress.Match);
@@ -172,12 +171,11 @@ public sealed class RaftCoreStateTests
             vote: 2,
             lastIndex: 3);
         core.Tracker.RecordVote(2, true);
-        core.ReadOnly.AddRequest(3, ReadRequest("pending"));
-        core.PendingConfigurationIndex = 3;
-        core.UncommittedSize = 100;
-        core.LeaderTransferee = 2;
-        core.ElectionElapsed = 3;
-        core.HeartbeatElapsed = 2;
+        core.AddReadOnlyRequestForTesting(3, ReadRequest("pending"));
+        core.SetPendingConfigurationIndexForTesting(3);
+        core.SetUncommittedSizeForTesting(100);
+        core.SetLeaderTransfereeForTesting(2);
+        core.SetClockElapsedForTesting(3, 2);
 
         Progress remote = core.Tracker.Progress[2];
         remote.MaybeUpdate(2);
@@ -193,12 +191,12 @@ public sealed class RaftCoreStateTests
         core.BecomeFollower(6, 0);
 
         Assert.Empty(core.Tracker.Votes);
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
         Assert.Equal(0UL, core.PendingConfigurationIndex);
         Assert.Equal(0UL, core.UncommittedSize);
         Assert.Equal(0UL, core.LeaderTransferee);
-        Assert.Equal(0, core.ElectionElapsed);
-        Assert.Equal(0, core.HeartbeatElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().HeartbeatElapsed);
 
         AssertResetProgress(core.Tracker.Progress[1], 3, 4, false);
         AssertResetProgress(remote, 0, 4, false);
@@ -267,8 +265,14 @@ public sealed class RaftCoreStateTests
             electionTick: 5,
             randomOffset: maximum => maximum - 1);
 
-        Assert.Equal(5, low.RandomizedElectionTimeout);
-        Assert.Equal(9, high.RandomizedElectionTimeout);
+        Assert.Equal(
+            5,
+            low.GetClockStateForTesting()
+                .RandomizedElectionTimeout);
+        Assert.Equal(
+            9,
+            high.GetClockStateForTesting()
+                .RandomizedElectionTimeout);
     }
 
     [Fact]
@@ -343,7 +347,10 @@ public sealed class RaftCoreStateTests
         Assert.False(voter.TickElectionClock());
         Assert.False(voter.TickElectionClock());
         Assert.True(voter.TickElectionClock());
-        Assert.Equal(0, voter.ElectionElapsed);
+        Assert.Equal(
+            0,
+            voter.GetClockStateForTesting()
+                .ElectionElapsed);
 
         RaftCore learner = NewCore(
             voters: [2],
@@ -354,7 +361,10 @@ public sealed class RaftCoreStateTests
         Assert.False(learner.TickElectionClock());
         Assert.False(learner.TickElectionClock());
         Assert.False(learner.TickElectionClock());
-        Assert.Equal(3, learner.ElectionElapsed);
+        Assert.Equal(
+            3,
+            learner.GetClockStateForTesting()
+                .ElectionElapsed);
     }
 
     [Fact]
@@ -362,13 +372,13 @@ public sealed class RaftCoreStateTests
     {
         RaftCore core = NewCore(voters: [1]);
         Progress local = core.Tracker.Progress[1];
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
 
         local.IsLearner = true;
-        Assert.True(core.IsLearner);
+        Assert.True(core.Tracker.IsLearner(core.Id));
 
         local.IsLearner = false;
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
     }
 
     [Fact]
@@ -387,8 +397,8 @@ public sealed class RaftCoreStateTests
         Assert.Equal(
             new LeaderClockTick(false, true),
             core.TickLeaderClocks());
-        Assert.Equal(2, core.ElectionElapsed);
-        Assert.Equal(0, core.HeartbeatElapsed);
+        Assert.Equal(2, core.GetClockStateForTesting().ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().HeartbeatElapsed);
 
         Assert.Equal(
             new LeaderClockTick(false, false),
@@ -396,8 +406,8 @@ public sealed class RaftCoreStateTests
         Assert.Equal(
             new LeaderClockTick(true, true),
             core.TickLeaderClocks());
-        Assert.Equal(0, core.ElectionElapsed);
-        Assert.Equal(0, core.HeartbeatElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().HeartbeatElapsed);
     }
 
     [Fact]
@@ -407,10 +417,11 @@ public sealed class RaftCoreStateTests
         Assert.Throws<RaftInvariantException>(
             () => follower.TickLeaderClocks());
 
-        follower.ElectionElapsed = int.MaxValue;
+        follower.SetClockElapsedForTesting(
+            int.MaxValue);
         Assert.Throws<RaftInvariantException>(
             () => follower.TickElectionClock());
-        Assert.Equal(int.MaxValue, follower.ElectionElapsed);
+        Assert.Equal(int.MaxValue, follower.GetClockStateForTesting().ElectionElapsed);
     }
 
     private static RaftCore NewCore(

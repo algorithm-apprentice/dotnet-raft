@@ -23,7 +23,7 @@ public sealed class RaftCoreLeadershipTransferTests
 
         Assert.Equal(original, request);
         Assert.Equal(2UL, core.LeaderTransferee);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Message timeout = Assert.Single(core.TakeMessages());
         Assert.Equal(MessageType.MsgTimeoutNow, timeout.Type);
         Assert.Equal(1UL, timeout.From);
@@ -267,13 +267,13 @@ public sealed class RaftCoreLeadershipTransferTests
             learners: [3]).Core;
         core.Step(Transfer(2));
         core.TakeMessages();
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
 
         core.Step(Transfer(4));
         core.Step(Transfer(3));
 
         Assert.Equal(2UL, core.LeaderTransferee);
-        Assert.Equal(4, core.ElectionElapsed);
+        Assert.Equal(4, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Empty(core.TakeMessages());
     }
 
@@ -284,11 +284,11 @@ public sealed class RaftCoreLeadershipTransferTests
             electionTick: 5).Core;
         core.Step(Transfer(2));
         core.TakeMessages();
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
 
         core.Step(Transfer(2));
 
-        Assert.Equal(4, core.ElectionElapsed);
+        Assert.Equal(4, core.GetClockStateForTesting().ElectionElapsed);
         core.TickLeader();
         Assert.Equal(0UL, core.LeaderTransferee);
     }
@@ -300,12 +300,12 @@ public sealed class RaftCoreLeadershipTransferTests
             electionTick: 5).Core;
         core.Step(Transfer(2));
         core.TakeMessages();
-        core.ElectionElapsed = 4;
+        core.SetClockElapsedForTesting(4);
 
         core.Step(Transfer(3));
 
         Assert.Equal(3UL, core.LeaderTransferee);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
     }
 
     [Fact]

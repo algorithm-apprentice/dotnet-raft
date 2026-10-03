@@ -20,9 +20,9 @@ internal sealed class RaftClock
 
     internal int HeartbeatTick { get; }
 
-    internal int ElectionElapsed { get; set; }
+    internal int ElectionElapsed { get; private set; }
 
-    internal int HeartbeatElapsed { get; set; }
+    internal int HeartbeatElapsed { get; private set; }
 
     internal int RandomizedElectionTimeout { get; private set; }
 
@@ -73,6 +73,19 @@ internal sealed class RaftClock
         ElectionElapsed = 0;
         HeartbeatElapsed = 0;
         RandomizedElectionTimeout = randomizedTimeout;
+    }
+
+    internal void ResetElectionElapsed()
+    {
+        ElectionElapsed = 0;
+    }
+
+    internal void SetElapsedForTesting(
+        int electionElapsed,
+        int heartbeatElapsed)
+    {
+        ElectionElapsed = electionElapsed;
+        HeartbeatElapsed = heartbeatElapsed;
     }
 
     internal void SetRandomizedElectionTimeoutForTesting(

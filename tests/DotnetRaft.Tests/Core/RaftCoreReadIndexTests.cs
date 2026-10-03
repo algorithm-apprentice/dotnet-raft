@@ -63,7 +63,7 @@ public sealed class RaftCoreReadIndexTests
 
         Assert.Empty(core.TakeReadStates());
         Assert.Empty(core.TakeMessages());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
 
         core.Step(AppResponse(
             core,
@@ -75,7 +75,7 @@ public sealed class RaftCoreReadIndexTests
             LatestHeartbeatContext(released);
         Assert.False(context.IsEmpty);
         Assert.Equal(1UL, core.Log.Committed);
-        Assert.Equal(1, core.ReadOnly.PendingCount);
+        Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
 
         core.Step(HeartbeatResponse(
             core,
@@ -88,7 +88,7 @@ public sealed class RaftCoreReadIndexTests
         Assert.Equal(
             "gated",
             state.RequestContext.ToStringUtf8());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]
@@ -179,7 +179,7 @@ public sealed class RaftCoreReadIndexTests
 
         Assert.Empty(core.TakeReadStates());
         Assert.Empty(core.TakeMessages());
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]
@@ -208,7 +208,7 @@ public sealed class RaftCoreReadIndexTests
                     "duplicate",
                     state.RequestContext.ToStringUtf8());
             });
-        Assert.Equal(0, core.ReadOnly.PendingCount);
+        Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
     [Fact]

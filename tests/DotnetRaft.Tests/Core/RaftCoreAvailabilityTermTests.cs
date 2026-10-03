@@ -32,7 +32,7 @@ public sealed class RaftCoreAvailabilityTermTests
 
         Assert.Equal(softState, core.SoftState);
         Assert.Equal(hardState, core.HardState);
-        Assert.Equal(0, core.ElectionElapsed);
+        Assert.Equal(0, core.GetClockStateForTesting().ElectionElapsed);
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
     }
@@ -68,7 +68,7 @@ public sealed class RaftCoreAvailabilityTermTests
             term: 5,
             checkQuorum: true).Core;
         core.BecomeFollower(5, leaderId: 2);
-        core.ElectionElapsed = core.ElectionTick;
+        core.SetClockElapsedForTesting(core.GetClockStateForTesting().ElectionTick);
 
         core.Step(ElectionRequest(
             core,

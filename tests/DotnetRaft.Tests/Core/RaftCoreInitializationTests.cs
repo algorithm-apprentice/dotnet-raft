@@ -20,7 +20,7 @@ public sealed class RaftCoreInitializationTests
         Assert.Equal(0UL, core.Vote);
         Assert.Equal(0UL, core.LeaderId);
         Assert.Equal(RaftRole.Follower, core.Role);
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Promotable);
         Assert.Equal(new SoftState(0, RaftRole.Follower), core.SoftState);
         Assert.Equal(0UL, core.HardState.Term);
@@ -91,7 +91,7 @@ public sealed class RaftCoreInitializationTests
         Assert.Equal(3UL, core.Log.Applied);
         Assert.Equal(3UL, core.Log.FirstIndex);
         Assert.Equal(4UL, core.Log.LastIndex);
-        Assert.True(core.IsLearner);
+        Assert.True(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Promotable);
         Assert.True(core.Tracker.Config.Voters.Incoming.SetEquals(
             [1UL, 2UL]));
@@ -114,7 +114,7 @@ public sealed class RaftCoreInitializationTests
 
         RaftCore core = NewCore(storage, id: 1);
 
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Promotable);
         Assert.False(core.Tracker.Progress.ContainsKey(1));
     }

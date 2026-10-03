@@ -31,11 +31,11 @@ public sealed class ReadIndexCoordinatorTests
                 localId: 1,
                 voters);
         Assert.True(tracked.HeartbeatRequired);
-        Assert.Equal(1, coordinator.ReadOnly.PendingCount);
+        Assert.Equal(1, coordinator.PendingCount);
 
         coordinator.Reset();
 
-        Assert.Equal(0, coordinator.ReadOnly.PendingCount);
+        Assert.Equal(0, coordinator.PendingCount);
         Assert.Equal(1, coordinator.GatedCount);
         Assert.True(coordinator.HasReadStates);
         Assert.True(

@@ -135,38 +135,11 @@ internal sealed class RaftCore
     internal RaftRole Role =>
         roleState.Role;
 
-    internal bool IsLearner =>
-        Tracker.IsLearner(Id);
-
     internal RaftLog Log { get; }
 
     internal ProgressTracker Tracker { get; }
 
-    internal ReadOnlyTracker ReadOnly =>
-        reads.ReadOnly;
-
     internal IRaftLogger Logger { get; }
-
-    internal int ElectionTick =>
-        clock.ElectionTick;
-
-    internal int HeartbeatTick =>
-        clock.HeartbeatTick;
-
-    internal int ElectionElapsed
-    {
-        get => clock.ElectionElapsed;
-        set => clock.ElectionElapsed = value;
-    }
-
-    internal int HeartbeatElapsed
-    {
-        get => clock.HeartbeatElapsed;
-        set => clock.HeartbeatElapsed = value;
-    }
-
-    internal int RandomizedElectionTimeout =>
-        clock.RandomizedElectionTimeout;
 
     internal bool AsyncStorageWrites { get; }
 
@@ -187,34 +160,22 @@ internal sealed class RaftCore
 
     internal bool StepDownOnRemoval { get; }
 
-    internal ulong LeaderTransferee
-    {
-        get => roleState.LeaderTransferee;
-        set => roleState.StartTransfer(value);
-    }
+    internal ulong LeaderTransferee =>
+        roleState.LeaderTransferee;
 
-    internal ulong PendingConfigurationIndex
-    {
-        get =>
-            proposals.PendingConfigurationIndex;
-        set =>
-            proposals.SetPendingConfigurationIndex(
-                value);
-    }
+    internal ulong PendingConfigurationIndex =>
+        proposals.PendingConfigurationIndex;
 
-    internal ulong UncommittedSize
-    {
-        get => proposals.UncommittedSize;
-        set => proposals.SetUncommittedSize(value);
-    }
+    internal ulong UncommittedSize =>
+        proposals.UncommittedSize;
+
+    internal ReadOnlyOption ReadOnlyOption =>
+        reads.Option;
 
     internal bool Promotable =>
         Tracker.Contains(Id)
         && !Tracker.IsLearner(Id)
         && !Log.HasUnstableSnapshot;
-
-    internal bool PastElectionTimeout =>
-        clock.PastElectionTimeout;
 
     internal SoftState SoftState =>
         roleState.GetSoftState();
@@ -231,7 +192,7 @@ internal sealed class RaftCore
     internal bool HasReadStates =>
         reads.HasReadStates;
 
-    internal int PendingReadIndexMessageCount =>
+    internal int GatedReadCountForTesting =>
         reads.GatedCount;
 
     internal void BecomeFollower(ulong term, ulong leaderId)
@@ -672,6 +633,65 @@ internal sealed class RaftCore
             timeout);
     }
 
+    internal void SetClockElapsedForTesting(
+        int electionElapsed,
+        int heartbeatElapsed = 0)
+    {
+        clock.SetElapsedForTesting(
+            electionElapsed,
+            heartbeatElapsed);
+    }
+
+    internal (
+        int ElectionTick,
+        int HeartbeatTick,
+        int ElectionElapsed,
+        int HeartbeatElapsed,
+        int RandomizedElectionTimeout)
+        GetClockStateForTesting()
+    {
+        return (
+            clock.ElectionTick,
+            clock.HeartbeatTick,
+            clock.ElectionElapsed,
+            clock.HeartbeatElapsed,
+            clock.RandomizedElectionTimeout);
+    }
+
+    internal int GetReadOnlyPendingCountForTesting()
+    {
+        return reads.PendingCount;
+    }
+
+    internal void SetLeaderTransfereeForTesting(
+        ulong transferee)
+    {
+        roleState.StartTransfer(transferee);
+    }
+
+    internal void SetPendingConfigurationIndexForTesting(
+        ulong index)
+    {
+        proposals.SetPendingConfigurationIndex(
+            index);
+    }
+
+    internal void SetUncommittedSizeForTesting(
+        ulong size)
+    {
+        proposals.SetUncommittedSizeForTesting(
+            size);
+    }
+
+    internal void AddReadOnlyRequestForTesting(
+        ulong commitIndex,
+        Message request)
+    {
+        reads.AddRequestForTesting(
+            commitIndex,
+            request);
+    }
+
     internal void ReduceUncommittedSize(ulong payloadSize)
     {
         proposals.Release(payloadSize);
@@ -878,7 +898,7 @@ internal sealed class RaftCore
             });
             if (message.Type == MessageType.MsgVote)
             {
-                ElectionElapsed = 0;
+                clock.ResetElectionElapsed();
                 roleState.GrantVote(message.From);
             }
 
@@ -974,7 +994,7 @@ internal sealed class RaftCore
     internal void HandleFollowerLeaderMessage(
         Message message)
     {
-        ElectionElapsed = 0;
+        clock.ResetElectionElapsed();
         roleState.SetLeader(message.From);
         HandleAcceptedLeaderMessage(message);
     }
@@ -1589,7 +1609,7 @@ internal sealed class RaftCore
             return;
         }
 
-        ElectionElapsed = 0;
+        clock.ResetElectionElapsed();
         roleState.StartTransfer(transferee);
         if (progress.Match == Log.LastIndex)
         {
@@ -1906,7 +1926,8 @@ internal sealed class RaftCore
             Tracker.Contains(Id);
         TraceConfigurationApplied(state);
 
-        if ((!hasLocalProgress || IsLearner)
+        if ((!hasLocalProgress
+                || Tracker.IsLearner(Id))
             && Role == RaftRole.Leader)
         {
             if (StepDownOnRemoval)
@@ -2000,7 +2021,8 @@ internal sealed class RaftCore
                 MessageType.MsgPreVote
             && CheckQuorum
             && LeaderId != RaftMessageTargets.None
-            && ElectionElapsed < ElectionTick
+            && clock.ElectionElapsed <
+                clock.ElectionTick
             && message.Context != CampaignTransferContext;
     }
 

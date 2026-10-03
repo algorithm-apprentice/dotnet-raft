@@ -144,7 +144,8 @@ internal sealed class ProposalAdmission
         PendingConfigurationIndex = index;
     }
 
-    internal void SetUncommittedSize(ulong size)
+    internal void SetUncommittedSizeForTesting(
+        ulong size)
     {
         UncommittedSize = size;
     }

@@ -46,7 +46,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         Assert.True(core.Log.HasUnstableSnapshot);
         Assert.Equal([1UL, 2UL, 3UL], core.Tracker.VoterNodes());
         Assert.Equal([4UL], core.Tracker.LearnerNodes());
-        Assert.False(core.IsLearner);
+        Assert.False(core.Tracker.IsLearner(core.Id));
         Assert.False(core.Promotable);
         Assert.All(core.Tracker.Progress.Values, progress =>
         {
@@ -217,7 +217,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         ConfState beforeConfig = core.Tracker.ToConfState();
         ProgressMap beforeProgress = core.Tracker.Progress.Clone();
         ulong beforeLastIndex = core.Log.LastIndex;
-        bool beforeLearner = core.IsLearner;
+        bool beforeLearner = core.Tracker.IsLearner(core.Id);
         Snapshot snapshot = SnapshotAt(
             5,
             4,
@@ -238,7 +238,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         AssertProgressEqual(beforeProgress, core.Tracker.Progress);
         Assert.True(core.Tracker.Votes.TryGetValue(1, out bool vote));
         Assert.True(vote);
-        Assert.Equal(beforeLearner, core.IsLearner);
+        Assert.Equal(beforeLearner, core.Tracker.IsLearner(core.Id));
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
     }
@@ -255,7 +255,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         ConfState beforeConfig = core.Tracker.ToConfState();
         ProgressMap beforeProgress = core.Tracker.Progress.Clone();
         ulong beforeLastIndex = core.Log.LastIndex;
-        bool beforeLearner = core.IsLearner;
+        bool beforeLearner = core.Tracker.IsLearner(core.Id);
         Snapshot snapshot = SnapshotAt(
             ulong.MaxValue,
             4,
@@ -275,7 +275,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         AssertProgressEqual(beforeProgress, core.Tracker.Progress);
         Assert.True(core.Tracker.Votes.TryGetValue(1, out bool vote));
         Assert.True(vote);
-        Assert.Equal(beforeLearner, core.IsLearner);
+        Assert.Equal(beforeLearner, core.Tracker.IsLearner(core.Id));
         Assert.Empty(core.TakeMessages());
         Assert.Empty(core.TakeMessagesAfterAppend());
     }
@@ -335,7 +335,7 @@ public sealed class RaftCoreSnapshotRestoreTests
             messageTerm: 3,
             snapshot));
 
-        Assert.Equal(becomeLearner, core.IsLearner);
+        Assert.Equal(becomeLearner, core.Tracker.IsLearner(core.Id));
         Assert.Equal(
             becomeLearner,
             core.Tracker.Progress[3].IsLearner);

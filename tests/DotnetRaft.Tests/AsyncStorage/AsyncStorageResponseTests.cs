@@ -240,7 +240,7 @@ public sealed class AsyncStorageResponseTests
         Message response = StorageResponse(
             node.Ready(),
             MessageType.MsgStorageAppendResp);
-        Assert.True(node.Core.IsLearner);
+        Assert.True(node.Core.Tracker.IsLearner(node.Core.Id));
 
         node.ApplyConfChange(
             new ProtocolConfChange
@@ -250,12 +250,12 @@ public sealed class AsyncStorageResponseTests
                 NodeId = 1,
             });
         node.Core.Tracker.RecordVote(2, granted: true);
-        Assert.False(node.Core.IsLearner);
+        Assert.False(node.Core.Tracker.IsLearner(node.Core.Id));
         Assert.NotEmpty(node.Core.Tracker.Votes);
 
         node.Step(response);
 
-        Assert.True(node.Core.IsLearner);
+        Assert.True(node.Core.Tracker.IsLearner(node.Core.Id));
         Assert.Empty(node.Core.Tracker.Votes);
         Assert.Equal(
             [1UL],

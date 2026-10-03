@@ -77,6 +77,49 @@ storage work. The core performs no blocking I/O.
 | Status and diagnostics | `status.go`, `util.go`, `state_trace*.go`, `logger.go` | Inspection, formatting, logging, and tracing | Core and tracker |
 | External test harness | `rafttest/*`, `interaction_test.go`, `testdata/*` | Message delivery, partitions, storage processing, and golden interaction scenarios | Public Raft API |
 
+## Implemented C# core boundaries
+
+The C# implementation preserves the reference package boundary while
+decomposing mutable core ownership:
+
+```mermaid
+flowchart TD
+    RawNode --> RaftCore
+    RaftNode --> RawNode
+
+    RaftCore --> RaftClock
+    RaftCore --> RaftOutput
+    RaftCore --> RaftRoleState
+    RaftCore --> ReadIndexCoordinator
+    RaftCore --> ProposalAdmission
+    RaftCore --> ProgressTracker
+    RaftCore --> RaftLog
+
+    RaftCore --> RoleStrategies
+    RoleStrategies --> RaftCore
+
+    ProgressTracker --> Quorum
+    ReadIndexCoordinator --> ReadOnlyTracker
+    RaftLog --> Storage
+    RaftLog --> UnstableLog
+```
+
+| C# component | Authoritative responsibility |
+|---|---|
+| `RaftCore` | Cross-component sequencing, term routing, coordinated reset, log mutation, commit/read ordering, membership orchestration, async storage responses, tracing, and logging |
+| `RaftClock` | Election/heartbeat elapsed values, configured ticks, randomized timeout, and overflow-safe tick/reset behavior |
+| `RaftOutput` | Immediate and after-append queues, outbound cloning, sender/term normalization, and queue classification |
+| `RaftRoleState` | Term, vote, leader ID, role, and leadership transferee |
+| `ReadIndexCoordinator` | `ReadOnlyTracker`, gated reads, quorum advancement, and completed `ReadState` output |
+| `ProposalAdmission` | Uncommitted payload accounting and pending configuration index |
+| `ProgressTracker` | Installed configuration/progress maps, votes, quorum-derived commit, and voter/learner queries |
+| Role strategies | Stateless follower, pre-candidate, candidate, and leader message routing resolved from the authoritative role on every dispatch |
+
+Only role strategies reference `RaftCore`, through explicit internal handler
+methods. Other collaborators never reference the aggregate. Mutable component
+state has one owner; tests use component fixtures or explicit `ForTesting`
+hooks rather than writable forwarding properties.
+
 ## Core state
 
 The root `raft` object combines five categories of state:
