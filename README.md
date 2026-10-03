@@ -1,56 +1,75 @@
 # dotnet-raft
 
-`dotnet-raft` is an educational, behavior-oriented C# port of
-[`etcd-io/raft`](https://github.com/etcd-io/raft). The reference snapshot is
-commit `1c0011d2c6b7a0230f87bad38ad4c6e70d810f9e`.
+`dotnet-raft` is an educational, behavior-oriented C# implementation of the
+deterministic Raft consensus state machine from
+[`etcd-io/raft`](https://github.com/etcd-io/raft), pinned to commit
+`1c0011d2c6b7a0230f87bad38ad4c6e70d810f9e`.
 
-The goal is to preserve the reference implementation's deterministic Raft
-state-machine model while making the algorithm approachable to .NET
-developers. Like `etcd/raft`, this library will implement consensus only.
-Network transport, durable storage engines, and the replicated application
-state machine remain application responsibilities.
+It implements consensus only. Network transport, durable storage engines,
+application state, snapshots, compaction policy, timers, and retries remain
+host responsibilities.
 
-## Current status
+## Install
 
-The architecture and implementation DAG are complete. Implementation is
-following the validated graph in strict topological order.
+```bash
+dotnet add package DotnetRaft --version 1.0.0
+```
+
+The package targets `net10.0`.
+
+## Choose an integration API
+
+- `RawNode` is synchronous and thread-unsafe. The host owns one serialized
+  event loop and passes every returned `Ready` back to `Advance`.
+- `RaftNode` is a concurrent asynchronous facade. One background owner loop
+  serializes commands and exposes cancellable `ValueTask` operations.
+- `AsyncStorageWrites` replaces `Advance` with reliable local
+  `MsgStorageAppend` and `MsgStorageApply` request/response queues.
+
+```csharp
+using DotnetRaft;
+using DotnetRaft.Storage;
+
+var storage = new MemoryStorage();
+var config = new RaftConfig
+{
+    Id = 1,
+    ElectionTick = 10,
+    HeartbeatTick = 1,
+    Storage = storage,
+};
+
+await using RaftNode node = RaftNode.Start(
+    config,
+    [new Peer(1)]);
+
+Ready ready = await node.WaitForReadyAsync();
+// Persist ready.Snapshot, ready.Entries, and ready.HardState;
+// apply ready.CommittedEntries in order; send ready.Messages.
+await node.AdvanceAsync();
+```
+
+The abbreviated sample does not replace the durability, configuration,
+physical-application, and recovery rules in the
+[public integration guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md).
+
+## Documentation
+
+- [Public API and host responsibilities](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
+- [Behavioral parity matrix](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/parity-matrix.md)
+- [Reference architecture](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/reference-architecture.md)
+- [Implementation DAG](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/implementation-dag.md)
+- [Performance methodology and baseline](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/performance.md)
+- [Release and compatibility ADR](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/adr/0002-release-and-compatibility-contract.md)
+- [Apache-2.0 license](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/LICENSE)
+- [Third-party notices](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/THIRD-PARTY-NOTICES.md)
+
+## Project status
 
 - **Completed milestone:** M6 Public integration
 - **Current milestone:** M7 Parity release
 - **Completed nodes:** D00-D25
-- **Next node:** D26 Parity and release hardening
+- **Current node:** D26 Parity and release hardening
 
-- [Reference architecture](docs/reference-architecture.md)
-- [Implementation DAG](docs/implementation-dag.md)
-- [ADR 0001: Porting strategy and architectural boundary](docs/adr/0001-porting-strategy.md)
-- [D04 stable storage design](docs/design/d04-stable-storage.md)
-- [D05 unstable log design](docs/design/d05-unstable-log.md)
-- [D06 unified Raft log design](docs/design/d06-raft-log.md)
-- [D07 inflight window design](docs/design/d07-inflight-window.md)
-- [D08 follower progress design](docs/design/d08-follower-progress.md)
-- [D09 progress tracker design](docs/design/d09-progress-tracker.md)
-- [D10 configuration changes design](docs/design/d10-configuration-changes.md)
-- [D11 read-only tracker design](docs/design/d11-read-only-tracker.md)
-- [D12 core state-machine shell design](docs/design/d12-core-state-machine-shell.md)
-- [D13 leader election design](docs/design/d13-leader-election.md)
-- [D14 basic log replication design](docs/design/d14-basic-log-replication.md)
-- [D15 replication flow control design](docs/design/d15-replication-flow-control.md)
-- [D16 snapshot design](docs/design/d16-snapshots.md)
-- [D17 membership integration design](docs/design/d17-membership-integration.md)
-- [D18 safe linearizable reads design](docs/design/d18-safe-linearizable-reads.md)
-- [D19 availability extensions design](docs/design/d19-availability-extensions.md)
-- [D20 leadership transfer design](docs/design/d20-leadership-transfer.md)
-- [D21 RawNode and Ready design](docs/design/d21-rawnode-ready.md)
-- [D22 bootstrap, status, and diagnostics design](docs/design/d22-bootstrap-status-diagnostics.md)
-- [D23 deterministic interaction harness design](docs/design/d23-interaction-harness.md)
-- [D24 concurrent Node wrapper design](docs/design/d24-concurrent-node.md)
-- [D25 asynchronous storage writes design](docs/design/d25-asynchronous-storage-writes.md)
-
-## Development principles
-
-- Treat messages and logical ticks as deterministic state-machine inputs.
-- Keep persistence and transport outside the consensus core.
-- Port behavior and invariants, not Go syntax or goroutine structure.
-- Complete and verify one DAG node before starting the next.
-- Use the reference tests as executable specifications.
-- Preserve Apache-2.0 attribution for material derived from `etcd/raft`.
+Development preserves the pinned implementation's behavior and invariants
+before performing the separately reviewed post-parity structural refactor.

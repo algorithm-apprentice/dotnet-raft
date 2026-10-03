@@ -1,0 +1,146 @@
+{
+  "referenceCommit": "1c0011d2c6b7a0230f87bad38ad4c6e70d810f9e",
+  "totalCases": 558,
+  "files": [
+    {
+      "name": "async_storage_writes.txt",
+      "caseCount": 44,
+      "commandInputSha256": "83867f500222269b916c9d2c254fe0ad115aed0faa9e8618e447f06de5ae707e"
+    },
+    {
+      "name": "async_storage_writes_append_aba_race.txt",
+      "caseCount": 47,
+      "commandInputSha256": "ed83af4b52e93606326de56dd8ec50fb6748215e3b3382147bceb57b80fe4e07"
+    },
+    {
+      "name": "campaign.txt",
+      "caseCount": 4,
+      "commandInputSha256": "b359c80233ba9d69870012375e8a1d8ef77d2c7f048cfdba3129ed0af77944b3"
+    },
+    {
+      "name": "campaign_learner_must_vote.txt",
+      "caseCount": 12,
+      "commandInputSha256": "6c351865bf6cda7932524333c037cdb98ac816ef5696236a2526935625d7ca59"
+    },
+    {
+      "name": "checkquorum.txt",
+      "caseCount": 15,
+      "commandInputSha256": "4d7a2f2e6cec9366996f421a6bf0caed8eddc7757bee1386840b847e497c5939"
+    },
+    {
+      "name": "confchange_disable_validation.txt",
+      "caseCount": 9,
+      "commandInputSha256": "f8fe01d118f3424638d1669bf93c5cdc39446f7de2f191635652e2d831bc76da"
+    },
+    {
+      "name": "confchange_v1_add_single.txt",
+      "caseCount": 6,
+      "commandInputSha256": "faf5f5109f27ee80612970f3d94c267768d42a43f2ca53bf3d9ee724451b6003"
+    },
+    {
+      "name": "confchange_v1_remove_leader.txt",
+      "caseCount": 21,
+      "commandInputSha256": "146af7402009c93fade03c6de0a632b40afc187fd930933f7312e044a603857e"
+    },
+    {
+      "name": "confchange_v1_remove_leader_stepdown.txt",
+      "caseCount": 19,
+      "commandInputSha256": "f8e15a00611d6a079352258a12d090e68cf699e5448fc9ffe98fc3e2167564ee"
+    },
+    {
+      "name": "confchange_v2_add_double_auto.txt",
+      "caseCount": 19,
+      "commandInputSha256": "fdf73ad61066f980e6119aaa060e054c9d779654a55bdf11963e231a54fe5635"
+    },
+    {
+      "name": "confchange_v2_add_double_implicit.txt",
+      "caseCount": 6,
+      "commandInputSha256": "23204818151578ede30fafc10e44a80fb57a7a6db2e19fa4c80f1e23aa66c185"
+    },
+    {
+      "name": "confchange_v2_add_single_auto.txt",
+      "caseCount": 6,
+      "commandInputSha256": "b68ff7325ada935409a8bdc596ba209c4d045c2fef5ac959b1f423c84aef84ef"
+    },
+    {
+      "name": "confchange_v2_add_single_explicit.txt",
+      "caseCount": 11,
+      "commandInputSha256": "007affd259e9f2b159cf7b0baeca7d1ff0488c0cf26b5f202aa6312d8b8f72ae"
+    },
+    {
+      "name": "confchange_v2_replace_leader.txt",
+      "caseCount": 17,
+      "commandInputSha256": "97b18cf8f36baee2db412b15e13b6b4071b0d35ee03c23c24aace4846e9ae92b"
+    },
+    {
+      "name": "confchange_v2_replace_leader_stepdown.txt",
+      "caseCount": 17,
+      "commandInputSha256": "a3c16e7a184e960f874ca1af642118ae5b5a31b7982a628189638394553e8f3b"
+    },
+    {
+      "name": "forget_leader.txt",
+      "caseCount": 29,
+      "commandInputSha256": "bb83164dedd894909000dff52901009636e3f2790109bd092a23dc83fab2c854"
+    },
+    {
+      "name": "forget_leader_prevote_checkquorum.txt",
+      "caseCount": 29,
+      "commandInputSha256": "f2efc0fa14e774f321647d93fa158c126d6b718654fdef0543a1b1e1fdeabb15"
+    },
+    {
+      "name": "forget_leader_read_only_lease_based.txt",
+      "caseCount": 7,
+      "commandInputSha256": "71c8765b5cfee7bba7707cb036a25bea3057ff3d49204e1175b58ea82d000a27"
+    },
+    {
+      "name": "heartbeat_resp_recovers_from_probing.txt",
+      "caseCount": 11,
+      "commandInputSha256": "9dbf0e108abc563c1587b4545c943584891c649d36be6b042582c69d155e7904"
+    },
+    {
+      "name": "lagging_commit.txt",
+      "caseCount": 17,
+      "commandInputSha256": "2f0009b3a7dd4a128c2386fa141c3062e3ba5038d855907fd36f705ff3941b8a"
+    },
+    {
+      "name": "prevote.txt",
+      "caseCount": 16,
+      "commandInputSha256": "46eb40f87daad624495680352846a6cbc9f592e8297a094d1d5efa688c706872"
+    },
+    {
+      "name": "prevote_checkquorum.txt",
+      "caseCount": 18,
+      "commandInputSha256": "42cc6b6876b88ea8150d33dc5aa38fb70aed951429b9b0f05258bb30d8fda5ac"
+    },
+    {
+      "name": "probe_and_replicate.txt",
+      "caseCount": 74,
+      "commandInputSha256": "72b774237f231772299db4a21741d4b76eec46cfecd310d99fe76be9889e4997"
+    },
+    {
+      "name": "replicate_pause.txt",
+      "caseCount": 32,
+      "commandInputSha256": "405bc77ab23be451fdc978a59654d9c45785098b2773cd57ab023f0f5966b448"
+    },
+    {
+      "name": "single_node.txt",
+      "caseCount": 4,
+      "commandInputSha256": "cad7819317067430be02d2fb98b66c7930f37f2d07ccdeba146e3247954f25d5"
+    },
+    {
+      "name": "slow_follower_after_compaction.txt",
+      "caseCount": 25,
+      "commandInputSha256": "aabad976a8d16707db138e870be6ec7bdf074dae4a2a035eda22fc32e5eb8530"
+    },
+    {
+      "name": "snapshot_succeed_via_app_resp.txt",
+      "caseCount": 18,
+      "commandInputSha256": "39f79aecc61fc44ae6ec843c523f2d1961b14c6f8116735654b84308f7118b21"
+    },
+    {
+      "name": "snapshot_succeed_via_app_resp_behind.txt",
+      "caseCount": 25,
+      "commandInputSha256": "590cd5488b4e946982132956fa5aabe8601227271961e619fcdf00e9444de34b"
+    }
+  ]
+}

@@ -1,0 +1,88 @@
+file Protocol/raft.proto package=raftpb
+enum raftpb.ConfChangeTransition
+  ConfChangeTransitionAuto=0
+  ConfChangeTransitionJointImplicit=1
+  ConfChangeTransitionJointExplicit=2
+enum raftpb.ConfChangeType
+  ConfChangeAddNode=0
+  ConfChangeRemoveNode=1
+  ConfChangeUpdateNode=2
+  ConfChangeAddLearnerNode=3
+enum raftpb.EntryType
+  EntryNormal=0
+  EntryConfChange=1
+  EntryConfChangeV2=2
+enum raftpb.MessageType
+  MsgHup=0
+  MsgBeat=1
+  MsgProp=2
+  MsgApp=3
+  MsgAppResp=4
+  MsgVote=5
+  MsgVoteResp=6
+  MsgSnap=7
+  MsgHeartbeat=8
+  MsgHeartbeatResp=9
+  MsgUnreachable=10
+  MsgSnapStatus=11
+  MsgCheckQuorum=12
+  MsgTransferLeader=13
+  MsgTimeoutNow=14
+  MsgReadIndex=15
+  MsgReadIndexResp=16
+  MsgPreVote=17
+  MsgPreVoteResp=18
+  MsgStorageAppend=19
+  MsgStorageAppendResp=20
+  MsgStorageApply=21
+  MsgStorageApplyResp=22
+  MsgForgetLeader=23
+message raftpb.ConfChange
+  1 optional id type=UInt64 wire=varint packed=false
+  2 optional type type=Enum(raftpb.ConfChangeType) wire=varint packed=false
+  3 optional node_id type=UInt64 wire=varint packed=false
+  4 optional context type=Bytes wire=length-delimited packed=false
+message raftpb.ConfChangeSingle
+  1 optional type type=Enum(raftpb.ConfChangeType) wire=varint packed=false
+  2 optional node_id type=UInt64 wire=varint packed=false
+message raftpb.ConfChangeV2
+  1 optional transition type=Enum(raftpb.ConfChangeTransition) wire=varint packed=false
+  2 repeated changes type=Message(raftpb.ConfChangeSingle) wire=length-delimited packed=false
+  3 optional context type=Bytes wire=length-delimited packed=false
+message raftpb.ConfState
+  1 repeated voters type=UInt64 wire=varint packed=false
+  2 repeated learners type=UInt64 wire=varint packed=false
+  3 repeated voters_outgoing type=UInt64 wire=varint packed=false
+  4 repeated learners_next type=UInt64 wire=varint packed=false
+  5 optional auto_leave type=Bool wire=varint packed=false
+message raftpb.Entry
+  1 optional Type type=Enum(raftpb.EntryType) wire=varint packed=false
+  2 optional Term type=UInt64 wire=varint packed=false
+  3 optional Index type=UInt64 wire=varint packed=false
+  4 optional Data type=Bytes wire=length-delimited packed=false
+message raftpb.HardState
+  1 optional term type=UInt64 wire=varint packed=false
+  2 optional vote type=UInt64 wire=varint packed=false
+  3 optional commit type=UInt64 wire=varint packed=false
+message raftpb.Message
+  1 optional type type=Enum(raftpb.MessageType) wire=varint packed=false
+  2 optional to type=UInt64 wire=varint packed=false
+  3 optional from type=UInt64 wire=varint packed=false
+  4 optional term type=UInt64 wire=varint packed=false
+  5 optional logTerm type=UInt64 wire=varint packed=false
+  6 optional index type=UInt64 wire=varint packed=false
+  7 repeated entries type=Message(raftpb.Entry) wire=length-delimited packed=false
+  8 optional commit type=UInt64 wire=varint packed=false
+  9 optional snapshot type=Message(raftpb.Snapshot) wire=length-delimited packed=false
+  10 optional reject type=Bool wire=varint packed=false
+  11 optional rejectHint type=UInt64 wire=varint packed=false
+  12 optional context type=Bytes wire=length-delimited packed=false
+  13 optional vote type=UInt64 wire=varint packed=false
+  14 repeated responses type=Message(raftpb.Message) wire=length-delimited packed=false
+message raftpb.Snapshot
+  1 optional data type=Bytes wire=length-delimited packed=false
+  2 optional metadata type=Message(raftpb.SnapshotMetadata) wire=length-delimited packed=false
+message raftpb.SnapshotMetadata
+  1 optional conf_state type=Message(raftpb.ConfState) wire=length-delimited packed=false
+  2 optional index type=UInt64 wire=varint packed=false
+  3 optional term type=UInt64 wire=varint packed=false

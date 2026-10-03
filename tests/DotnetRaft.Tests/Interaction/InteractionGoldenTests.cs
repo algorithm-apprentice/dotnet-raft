@@ -21,14 +21,16 @@ public sealed class InteractionGoldenTests
                     "TestData"))
             : Path.Combine(
                 AppContext.BaseDirectory,
-                "Interaction",
-                "TestData");
+                "Interaction");
         string[] files = Directory.GetFiles(
             directory,
-            "*.txt");
+            "*.txt",
+            SearchOption.AllDirectories);
         Array.Sort(files, StringComparer.Ordinal);
 
-        Assert.Equal(8, files.Length);
+        Assert.Equal(
+            rewrite ? 6 : 34,
+            files.Length);
         foreach (string file in files)
         {
             if (rewrite)

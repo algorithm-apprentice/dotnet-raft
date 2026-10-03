@@ -24,6 +24,8 @@ mono_crash.*
 [Dd]ebugPublic/
 [Rr]elease/
 [Rr]eleases/
+!tests/DotnetRaft.Tests/Release/
+!tests/DotnetRaft.Tests/Release/**
 x64/
 x86/
 [Ww][Ii][Nn]32/

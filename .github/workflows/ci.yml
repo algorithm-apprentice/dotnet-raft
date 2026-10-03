@@ -1,0 +1,56 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test-pack:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore DotnetRaft.sln
+
+      - name: Verify formatting
+        run: dotnet format DotnetRaft.sln --no-restore --verify-no-changes --verbosity quiet
+
+      - name: Test Debug
+        run: dotnet test DotnetRaft.sln -c Debug --no-restore --verbosity quiet
+
+      - name: Test Release
+        run: dotnet test DotnetRaft.sln -c Release --no-restore --verbosity quiet
+
+      - name: Pack
+        run: ./eng/pack-release.sh "$GITHUB_WORKSPACE" "${{ github.sha }}"
+
+      - name: Verify package
+        run: >-
+          ./eng/verify-package.sh
+          artifacts/package/DotnetRaft.1.0.0.nupkg
+          artifacts/package/DotnetRaft.1.0.0.snupkg
+          "$GITHUB_WORKSPACE"
+          "${{ github.sha }}"
+
+      - name: Verify reproducible package content
+        run: ./eng/verify-reproducible-pack.sh "$GITHUB_WORKSPACE" "${{ github.sha }}"
+
+      - name: Benchmark smoke
+        run: >-
+          dotnet run
+          --project benchmarks/DotnetRaft.Benchmarks/DotnetRaft.Benchmarks.csproj
+          -c Release
+          --no-restore
+          --
+          --smoke
