@@ -35,9 +35,23 @@ storage. It does not persist the application state machine.
 
 ## Durable SQLite storage
 
-Install:
+Version `1.0.0` is not currently published to NuGet.org. Build both local
+packages from a repository checkout, then add the SQLite package from the
+generated source:
 
 ```bash
+dotnet restore DotnetRaft.sln
+dotnet pack src/DotnetRaft/DotnetRaft.csproj -c Release
+dotnet pack src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj -c Release
+```
+
+In the consumer project, create `NuGet.Config` if needed, add the generated
+package directory alongside NuGet.org, and install:
+
+```bash
+dotnet new nugetconfig
+dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
+  --name dotnet-raft-local --configfile NuGet.Config
 dotnet add package DotnetRaft.Sqlite --version 1.0.0
 ```
 
@@ -120,6 +134,12 @@ copying only the main database file while it is live are unsupported.
 SQLite persists only Raft consensus state. Application bytes,
 `physicalApplied`, proposal deduplication, and any application database remain
 the host's responsibility.
+
+When application state is stored separately, treat the Raft and application
+stores as one recovery set. Pending-snapshot reconciliation closes process
+crash windows; it does not prove that independently captured or restored
+database generations belong together. Use a coordinated backup protocol, or
+stop the host and preserve its complete data directory as one unit.
 
 ## Configuration
 

@@ -11,7 +11,22 @@ host responsibilities.
 
 ## Install
 
+Version `1.0.0` is packaged and verified by CI but is not currently published
+to NuGet.org. From a repository checkout, build the local packages:
+
 ```bash
+dotnet restore DotnetRaft.sln
+dotnet pack src/DotnetRaft/DotnetRaft.csproj -c Release
+dotnet pack src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj -c Release
+```
+
+In the consumer project, create `NuGet.Config` if it does not already have one,
+add the local package directory alongside NuGet.org, and install:
+
+```bash
+dotnet new nugetconfig
+dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
+  --name dotnet-raft-local --configfile NuGet.Config
 dotnet add package DotnetRaft --version 1.0.0
 ```
 
