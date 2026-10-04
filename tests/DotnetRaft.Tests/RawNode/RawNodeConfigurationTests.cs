@@ -1,3 +1,4 @@
+using DotnetRaft.ConfChange;
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
@@ -61,6 +62,95 @@ public sealed class RawNodeConfigurationTests
         Entry entry = Assert.Single(ready.Entries);
         Assert.Equal(EntryType.EntryConfChangeV2, entry.Type);
         Assert.Equal(original.ToByteString(), entry.Data);
+    }
+
+    [Fact]
+    public void ProposalRejectsStructuralErrorsBeforeLogMutation()
+    {
+        MemoryStorage storage = CreateStorage();
+        var node = CreateNode(
+            storage,
+            disableConfChangeValidation: true);
+        BecomeSingletonLeader(node, storage);
+        ulong lastIndex = node.Core.Log.LastIndex;
+
+        Assert.Throws<ArgumentException>(
+            () => node.ProposeConfChange(
+                new ProtocolConfChange
+                {
+                    Type = (ConfChangeType)99,
+                    NodeId = 2,
+                }));
+        Assert.Throws<ArgumentException>(
+            () => node.ProposeConfChange(
+                new ProtocolConfChange
+                {
+                    NodeId =
+                        RaftLocalMessageTargets
+                            .AppendThread,
+                }));
+        Assert.Throws<ArgumentException>(
+            () => node.ProposeConfChange(
+                new ConfChangeV2
+                {
+                    Transition =
+                        (ConfChangeTransition)99,
+                }));
+        var unknownType = new ConfChangeV2();
+        unknownType.Changes.Add(
+            new ConfChangeSingle
+            {
+                Type = (ConfChangeType)99,
+                NodeId = 2,
+            });
+        Assert.Throws<ArgumentException>(
+            () => node.ProposeConfChange(
+                unknownType));
+
+        Assert.Equal(
+            lastIndex,
+            node.Core.Log.LastIndex);
+        Assert.False(node.HasReady());
+
+        node.Propose("valid"u8);
+        Assert.Single(node.Ready().Entries);
+    }
+
+    [Fact]
+    public void ZeroNodeIdRemainsAConfigurationNoOp()
+    {
+        MemoryStorage storage = CreateStorage();
+        var node = CreateNode(storage);
+        BecomeSingletonLeader(node, storage);
+
+        node.ProposeConfChange(
+            new ProtocolConfChange
+            {
+                NodeId = 0,
+            });
+
+        Entry entry = Assert.Single(
+            node.Ready().Entries);
+        ConfState state = node.ApplyConfChange(
+            ProtocolConfChange.Parser.ParseFrom(
+                entry.Data));
+        Assert.Equal(
+            [1UL],
+            state.Voters);
+    }
+
+    [Theory]
+    [InlineData(ulong.MaxValue)]
+    [InlineData(ulong.MaxValue - 1)]
+    public void RestoredConfigurationRejectsReservedIds(
+        ulong id)
+    {
+        MemoryStorage storage =
+            CreateStorage(voters: [1, id]);
+
+        Assert.Throws<
+            ConfigurationChangeException>(
+            () => CreateNode(storage));
     }
 
     [Fact]

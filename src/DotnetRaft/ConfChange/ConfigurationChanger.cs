@@ -128,6 +128,8 @@ internal sealed class ConfigurationChanger
                 continue;
             }
 
+            ConfigurationChangeValidation
+                .ValidateApplied(change);
             switch (change.Type)
             {
                 case ConfChangeType.ConfChangeAddNode:

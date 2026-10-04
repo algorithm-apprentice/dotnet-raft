@@ -84,6 +84,76 @@ public sealed class RaftNodeCommandTests
     }
 
     [Fact]
+    public async Task InvalidNetworkMessageRemainsNonterminal()
+    {
+        (RaftNode node, _) =
+            RestartNode(voters: [1, 2]);
+        try
+        {
+            await Assert.ThrowsAsync<
+                ArgumentException>(
+                async () => await node.StepAsync(
+                        new Message())
+                    .AsTask());
+            await Assert.ThrowsAsync<
+                ArgumentException>(
+                async () => await node.StepAsync(
+                        new Message
+                        {
+                            From = 2,
+                            To = 1,
+                            Type =
+                                MessageType.MsgVote,
+                        })
+                    .AsTask());
+
+            Assert.False(
+                node.Completion.IsCompleted);
+            _ = await node.GetStatusAsync();
+            node.Tick();
+        }
+        finally
+        {
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task InvalidConfigurationProposalRemainsNonterminal()
+    {
+        (RaftNode node, MemoryStorage storage) =
+            RestartNode();
+        try
+        {
+            await BecomeSingletonLeaderAsync(
+                node,
+                storage);
+
+            await Assert.ThrowsAsync<
+                ArgumentException>(
+                async () => await node
+                    .ProposeConfChangeAsync(
+                        new ConfChangeV2
+                        {
+                            Transition =
+                                (ConfChangeTransition)99,
+                        })
+                    .AsTask());
+
+            Assert.False(
+                node.Completion.IsCompleted);
+            Assert.Equal(
+                RaftRole.Leader,
+                (await node.GetStatusAsync())
+                    .Basic.Role);
+        }
+        finally
+        {
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task CanceledBlockedProposalNeverDispatches()
     {
         (RaftNode node, MemoryStorage storage) =

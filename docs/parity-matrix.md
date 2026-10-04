@@ -52,6 +52,10 @@ These are documented design choices, not unknown parity gaps:
    timers remain outside the consensus library.
 9. Package 1.0.0 targets `net10.0` only; no older-framework compatibility
    requirement exists.
+10. ADR 0008 validates malformed network and configuration proposal structure
+    at the public `RawNode` boundary before core mutation. The pinned
+    implementation relies on its host and generated messages for those
+    preconditions.
 
 ## Corpus integrity
 
@@ -64,4 +68,3 @@ These are documented design choices, not unknown parity gaps:
 
 The checked-in expected output uses the accepted C# descriptions and logger
 wording while preserving every upstream command and input.
-

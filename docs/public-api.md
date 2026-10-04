@@ -305,8 +305,16 @@ constructing a new node.
 Send every nonlocal Ready message to `Message.To`. Clone or serialize it
 before sharing across threads.
 
-Pass received messages to `Step`/`StepAsync`. Unknown response senders are
-filtered. Classifier-local messages are not network protocol messages.
+Authenticate the connection-level peer and require that identity to match
+`Message.From`. Validate that `Message.To` is the exact local node and restrict
+the listener to authorized cluster peers. `Step` and `StepAsync` are
+consensus-message facades, not authentication or routing trust boundaries.
+
+Pass the validated message to `Step`/`StepAsync`. The library rejects
+host-independent malformed message structure before core mutation. Unknown
+response senders are filtered, and classifier-local messages are not network
+protocol messages. An `ArgumentException` rejects only that operation;
+internal invariant failures remain terminal.
 
 After sending a snapshot, call `ReportSnapshot` with success or failure. A
 failure resumes probing; failing to report can leave follower progress paused.
@@ -314,7 +322,8 @@ failure resumes probing; failing to report can leave follower progress paused.
 The runnable
 [`DotnetRaft.KvCluster`](../examples/DotnetRaft.KvCluster/README.md) example
 shows this boundary with an ASP.NET Core gRPC bytes-envelope transport. It is
-an educational in-memory host, not a durable deployment template.
+an unauthenticated, loopback-only educational host, not a production
+deployment template.
 
 ## Snapshots and compaction
 
