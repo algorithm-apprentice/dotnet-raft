@@ -187,6 +187,11 @@ For `AsyncStorageWrites == false`:
 8. admit every `ReadState` to the same ordered application pipeline; and
 9. call `Advance` with the exact returned `Ready`.
 
+Snapshot presence does not participate in `Ready.MustSync`. Complete snapshot
+persistence according to the storage implementation's durability contract
+before dependent messages or `Advance`; do not infer a separate generic flush
+solely because `Ready.Snapshot` is present.
+
 Only one Ready can be outstanding. Inputs can continue accumulating while it
 is outstanding; newer work appears after advancement.
 
@@ -261,10 +266,10 @@ foreach (Message message in ready.Messages)
     switch (message.To)
     {
         case RaftLocalMessageTargets.AppendThread:
-            appendQueue.Writer.TryWrite(message);
+            await appendQueue.Writer.WriteAsync(message);
             break;
         case RaftLocalMessageTargets.ApplyThread:
-            applyQueue.Writer.TryWrite(message);
+            await applyQueue.Writer.WriteAsync(message);
             break;
         default:
             await transport.SendAsync(message);
@@ -273,7 +278,10 @@ foreach (Message message in ready.Messages)
 }
 ```
 
-Append and apply queues are independently FIFO and reliable.
+Append and apply queues are independently FIFO. Awaited writes apply
+backpressure when a bounded queue is full and surface a completed or faulted
+channel. Treat such failure as a node/host failure; never discard a local
+storage request by ignoring a false `TryWrite` result.
 
 ### Append worker
 
@@ -281,7 +289,9 @@ Append and apply queues are independently FIFO and reliable.
 encoded in its term/vote/commit fields.
 
 Atomically publish snapshot, entries, and hard state. If responses are
-present, force durability before delivering them in order.
+present, force durability before delivering them in order. The response list,
+not snapshot presence by itself, defines the asynchronous forced-durability
+decision.
 
 A snapshot-bearing request also restores physical application state and
 configuration under the same exclusive application-state barrier used by the

@@ -358,16 +358,18 @@ according to the pinned durability rule.
 - every batch is published without a torn snapshot/entry/hard-state
   generation;
 - entries always make `MustSync` true;
-- snapshots are always durably persisted even when `MustSync` is false;
+- snapshot presence does not participate in the `MustSync` calculation;
 - term or vote changes require a forced durable hard-state write; and
 - a commit-only hard-state generation with `MustSync == false` may use a
   non-forced write and may be lost as a whole on crash.
 
 `MustSync == false` does not relax the complete-batch publication boundary or
-persistence-before-message ordering. It only informs the host's
-HardState/entry WAL flush decision. If separately durable application progress
-outlives a lost commit-only generation, restart performs the recovery repair
-defined above.
+persistence-before-message ordering. A snapshot must be accepted by stable
+storage before dependent messages are sent or `Advance` is called, but its
+store-specific flush policy is not defined by `MustSync`. `MustSync` only
+informs the host's HardState/entry WAL flush decision. If separately durable
+application progress outlives a lost commit-only generation, restart performs
+the recovery repair defined above.
 
 The public static helper rejects negative entry counts and compares hard-state
 values rather than protobuf presence bits.
@@ -414,10 +416,12 @@ SetHardState
 ```
 
 A storage implementation should stage or WAL the complete generation and
-atomically publish it. When `MustSync` is true, the generation must be forced
-durable before publication completes. A snapshot must also be forced durable
-regardless of `MustSync`. A commit-only `MustSync == false` generation can use
-a non-forced write.
+atomically publish it. When `MustSync` is true, the entries and hard state must
+be synchronously stabilized before publication completes. Snapshot persistence
+must complete according to the storage implementation's own durability
+contract before dependent messages or `Advance`; snapshot presence alone does
+not require an additional generic flush. A commit-only `MustSync == false`
+generation can use a non-forced write.
 
 After every crash, storage must expose either the prior generation or a
 self-consistent new generation. It must never expose:
@@ -684,8 +688,8 @@ the applied cursor advances beyond the entries actually delivered.
   published;
 - forced term/vote or entry generations survive every modeled crash after
   publication;
-- snapshot-only generations force snapshot durability even when `MustSync` is
-  false;
+- snapshot-only generations do not acquire a synthetic force decision from
+  `MustSync`;
 - commit-only `MustSync == false` recovery exposes either the complete old
   generation or the complete new generation within Raft storage;
 - when durable application progress outlives the old recovered commit, restart
