@@ -345,6 +345,7 @@ internal sealed class RaftCore
                 RaftMessageTargets.None)
         {
             AbortLeaderTransfer();
+            MaybeAutoLeave();
         }
 
         if (Role != RaftRole.Leader

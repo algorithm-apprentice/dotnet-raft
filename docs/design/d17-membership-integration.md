@@ -310,7 +310,9 @@ subsequent `AppliedTo` calls from proposing duplicate exits.
 
 The proposal has zero protobuf payload and therefore cannot be rejected by the
 uncommitted-payload quota. In D17 there is no leadership-transfer rejection
-path. D20 will preserve the reference retry behavior when transfer is active.
+path. D20 drops the proposal while transfer is active, and ADR 0009
+re-evaluates the same guarded operation immediately when that transfer times
+out.
 
 A follower never auto-proposes. If leadership later changes while the joint
 configuration remains active, applying a later entry as the new leader
@@ -412,7 +414,9 @@ exit check.
 - advancing application through each intervening normal entry does not append
   duplicate exits;
 - followers do not auto-propose;
-- a later leader triggers exit after a subsequent application advance.
+- a later leader triggers exit after a subsequent application advance;
+- a leader whose transfer times out retries a transfer-blocked exit
+  immediately, without waiting for another applied entry;
 - restoring an `AutoLeave == true` snapshot as a follower emits no exit, but a
   later leader no-op application emits exactly one;
 - restoring an otherwise equivalent `AutoLeave == false` snapshot never emits

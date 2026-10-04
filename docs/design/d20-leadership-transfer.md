@@ -284,15 +284,18 @@ During transfer it is intentionally dropped.
 proposal and leaves membership, pending index, log, and queues unchanged. The
 application cursor remains advanced.
 
-Every later host `AppliedTo` acknowledgement re-evaluates auto-leave, matching
-the pinned core function. Normal D21 `Ready`/`Advance` use supplies a later
-applied batch; the internal core also accepts a repeated current index and
-would re-evaluate on that explicit duplicate call. Timeout or cancellation
-alone does not retry the proposal. Therefore:
+Every later host `AppliedTo` acknowledgement re-evaluates auto-leave through
+the pinned core function. Normal D21 `Ready`/`Advance` use supplies that
+fallback.
+
+ADR 0009 adds one narrow liveness deviation: when the transfer reaches its
+election timeout and the node remains leader, `TickLeader` clears the transfer
+target and immediately re-evaluates auto-leave. It uses the same proposal path
+and pending-index guard. Therefore:
 
 - if transfer succeeds, the new leader can propose the exit; or
-- if transfer times out or is cancelled, the current leader retries on a later
-  application acknowledgement.
+- if transfer times out, the current leader retries in that timeout tick
+  without waiting for unrelated application work.
 
 Malformed protobuf, storage, and invariant failures are not swallowed.
 
@@ -432,9 +435,10 @@ but logging does not affect protocol behavior.
   progress;
 - cancellation or timeout does not retract an already emitted
   `MsgTimeoutNow`;
-- timeout alone does not retry automatic joint exit;
-- after a transfer-time auto-leave drop, a strictly later committed entry is
-  applied and causes exactly one retry.
+- transfer timeout immediately retries a previously dropped automatic joint
+  exit exactly once, without a later committed entry;
+- repeated ticks and duplicate current-index application do not append another
+  exit.
 
 ### Interaction scenarios
 
@@ -455,8 +459,8 @@ D20 is complete when:
    revalidation;
 3. the forced real election bypasses leader-lease suppression without
    bypassing quorum or log freshness;
-4. transfer timeout, replacement, self-cancellation, reset, and membership
-   cancellation match the pinned behavior;
+4. transfer replacement, self-cancellation, reset, and membership cancellation
+   match the pinned behavior, while timeout adds the ADR 0009 auto-leave retry;
 5. proposals and auto-leave behave atomically while transfer is pending;
 6. direct, slow-log, snapshot, forwarding, and `CheckQuorum` interaction tests
    pass;

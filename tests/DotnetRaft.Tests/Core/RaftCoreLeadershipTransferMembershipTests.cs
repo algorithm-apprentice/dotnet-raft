@@ -108,7 +108,7 @@ public sealed class RaftCoreLeadershipTransferMembershipTests
     }
 
     [Fact]
-    public void AutoLeaveRetriesAfterTransferTimeoutAndLaterApplication()
+    public void AutoLeaveRetriesImmediatelyAfterTransferTimeout()
     {
         RaftCore core = CreateLeader(
             voters: [1, 2, 3],
@@ -151,32 +151,10 @@ public sealed class RaftCoreLeadershipTransferMembershipTests
         }
 
         Assert.Equal(0UL, core.LeaderTransferee);
-        Assert.Equal(2UL, core.Log.LastIndex);
-
-        core.Step(Proposal(
-            core.Id,
-            NormalEntry("later")));
-        core.TakeMessages();
-        core.Step(Assert.Single(
-            core.TakeMessagesAfterAppend()));
-        core.TakeMessages();
-        core.Step(new Message
-        {
-            From = 2,
-            To = 1,
-            Term = core.Term,
-            Type = MessageType.MsgAppResp,
-            Index = 3,
-        });
-        core.TakeMessages();
-        Assert.Equal(3UL, core.Log.Committed);
-
-        core.AppliedTo(3, 0);
-
-        Assert.Equal(4UL, core.Log.LastIndex);
-        Assert.Equal(4UL, core.PendingConfigurationIndex);
+        Assert.Equal(3UL, core.Log.LastIndex);
+        Assert.Equal(3UL, core.PendingConfigurationIndex);
         Entry exit = Assert.Single(
-            core.Log.GetEntries(4));
+            core.Log.GetEntries(3));
         Assert.Equal(
             EntryType.EntryConfChangeV2,
             exit.Type);
@@ -184,6 +162,48 @@ public sealed class RaftCoreLeadershipTransferMembershipTests
             new ConfChangeV2(),
             ConfChangeV2.Parser.ParseFrom(
                 exit.Data));
+
+        core.AppliedTo(2, 0);
+        for (var tick = 0;
+             tick < core.GetClockStateForTesting().ElectionTick;
+             tick++)
+        {
+            core.TickLeader();
+            core.TakeMessages();
+        }
+
+        Assert.Equal(3UL, core.Log.LastIndex);
+        Assert.Equal(3UL, core.PendingConfigurationIndex);
+    }
+
+    [Fact]
+    public void CheckQuorumStepDownSuppressesTimeoutAutoLeaveRetry()
+    {
+        RaftCore core = CreateLeader(
+            voters: [1, 2, 3],
+            outgoingVoters: [1, 2, 3],
+            entries: [EntryAt(1, 1)],
+            term: 1,
+            commit: 1,
+            applied: 1,
+            electionTick: 2,
+            checkQuorum: true).Core;
+        core.Tracker.Config.AutoLeave = true;
+        core.SetPendingConfigurationIndexForTesting(1);
+        core.SetLeaderTransfereeForTesting(2);
+        ulong lastIndex = core.Log.LastIndex;
+
+        for (var tick = 0;
+             tick < core.GetClockStateForTesting().ElectionTick;
+             tick++)
+        {
+            core.TickLeader();
+            core.TakeMessages();
+        }
+
+        Assert.Equal(RaftRole.Follower, core.Role);
+        Assert.Equal(0UL, core.LeaderTransferee);
+        Assert.Equal(lastIndex, core.Log.LastIndex);
     }
 
     private static ConfChangeSingle Remove(ulong id)
