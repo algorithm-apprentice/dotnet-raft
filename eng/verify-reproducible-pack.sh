@@ -17,6 +17,8 @@ fi
 candidate="$repo/artifacts/package"
 test -f "$candidate/DotnetRaft.1.0.0.nupkg"
 test -f "$candidate/DotnetRaft.1.0.0.snupkg"
+test -f "$candidate/DotnetRaft.Sqlite.1.0.0.nupkg"
+test -f "$candidate/DotnetRaft.Sqlite.1.0.0.snupkg"
 
 temp="$(cd "$(mktemp -d)" && pwd -P)"
 left="$temp/left"
@@ -59,3 +61,15 @@ compare \
 compare \
   "$candidate/DotnetRaft.1.0.0.snupkg" \
   "$right/artifacts/package/DotnetRaft.1.0.0.snupkg"
+compare \
+  "$candidate/DotnetRaft.Sqlite.1.0.0.nupkg" \
+  "$left/artifacts/package/DotnetRaft.Sqlite.1.0.0.nupkg"
+compare \
+  "$candidate/DotnetRaft.Sqlite.1.0.0.nupkg" \
+  "$right/artifacts/package/DotnetRaft.Sqlite.1.0.0.nupkg"
+compare \
+  "$candidate/DotnetRaft.Sqlite.1.0.0.snupkg" \
+  "$left/artifacts/package/DotnetRaft.Sqlite.1.0.0.snupkg"
+compare \
+  "$candidate/DotnetRaft.Sqlite.1.0.0.snupkg" \
+  "$right/artifacts/package/DotnetRaft.Sqlite.1.0.0.snupkg"

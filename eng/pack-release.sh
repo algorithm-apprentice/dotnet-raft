@@ -23,3 +23,12 @@ dotnet pack "$repo/src/DotnetRaft/DotnetRaft.csproj" \
   -p:Deterministic=true \
   -p:RepositoryCommit="$commit" \
   -p:PathMap="$repo=/_/"
+
+SOURCE_DATE_EPOCH=315532800 \
+dotnet pack "$repo/src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj" \
+  -c Release \
+  --no-restore \
+  -p:ContinuousIntegrationBuild=true \
+  -p:Deterministic=true \
+  -p:RepositoryCommit="$commit" \
+  -p:PathMap="$repo=/_/"

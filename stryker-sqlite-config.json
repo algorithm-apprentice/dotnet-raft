@@ -1,0 +1,26 @@
+{
+  "stryker-config": {
+    "solution": "DotnetRaft.sln",
+    "project": "DotnetRaft.Sqlite.csproj",
+    "test-projects": [
+      "tests/DotnetRaft.Sqlite.Tests/DotnetRaft.Sqlite.Tests.csproj"
+    ],
+    "configuration": "Release",
+    "mutate": [
+      "**/SqliteStorage.cs",
+      "**/SqliteStorageCodec.cs",
+      "**/SqliteStorageSchema.cs"
+    ],
+    "reporters": [
+      "cleartext",
+      "json"
+    ],
+    "coverage-analysis": "off",
+    "concurrency": 4,
+    "thresholds": {
+      "high": 85,
+      "low": 75,
+      "break": 0
+    }
+  }
+}

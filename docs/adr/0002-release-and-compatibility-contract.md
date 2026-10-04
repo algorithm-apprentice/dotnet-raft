@@ -19,8 +19,10 @@ breakage from intentional evolution.
 ## Decision
 
 1. The first package version is `DotnetRaft` `1.0.0`, targeting `net10.0`.
-2. The package is an educational consensus library, not a transport, gRPC
-   service, durable database, or replicated application.
+2. `DotnetRaft` is an educational consensus library, not a transport, gRPC
+   service, durable database, or replicated application. ADR 0006 adds the
+   optional `DotnetRaft.Sqlite` durable consensus-storage package without
+   changing the core package boundary.
 3. Public API compatibility begins at D26:
    - a checked-in reflection-generated API manifest records the shipped
      surface;
@@ -33,6 +35,7 @@ breakage from intentional evolution.
      optional defaults, generic constraints, and accessor modifiers;
    - protobuf wire field numbers, types, cardinality, and enum numeric values;
    - persisted log/snapshot restart compatibility;
+   - the separately approved `DotnetRaft.Sqlite` public API and schema version;
    - D21-D25 host ordering, durability, recovery, Ready, and local-storage
      protocols;
    - supported target frameworks; and
@@ -53,6 +56,8 @@ breakage from intentional evolution.
    - `README.md`;
    - `LICENSE`; and
    - `THIRD-PARTY-NOTICES.md`.
+   `DotnetRaft.Sqlite` independently includes its assembly, portable symbols,
+   SQLite-specific README, license, and notices.
 7. Runtime package dependencies include `Google.Protobuf`; `Grpc.Tools`
    remains build-private and must not appear as a consumer dependency.
 8. The package is tag-ready but D26 does not publish to nuget.org or create a
@@ -68,6 +73,7 @@ breakage from intentional evolution.
 ### Positive
 
 - Consumers receive complete license and provenance metadata.
+- Consensus-only consumers are not forced to restore native SQLite assets.
 - Package contents and dependencies are mechanically verified.
 - The first stable API boundary is explicit.
 - Post-D26 internal refactoring can rely on both behavioral tests and an API

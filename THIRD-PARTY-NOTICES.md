@@ -15,3 +15,20 @@ that license is included in this repository as `LICENSE`.
 The derived work changes the implementation language to C#, reorganizes the
 code around an explicit implementation dependency DAG, and adapts APIs and
 tests to .NET conventions.
+
+## Microsoft.Data.Sqlite
+
+`DotnetRaft.Sqlite` uses
+[`Microsoft.Data.Sqlite`](https://www.nuget.org/packages/Microsoft.Data.Sqlite),
+an MIT-licensed ADO.NET provider maintained by Microsoft.
+
+## SQLitePCLRaw
+
+`Microsoft.Data.Sqlite` uses
+[`SQLitePCLRaw`](https://github.com/ericsink/SQLitePCL.raw), licensed under the
+Apache License, Version 2.0, for SQLite native interop and runtime packaging.
+
+## SQLite
+
+SQLite is in the public domain. See
+[`sqlite.org/copyright.html`](https://www.sqlite.org/copyright.html).

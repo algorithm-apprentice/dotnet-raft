@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 
 using DotnetRaft.Protocol;
+using DotnetRaft.Storage.Sqlite;
 
 using Google.Protobuf.Reflection;
 
@@ -18,6 +19,16 @@ public sealed class PublicApiApprovalTests
         const string fileName = "PublicApi.approved.txt";
         string actual = PublicApiFormatter.Generate(
             typeof(RaftConfig).Assembly);
+        VerifyOrRewrite(fileName, actual);
+    }
+
+    [Fact]
+    public void SqliteManagedPublicApiMatchesApproval()
+    {
+        const string fileName =
+            "SqlitePublicApi.approved.txt";
+        string actual = PublicApiFormatter.Generate(
+            typeof(SqliteStorage).Assembly);
         VerifyOrRewrite(fileName, actual);
     }
 

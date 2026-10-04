@@ -1,0 +1,21 @@
+type public sealed class DotnetRaft.Storage.Sqlite.SqliteStorage : DotnetRaft.Storage.IStorage, System.IDisposable
+  public DotnetRaft.Protocol.HardState? GetHardState()
+  public DotnetRaft.Protocol.Snapshot CreateSnapshot(ulong index, DotnetRaft.Protocol.ConfState? confState, Google.Protobuf.ByteString data)
+  public DotnetRaft.Protocol.Snapshot? GetPendingApplicationSnapshot()
+  public SqliteStorage(string databasePath)
+  public sealed virtual DotnetRaft.Protocol.Snapshot GetSnapshot()
+  public sealed virtual DotnetRaft.Storage.StorageState GetInitialState()
+  public sealed virtual System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> GetEntries(ulong lowInclusive, ulong highExclusive, ulong maxSize)
+  public sealed virtual ulong GetFirstIndex()
+  public sealed virtual ulong GetLastIndex()
+  public sealed virtual ulong GetTerm(ulong index)
+  public sealed virtual void Dispose()
+  public string DatabasePath { get; }
+  public void AcknowledgeApplicationSnapshot(ulong index)
+  public void Append(System.Collections.Generic.IEnumerable<DotnetRaft.Protocol.Entry> entries)
+  public void ApplySnapshot(DotnetRaft.Protocol.Snapshot snapshot)
+  public void Compact(ulong compactIndex)
+  public void PersistReady(DotnetRaft.Ready ready)
+  public void PersistStorageAppend(DotnetRaft.Protocol.Message request)
+  public void SetHardState(DotnetRaft.Protocol.HardState state)
+

@@ -45,6 +45,14 @@ jobs:
           "$GITHUB_WORKSPACE"
           "${{ github.sha }}"
 
+      - name: Verify SQLite package
+        run: >-
+          ./eng/verify-sqlite-package.sh
+          artifacts/package/DotnetRaft.Sqlite.1.0.0.nupkg
+          artifacts/package/DotnetRaft.Sqlite.1.0.0.snupkg
+          "$GITHUB_WORKSPACE"
+          "${{ github.sha }}"
+
       - name: Verify reproducible package content
         run: ./eng/verify-reproducible-pack.sh "$GITHUB_WORKSPACE" "${{ github.sha }}"
 

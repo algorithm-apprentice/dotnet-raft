@@ -17,6 +17,15 @@ dotnet add package DotnetRaft --version 1.0.0
 
 The package targets `net10.0`.
 
+For durable SQLite consensus storage:
+
+```bash
+dotnet add package DotnetRaft.Sqlite --version 1.0.0
+```
+
+`DotnetRaft.Sqlite` is optional and keeps the core consensus package free of
+native database dependencies.
+
 ## Choose an integration API
 
 - `RawNode` is synchronous and thread-unsafe. The host owns one serialized
@@ -57,6 +66,7 @@ physical-application, and recovery rules in the
 
 - [Public API and host responsibilities](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
 - [Runnable gRPC key-value cluster example](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.KvCluster)
+- [Durable SQLite storage package](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/src/DotnetRaft.Sqlite)
 - [Behavioral parity matrix](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/parity-matrix.md)
 - [Reference architecture](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/reference-architecture.md)
 - [Implementation DAG](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/implementation-dag.md)
@@ -71,6 +81,8 @@ physical-application, and recovery rules in the
 - **Completed nodes:** D00-D26
 - **Completed:** behavior-preserving post-parity `RaftCore` refactoring
 - **Available example:** three-process ASP.NET Core gRPC key-value cluster
+- **Available storage:** durable SQLite Raft log, hard state, snapshots, and
+  restart support through `DotnetRaft.Sqlite`
 
 The example remains intentionally educational: it uses in-memory storage and
 state, while demonstrating transport, Ready processing, application, and

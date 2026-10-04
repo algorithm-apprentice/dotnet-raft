@@ -8,14 +8,17 @@ using System.Text.Json;
 using System.Xml.Linq;
 
 const string PackageId = "DotnetRaft";
+const string SqlitePackageId = "DotnetRaft.Sqlite";
 const string PackageVersion = "1.0.0";
 const string Description =
     "An educational, behavior-oriented C# implementation of the etcd Raft consensus state machine for .NET.";
+const string SqliteDescription =
+    "Durable SQLite consensus storage for DotnetRaft.";
 
 if (args.Length == 0)
 {
     return Fail(
-        "Usage: verify <nupkg> <snupkg> <repository-root> <commit> | compare <left> <right>");
+        "Usage: verify|verify-sqlite <nupkg> <snupkg> <repository-root> <commit> | compare <left> <right>");
 }
 
 try
@@ -24,6 +27,13 @@ try
     {
         case "verify" when args.Length == 5:
             VerifyPackage(
+                Path.GetFullPath(args[1]),
+                Path.GetFullPath(args[2]),
+                Path.GetFullPath(args[3]),
+                args[4]);
+            return 0;
+        case "verify-sqlite" when args.Length == 5:
+            VerifySqlitePackage(
                 Path.GetFullPath(args[1]),
                 Path.GetFullPath(args[2]),
                 Path.GetFullPath(args[3]),
@@ -275,16 +285,271 @@ static void VerifyPackage(
     VerifyDebugIdentity(
         dll,
         pdb,
-        expectedCommit);
+        expectedCommit,
+        "DotnetRaft.pdb");
 
     Console.WriteLine(
         $"verified {PackageId} {PackageVersion} commit {commit}");
 }
 
+static void VerifySqlitePackage(
+    string packagePath,
+    string symbolPath,
+    string repositoryRoot,
+    string expectedCommit)
+{
+    Require(
+        expectedCommit.Length == 40
+        && expectedCommit.All(Uri.IsHexDigit),
+        "Expected commit is not a 40-character SHA.");
+    RequireFile(packagePath);
+    RequireFile(symbolPath);
+    string licensePath =
+        Path.Combine(repositoryRoot, "LICENSE");
+    string readmePath =
+        Path.Combine(
+            repositoryRoot,
+            "src",
+            "DotnetRaft.Sqlite",
+            "README.md");
+    string noticesPath =
+        Path.Combine(
+            repositoryRoot,
+            "THIRD-PARTY-NOTICES.md");
+    RequireFile(licensePath);
+    RequireFile(readmePath);
+    RequireFile(noticesPath);
+
+    using ZipArchive package =
+        ZipFile.OpenRead(packagePath);
+    RequireEntry(
+        package,
+        "lib/net10.0/DotnetRaft.Sqlite.dll");
+    RequireEntry(package, "LICENSE");
+    RequireEntry(package, "README.md");
+    RequireEntry(
+        package,
+        "THIRD-PARTY-NOTICES.md");
+    XElement metadata =
+        Metadata(ReadXml(SingleNuspec(package)));
+    RequireValue(
+        metadata,
+        "id",
+        SqlitePackageId);
+    RequireValue(
+        metadata,
+        "version",
+        PackageVersion);
+    RequireValue(
+        metadata,
+        "authors",
+        "algorithm-apprentice");
+    RequireValue(
+        metadata,
+        "description",
+        SqliteDescription);
+    RequireValue(metadata, "readme", "README.md");
+
+    XNamespace ns = metadata.Name.Namespace;
+    XElement license =
+        metadata.Element(ns + "license")
+        ?? throw new InvalidOperationException(
+            "SQLite package nuspec has no license metadata.");
+    Require(
+        string.Equals(
+            (string?)license.Attribute("type"),
+            "file",
+            StringComparison.Ordinal)
+        && string.Equals(
+            license.Value,
+            "LICENSE",
+            StringComparison.Ordinal),
+        "SQLite package license metadata is incorrect.");
+    XElement repository =
+        metadata.Element(ns + "repository")
+        ?? throw new InvalidOperationException(
+            "SQLite package nuspec has no repository metadata.");
+    Require(
+        string.Equals(
+            (string?)repository.Attribute("type"),
+            "git",
+            StringComparison.Ordinal)
+        && string.Equals(
+            (string?)repository.Attribute("url"),
+            "https://github.com/algorithm-apprentice/dotnet-raft",
+            StringComparison.Ordinal)
+        && string.Equals(
+            (string?)repository.Attribute("commit"),
+            expectedCommit,
+            StringComparison.OrdinalIgnoreCase),
+        "SQLite package repository metadata is incorrect.");
+
+    XElement[] dependencies = metadata
+        .Descendants(ns + "dependency")
+        .ToArray();
+    XElement core = dependencies.SingleOrDefault(
+        dependency =>
+            string.Equals(
+                (string?)dependency.Attribute("id"),
+                PackageId,
+                StringComparison.Ordinal))
+        ?? throw new InvalidOperationException(
+            "DotnetRaft dependency is missing.");
+    Require(
+        ((string?)core.Attribute("version")
+         ?? string.Empty)
+        .Contains(
+            "1.0.0",
+            StringComparison.Ordinal),
+        "DotnetRaft dependency version is not 1.0.0.");
+    XElement sqlite =
+        dependencies.SingleOrDefault(
+            dependency =>
+                string.Equals(
+                    (string?)dependency.Attribute("id"),
+                    "Microsoft.Data.Sqlite",
+                    StringComparison.Ordinal))
+        ?? throw new InvalidOperationException(
+            "Microsoft.Data.Sqlite dependency is missing.");
+    Require(
+        ((string?)sqlite.Attribute("version")
+         ?? string.Empty)
+        .Contains(
+            "10.0.12",
+            StringComparison.Ordinal),
+        "Microsoft.Data.Sqlite dependency version is not 10.0.12.");
+    Require(
+        dependencies.All(
+            dependency =>
+                !string.Equals(
+                    (string?)dependency.Attribute("id"),
+                    "Grpc.Tools",
+                    StringComparison.Ordinal)),
+        "Grpc.Tools leaked into SQLite runtime dependencies.");
+
+    CompareEntry(package, "LICENSE", licensePath);
+    CompareEntry(package, "README.md", readmePath);
+    CompareEntry(
+        package,
+        "THIRD-PARTY-NOTICES.md",
+        noticesPath);
+
+    byte[] dll = ReadEntry(
+        package,
+        "lib/net10.0/DotnetRaft.Sqlite.dll");
+    using ZipArchive symbols =
+        ZipFile.OpenRead(symbolPath);
+    RequireEntry(
+        symbols,
+        "lib/net10.0/DotnetRaft.Sqlite.pdb");
+    XElement symbolMetadata =
+        Metadata(ReadXml(SingleNuspec(symbols)));
+    RequireValue(
+        symbolMetadata,
+        "id",
+        SqlitePackageId);
+    RequireValue(
+        symbolMetadata,
+        "version",
+        PackageVersion);
+    XElement symbolRepository =
+        symbolMetadata.Element(
+            symbolMetadata.Name.Namespace
+            + "repository")
+        ?? throw new InvalidOperationException(
+            "SQLite symbol nuspec has no repository metadata.");
+    Require(
+        string.Equals(
+            (string?)symbolRepository.Attribute("commit"),
+            expectedCommit,
+            StringComparison.OrdinalIgnoreCase),
+        "SQLite symbol package repository commit does not match.");
+    XElement packageType = symbolMetadata
+        .Descendants(
+            symbolMetadata.Name.Namespace
+            + "packageType")
+        .SingleOrDefault()
+        ?? throw new InvalidOperationException(
+            "SQLite symbol package type is missing.");
+    Require(
+        string.Equals(
+            (string?)packageType.Attribute("name"),
+            "SymbolsPackage",
+            StringComparison.Ordinal),
+        "SQLite symbol package type is not SymbolsPackage.");
+
+    ZipArchiveEntry[] symbolEntries =
+    [
+        .. symbols.Entries.Where(
+            entry =>
+                !entry.FullName.EndsWith('/')),
+    ];
+    string[] duplicates = symbolEntries
+        .GroupBy(
+            entry => entry.FullName,
+            StringComparer.Ordinal)
+        .Where(group => group.Count() != 1)
+        .Select(group => group.Key)
+        .ToArray();
+    Require(
+        duplicates.Length == 0,
+        $"SQLite symbol package has duplicate entries: {string.Join(',', duplicates)}.");
+    ZipArchiveEntry coreProperties =
+        symbolEntries.Single(entry =>
+            entry.FullName.StartsWith(
+                "package/services/metadata/core-properties/",
+                StringComparison.Ordinal)
+            && entry.FullName.EndsWith(
+                ".psmdcp",
+                StringComparison.Ordinal));
+    string[] expectedEntries =
+    [
+        "_rels/.rels",
+        "DotnetRaft.Sqlite.nuspec",
+        "lib/net10.0/DotnetRaft.Sqlite.pdb",
+        "[Content_Types].xml",
+        coreProperties.FullName,
+    ];
+    Require(
+        symbolEntries
+            .Select(entry => entry.FullName)
+            .Order(StringComparer.Ordinal)
+            .SequenceEqual(
+                expectedEntries.Order(
+                    StringComparer.Ordinal),
+                StringComparer.Ordinal),
+        "SQLite symbol package entry set is not exact.");
+    foreach (ZipArchiveEntry entry in symbolEntries)
+    {
+        Require(
+            IsAllowedSymbolEntry(
+                entry.FullName,
+                "DotnetRaft.Sqlite.nuspec",
+                "DotnetRaft.Sqlite.pdb"),
+            $"SQLite symbol package contains unsupported entry {entry.FullName}.");
+    }
+
+    byte[] pdb = ReadEntry(
+        symbols,
+        "lib/net10.0/DotnetRaft.Sqlite.pdb");
+    Require(
+        pdb.AsSpan(0, 4)
+            .SequenceEqual("BSJB"u8),
+        "SQLite symbol package PDB is not portable.");
+    VerifyDebugIdentity(
+        dll,
+        pdb,
+        expectedCommit,
+        "DotnetRaft.Sqlite.pdb");
+    Console.WriteLine(
+        $"verified {SqlitePackageId} {PackageVersion} commit {expectedCommit}");
+}
+
 static void VerifyDebugIdentity(
     byte[] dll,
     byte[] pdb,
-    string expectedCommit)
+    string expectedCommit,
+    string expectedPdbName)
 {
     using var peReader = new PEReader(
         new MemoryStream(dll, writable: false));
@@ -317,9 +582,9 @@ static void VerifyDebugIdentity(
         "DLL and PDB stamps do not match.");
     Require(
         codeView.Path.EndsWith(
-            "DotnetRaft.pdb",
+            expectedPdbName,
             StringComparison.Ordinal),
-        "DLL CodeView path does not name DotnetRaft.pdb.");
+        $"DLL CodeView path does not name {expectedPdbName}.");
     VerifySourceLink(reader, expectedCommit);
 }
 
@@ -364,7 +629,10 @@ static void VerifySourceLink(
         "Source Link mapping is not the exact expected GitHub mapping.");
 }
 
-static bool IsAllowedSymbolEntry(string path)
+static bool IsAllowedSymbolEntry(
+    string path,
+    string nuspecName = "DotnetRaft.nuspec",
+    string pdbName = "DotnetRaft.pdb")
 {
     if (string.Equals(
             path,
@@ -376,11 +644,11 @@ static bool IsAllowedSymbolEntry(string path)
             StringComparison.Ordinal)
         || string.Equals(
             path,
-            "DotnetRaft.nuspec",
+            nuspecName,
             StringComparison.Ordinal)
         || string.Equals(
             path,
-            "lib/net10.0/DotnetRaft.pdb",
+            $"lib/net10.0/{pdbName}",
             StringComparison.Ordinal))
     {
         return true;

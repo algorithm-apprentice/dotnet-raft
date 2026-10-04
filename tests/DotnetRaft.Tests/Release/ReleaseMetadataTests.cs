@@ -73,6 +73,61 @@ public sealed partial class ReleaseMetadataTests
     }
 
     [Fact]
+    public void SqliteProjectDeclaresReleasePackageMetadata()
+    {
+        string project = Path.Combine(
+            ReleaseTestPaths.RepositoryRoot,
+            "src",
+            "DotnetRaft.Sqlite",
+            "DotnetRaft.Sqlite.csproj");
+        XDocument document = XDocument.Load(project);
+
+        Assert.Equal("true", Value(document, "IsPackable"));
+        Assert.Equal(
+            "DotnetRaft.Sqlite",
+            Value(document, "PackageId"));
+        Assert.Equal("1.0.0", Value(document, "Version"));
+        Assert.Equal(
+            "algorithm-apprentice",
+            Value(document, "Authors"));
+        Assert.Equal(
+            "Durable SQLite consensus storage for DotnetRaft.",
+            Value(document, "Description"));
+        Assert.Equal(
+            "LICENSE",
+            Value(document, "PackageLicenseFile"));
+        Assert.Equal(
+            "README.md",
+            Value(document, "PackageReadmeFile"));
+        Assert.Equal(
+            "true",
+            Value(document, "IncludeSymbols"));
+        Assert.Equal(
+            "snupkg",
+            Value(document, "SymbolPackageFormat"));
+
+        XElement sqlite = document
+            .Descendants("PackageReference")
+            .Single(element =>
+                string.Equals(
+                    (string?)element.Attribute(
+                        "Include"),
+                    "Microsoft.Data.Sqlite",
+                    StringComparison.Ordinal));
+        Assert.Equal(
+            "10.0.12",
+            (string?)sqlite.Attribute("Version"));
+        Assert.Contains(
+            document.Descendants("ProjectReference"),
+            element =>
+                ((string?)element.Attribute("Include")
+                 ?? string.Empty)
+                .EndsWith(
+                    "DotnetRaft.csproj",
+                    StringComparison.Ordinal));
+    }
+
+    [Fact]
     public void ReleaseDocumentsAndScriptsExist()
     {
         string[] paths =
@@ -85,10 +140,13 @@ public sealed partial class ReleaseMetadataTests
             "docs/performance.md",
             "eng/pack-release.sh",
             "eng/verify-package.sh",
+            "eng/verify-sqlite-package.sh",
             "eng/verify-reproducible-pack.sh",
             ".github/workflows/ci.yml",
             "benchmarks/DotnetRaft.Benchmarks/DotnetRaft.Benchmarks.csproj",
             "tools/DotnetRaft.ReleaseVerifier/DotnetRaft.ReleaseVerifier.csproj",
+            "src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj",
+            "src/DotnetRaft.Sqlite/README.md",
         ];
         foreach (string relative in paths)
         {
@@ -104,21 +162,32 @@ public sealed partial class ReleaseMetadataTests
     [Fact]
     public void ReadmeUsesOnlyAbsoluteHttpsLinks()
     {
-        string readme = File.ReadAllText(
+        string[] readmes =
+        {
             Path.Combine(
                 ReleaseTestPaths.RepositoryRoot,
-                "README.md"));
-        MatchCollection links =
-            MarkdownLinkRegex().Matches(readme);
-        Assert.NotEmpty(links);
-        foreach (Match link in links)
+                "README.md"),
+            Path.Combine(
+                ReleaseTestPaths.RepositoryRoot,
+                "src",
+                "DotnetRaft.Sqlite",
+                "README.md"),
+        };
+        foreach (string path in readmes)
         {
-            string target =
-                link.Groups["target"].Value;
-            Assert.StartsWith(
-                "https://",
-                target,
-                StringComparison.Ordinal);
+            MatchCollection links =
+                MarkdownLinkRegex().Matches(
+                    File.ReadAllText(path));
+            Assert.NotEmpty(links);
+            foreach (Match link in links)
+            {
+                string target =
+                    link.Groups["target"].Value;
+                Assert.StartsWith(
+                    "https://",
+                    target,
+                    StringComparison.Ordinal);
+            }
         }
     }
 

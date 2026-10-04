@@ -30,6 +30,97 @@ The host owns:
 - retry and client request identity; and
 - crash recovery.
 
+`DotnetRaft.Sqlite` is an optional package implementing durable consensus
+storage. It does not persist the application state machine.
+
+## Durable SQLite storage
+
+Install:
+
+```bash
+dotnet add package DotnetRaft.Sqlite --version 1.0.0
+```
+
+Open one local database:
+
+```csharp
+using DotnetRaft.Storage.Sqlite;
+
+using var storage =
+    new SqliteStorage("data/raft.db");
+```
+
+The storage uses SQLite WAL mode, exclusive locking, and
+`synchronous=FULL`. It atomically persists each synchronous Ready:
+
+```csharp
+storage.PersistReady(ready);
+```
+
+For asynchronous storage writes:
+
+```csharp
+storage.PersistStorageAppend(appendRequest);
+```
+
+Do not deliver `appendRequest.Responses` until persistence succeeds.
+
+### Pending application snapshots
+
+Persisting an incoming snapshot and restoring application state cannot be one
+transaction when application state is stored elsewhere. SQLite storage
+therefore records a durable pending marker.
+
+Before constructing a restarted node:
+
+```csharp
+Snapshot? pending =
+    storage.GetPendingApplicationSnapshot();
+if (pending is not null)
+{
+    RestoreApplicationSnapshotAtomically(
+        pending.Data,
+        pending.Metadata.Index,
+        pending.Metadata.ConfState);
+
+    HardState hardState =
+        storage.GetHardState()
+        ?? throw new InvalidDataException(
+            "A pending non-bootstrap snapshot requires durable HardState.");
+    if (hardState.Term
+        < pending.Metadata.Term)
+    {
+        throw new InvalidDataException(
+            "Recovered HardState term is older than the pending snapshot.");
+    }
+
+    if (hardState.Commit
+        < pending.Metadata.Index)
+    {
+        hardState.Commit =
+            pending.Metadata.Index;
+        storage.SetHardState(hardState);
+    }
+
+    storage.AcknowledgeApplicationSnapshot(
+        pending.Metadata.Index);
+}
+```
+
+`GetInitialState` rejects startup while the marker remains. Snapshot
+acknowledgement also requires durable `HardState.Commit` to cover the snapshot.
+Repeating snapshot restore after a crash must be safe and idempotent.
+Term and vote cannot be synthesized from snapshot metadata; missing or
+regressed durable term is a terminal recovery failure.
+
+The database, `-wal`, and `-shm` files must remain together on one local
+filesystem. Network filesystems, hard-link aliases, multiple owners, and
+copying only the main database file while it is live are unsupported.
+
+SQLite persists only Raft consensus state. Application bytes,
+`physicalApplied`, proposal deduplication, and any application database remain
+the host's responsibility.
+
 ## Configuration
 
 At minimum:
