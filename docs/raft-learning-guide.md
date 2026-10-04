@@ -1128,15 +1128,21 @@ dotnet build examples/DotnetRaft.KvCluster -c Release --no-restore
 ./eng/smoke-durable-kv-cluster.sh "$PWD"
 ```
 
+It requires `curl`, `jq`, and `python3`, plus unused loopback ports
+`17101`-`17103` and `17201`-`17203`.
+
 It exercises:
 
 - follower-originated writes;
+- leader-view convergence and retry-safe transient mutation failures;
 - an offline follower;
 - a 31 MiB value and snapshot catch-up;
 - leader `SIGKILL`;
 - quorum progress while the leader is down;
 - old-leader recovery; and
 - complete cluster restart.
+
+On failure it prints the three node logs before cleanup.
 
 ## 9. Tests as an executable specification
 

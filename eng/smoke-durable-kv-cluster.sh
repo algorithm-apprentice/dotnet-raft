@@ -8,12 +8,56 @@ fi
 
 repo="$(cd "$1" && pwd -P)"
 dll="$repo/examples/DotnetRaft.KvCluster/bin/Release/net10.0/DotnetRaft.KvCluster.dll"
-test -f "$dll"
+
+require_command() {
+  local command="$1"
+  if ! command -v "$command" >/dev/null 2>&1; then
+    echo "durable KV cluster smoke requires $command" >&2
+    exit 1
+  fi
+}
+
+for command in curl jq python3; do
+  require_command "$command"
+done
+
+if [[ ! -f "$dll" ]]; then
+  echo "missing Release host at $dll" >&2
+  echo "run: dotnet build examples/DotnetRaft.KvCluster -c Release" >&2
+  exit 1
+fi
+
+python3 - <<'PY'
+import socket
+import sys
+
+sockets = []
+try:
+    for port in range(17101, 17104):
+        current = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        current.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        current.bind(("127.0.0.1", port))
+        current.listen(1)
+        sockets.append(current)
+    for port in range(17201, 17204):
+        current = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        current.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        current.bind(("127.0.0.1", port))
+        current.listen(1)
+        sockets.append(current)
+except OSError as error:
+    print(f"durable KV cluster smoke requires unused loopback ports: {error}", file=sys.stderr)
+    sys.exit(1)
+finally:
+    for current in sockets:
+        current.close()
+PY
 
 temp="$(mktemp -d)"
 pids=()
 
 cleanup() {
+  local status="$?"
   for id in "${!pids[@]}"; do
     pid="${pids[$id]}"
     if kill -0 "$pid" >/dev/null 2>&1; then
@@ -30,6 +74,14 @@ cleanup() {
       wait "$pid" >/dev/null 2>&1 || true
     fi
   done
+  if [[ "$status" -ne 0 ]]; then
+    for log in "$temp"/node-*.log; do
+      if [[ -f "$log" ]]; then
+        echo "===== $(basename "$log") =====" >&2
+        cat "$log" >&2
+      fi
+    done
+  fi
   rm -rf "$temp"
 }
 trap cleanup EXIT
@@ -98,6 +150,51 @@ curl_bounded() {
     "$@"
 }
 
+curl_retrying_mutation() {
+  local operation="$1"
+  shift
+  local response="$temp/curl-response.txt"
+  local attempt
+  local curl_exit
+  local status
+  for attempt in $(seq 1 3); do
+    : >"$response"
+    if status="$(
+      curl \
+        --connect-timeout 1 \
+        --max-time 10 \
+        -sS \
+        -o "$response" \
+        -w '%{http_code}' \
+        "$@"
+    )"; then
+      curl_exit=0
+    else
+      curl_exit="$?"
+    fi
+
+    if [[ "$curl_exit" -eq 0 && "$status" == 2?? ]]; then
+      return
+    fi
+
+    if [[ "$attempt" -lt 3 ]] \
+      && {
+        [[ "$curl_exit" -ne 0 ]] \
+          || [[ "$status" =~ ^(408|429|500|502|503|504)$ ]];
+      }; then
+      sleep 0.5
+      continue
+    fi
+
+    echo "$operation failed after attempt $attempt (curl=$curl_exit, HTTP=$status)" >&2
+    if [[ -s "$response" ]]; then
+      cat "$response" >&2
+      echo >&2
+    fi
+    return 1
+  done
+}
+
 wait_http() {
   local id="$1"
   local url="http://127.0.0.1:$(http_port "$id")/"
@@ -109,6 +206,20 @@ wait_http() {
   done
   cat "$temp/node-$id.log" >&2
   echo "node $id did not start" >&2
+  exit 1
+}
+
+wait_leader_view() {
+  local id="$1"
+  local expected="$2"
+  local url="http://127.0.0.1:$(http_port "$id")/status"
+  for _ in $(seq 1 100); do
+    if [[ "$(curl_bounded "$url" 2>/dev/null | jq -r '.leaderId // 0')" == "$expected" ]]; then
+      return
+    fi
+    sleep 0.1
+  done
+  echo "node $id did not observe leader $expected" >&2
   exit 1
 }
 
@@ -132,24 +243,24 @@ put_value() {
   local key="$2"
   local value="$3"
   local request_id="$4"
-  curl_bounded \
+  curl_retrying_mutation \
+    "PUT $key through node $id" \
     -X PUT \
     "http://127.0.0.1:$(http_port "$id")/kv/$key" \
     -H 'content-type: application/json' \
-    -d "{\"value\":\"$value\",\"requestId\":\"$request_id\"}" \
-    >/dev/null
+    -d "{\"value\":\"$value\",\"requestId\":\"$request_id\"}"
 }
 
 put_file() {
   local id="$1"
   local key="$2"
   local file="$3"
-  curl_bounded \
+  curl_retrying_mutation \
+    "PUT $key through node $id" \
     -X PUT \
     "http://127.0.0.1:$(http_port "$id")/kv/$key" \
     -H 'content-type: application/json' \
-    --data-binary "@$file" \
-    >/dev/null
+    --data-binary "@$file"
 }
 
 wait_value() {
@@ -191,6 +302,9 @@ done
 
 curl_bounded -X POST "http://127.0.0.1:17101/campaign" >/dev/null
 leader="$(wait_any_leader 1 2 3)"
+for id in 1 2 3; do
+  wait_leader_view "$id" "$leader"
+done
 writer=1
 if [[ "$writer" == "$leader" ]]; then
   writer=2
@@ -240,6 +354,9 @@ for id in 1 2 3; do
 done
 curl_bounded -X POST "http://127.0.0.1:$(http_port "${survivors[0]}")/campaign" >/dev/null
 new_leader="$(wait_any_leader "${survivors[@]}")"
+for id in "${survivors[@]}"; do
+  wait_leader_view "$id" "$new_leader"
+done
 surviving_writer="${survivors[0]}"
 if [[ "$surviving_writer" == "$new_leader" ]]; then
   surviving_writer="${survivors[1]}"
@@ -265,7 +382,10 @@ for id in 1 2 3; do
 done
 
 curl_bounded -X POST "http://127.0.0.1:17103/campaign" >/dev/null
-wait_any_leader 1 2 3 >/dev/null
+leader="$(wait_any_leader 1 2 3)"
+for id in 1 2 3; do
+  wait_leader_view "$id" "$leader"
+done
 wait_value 2 color blue
 wait_value 2 shape circle
 

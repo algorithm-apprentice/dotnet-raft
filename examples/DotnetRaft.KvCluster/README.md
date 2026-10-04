@@ -129,7 +129,8 @@ threshold interval before retrying serialization.
 
 ## Automated real-process smoke
 
-From the repository root:
+The smoke requires `curl`, `jq`, and `python3`. Ports `17101`-`17103` and
+`17201`-`17203` must be unused. From the repository root:
 
 ```bash
 dotnet build examples/DotnetRaft.KvCluster -c Release
@@ -141,4 +142,6 @@ follower offline while replicating and snapshotting a 31 MiB value, verifies
 HTTP ingestion beyond Kestrel's former default and large-snapshot catch-up,
 kills the leader with SIGKILL, continues with the remaining quorum, restarts
 the old leader from the same directory, and finally restarts the complete
-cluster.
+cluster. It waits for each active node to observe the elected leader and
+retries only transient mutation failures with the same durable request ID.
+Any failure prints all node logs before cleanup.
