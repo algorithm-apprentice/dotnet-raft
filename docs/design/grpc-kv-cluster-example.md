@@ -252,3 +252,6 @@ The periodic tick loop is tested separately.
     at physical index 5;
 - invalid PUT bodies return HTTP 400;
 - full solution Debug and Release suites pass.
+
+This document records the original volatile milestone. ADR 0007 and
+`durable-grpc-kv-host.md` define the later durable implementation.

@@ -43,10 +43,27 @@ public sealed partial class GrpcRaftMessageTransport
 
         PeerClient peer = clients.GetOrAdd(
             message.To,
-            _ => new PeerClient(address));
+            _ => new PeerClient(
+                address,
+                options.MaxTransportMessageBytes));
+        ByteString payload =
+            message.ToByteString();
+        if (payload.Length
+            > options.MaxTransportMessageBytes)
+        {
+            LogOversize(
+                logger,
+                message.Type,
+                message.From,
+                message.To,
+                payload.Length,
+                options.MaxTransportMessageBytes);
+            return RaftSendResult.Unavailable;
+        }
+
         var envelope = new RaftEnvelope
         {
-            Payload = message.ToByteString(),
+            Payload = payload,
         };
         DateTime deadline =
             DateTime.UtcNow + options.TransportTimeout;
@@ -65,7 +82,8 @@ public sealed partial class GrpcRaftMessageTransport
             when (!cancellationToken.IsCancellationRequested
                   && exception.StatusCode is
                       StatusCode.Unavailable
-                      or StatusCode.DeadlineExceeded)
+                      or StatusCode.DeadlineExceeded
+                      or StatusCode.ResourceExhausted)
         {
             LogUnavailable(
                 logger,
@@ -90,9 +108,19 @@ public sealed partial class GrpcRaftMessageTransport
 
     private sealed class PeerClient
     {
-        internal PeerClient(Uri address)
+        internal PeerClient(
+            Uri address,
+            int maximumMessageBytes)
         {
-            Channel = GrpcChannel.ForAddress(address);
+            Channel = GrpcChannel.ForAddress(
+                address,
+                new GrpcChannelOptions
+                {
+                    MaxReceiveMessageSize =
+                        maximumMessageBytes,
+                    MaxSendMessageSize =
+                        maximumMessageBytes,
+                });
             Client = new RaftTransport.RaftTransportClient(
                 Channel);
         }
@@ -112,4 +140,16 @@ public sealed partial class GrpcRaftMessageTransport
         ulong from,
         ulong to,
         Exception exception);
+
+    [LoggerMessage(
+        EventId = 2,
+        Level = LogLevel.Warning,
+        Message = "Raft message {MessageType} from {From} to {To} is {PayloadBytes} bytes and exceeds transport maximum {MaximumBytes}.")]
+    private static partial void LogOversize(
+        ILogger logger,
+        MessageType messageType,
+        ulong from,
+        ulong to,
+        int payloadBytes,
+        int maximumBytes);
 }

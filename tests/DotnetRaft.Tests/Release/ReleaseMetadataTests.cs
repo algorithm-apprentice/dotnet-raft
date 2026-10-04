@@ -142,6 +142,7 @@ public sealed partial class ReleaseMetadataTests
             "eng/verify-package.sh",
             "eng/verify-sqlite-package.sh",
             "eng/verify-reproducible-pack.sh",
+            "eng/smoke-durable-kv-cluster.sh",
             ".github/workflows/ci.yml",
             "benchmarks/DotnetRaft.Benchmarks/DotnetRaft.Benchmarks.csproj",
             "tools/DotnetRaft.ReleaseVerifier/DotnetRaft.ReleaseVerifier.csproj",

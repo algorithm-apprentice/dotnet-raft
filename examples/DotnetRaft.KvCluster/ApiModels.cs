@@ -1,12 +1,16 @@
 namespace DotnetRaft.Examples.KvCluster;
 
-public sealed record SetValueRequest(string Value);
+public sealed record SetValueRequest(
+    string Value,
+    Guid? RequestId = null);
 
 public sealed record ProposalResponse(
     ulong NodeId,
     Guid RequestId,
+    KvCommandType Operation,
     ulong AppliedIndex,
-    ulong PhysicalApplied);
+    ulong PhysicalApplied,
+    bool Duplicate);
 
 public sealed record ReadResponse(
     ulong NodeId,

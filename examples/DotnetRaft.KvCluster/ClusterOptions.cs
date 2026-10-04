@@ -20,6 +20,20 @@ public sealed class ClusterOptions
 
     public bool AutomaticTicks { get; init; } = true;
 
+    public string? DataDirectory { get; init; }
+
+    public int SnapshotThresholdEntries
+    {
+        get;
+        init;
+    } = 1000;
+
+    public int MaxTransportMessageBytes
+    {
+        get;
+        init;
+    } = 64 * 1024 * 1024;
+
     public ValidatedClusterOptions Validate()
     {
         if (NodeId == 0)
@@ -52,6 +66,19 @@ public sealed class ClusterOptions
         {
             throw new InvalidOperationException(
                 "Raft:TransportTimeoutMilliseconds must be positive.");
+        }
+
+        if (SnapshotThresholdEntries <= 0)
+        {
+            throw new InvalidOperationException(
+                "Raft:SnapshotThresholdEntries must be positive.");
+        }
+
+        if (MaxTransportMessageBytes
+            <= 128 * 1024)
+        {
+            throw new InvalidOperationException(
+                "Raft:MaxTransportMessageBytes must exceed 128 KiB.");
         }
 
         if (Peers.Count != 3)
@@ -122,6 +149,14 @@ public sealed class ClusterOptions
                 "Every peer must use a distinct gRPC port.");
         }
 
+        string dataDirectory = Path.GetFullPath(
+            string.IsNullOrWhiteSpace(DataDirectory)
+                ? Path.Combine(
+                    Environment.CurrentDirectory,
+                    "data",
+                    $"node-{NodeId}")
+                : DataDirectory);
+
         return new ValidatedClusterOptions(
             NodeId,
             HttpPort,
@@ -133,7 +168,10 @@ public sealed class ClusterOptions
                 RequestTimeoutSeconds),
             TimeSpan.FromMilliseconds(
                 TransportTimeoutMilliseconds),
-            AutomaticTicks);
+            AutomaticTicks,
+            dataDirectory,
+            SnapshotThresholdEntries,
+            MaxTransportMessageBytes);
     }
 
     private static void ValidatePort(
@@ -156,4 +194,7 @@ public sealed record ValidatedClusterOptions(
     TimeSpan TickInterval,
     TimeSpan RequestTimeout,
     TimeSpan TransportTimeout,
-    bool AutomaticTicks);
+    bool AutomaticTicks,
+    string DataDirectory,
+    int SnapshotThresholdEntries,
+    int MaxTransportMessageBytes);

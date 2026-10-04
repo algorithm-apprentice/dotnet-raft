@@ -1,7 +1,7 @@
 using System.Runtime.ExceptionServices;
 
 using DotnetRaft.Protocol;
-using DotnetRaft.Storage;
+using DotnetRaft.Storage.Sqlite;
 
 using Google.Protobuf;
 
@@ -14,6 +14,8 @@ public sealed partial class RaftClusterHost
     : BackgroundService,
       IRaftMessageReceiver
 {
+    private const int TransportEnvelopeReserve =
+        64 * 1024;
     private readonly IHostApplicationLifetime applicationLifetime;
     private readonly FixedMembershipConfiguration
         fixedMembership;
@@ -23,15 +25,21 @@ public sealed partial class RaftClusterHost
     private readonly PendingProposalRegistry pendingProposals;
     private readonly PendingReadRegistry pendingReads;
     private readonly ulong[] peerIds;
-    private readonly KeyValueStateMachine stateMachine;
-    private readonly MemoryStorage storage;
+    private readonly SqliteKeyValueStateMachine
+        stateMachine;
+    private readonly SqliteStorage storage;
+    private ulong lastSnapshotAttemptIndex;
+    private readonly TaskCompletionSource startupReady =
+        new(
+            TaskCreationOptions
+                .RunContinuationsAsynchronously);
     private readonly IRaftTickSource tickSource;
     private readonly IRaftMessageTransport transport;
 
     public RaftClusterHost(
         ValidatedClusterOptions options,
-        MemoryStorage storage,
-        KeyValueStateMachine stateMachine,
+        SqliteStorage storage,
+        SqliteKeyValueStateMachine stateMachine,
         PendingProposalRegistry pendingProposals,
         PendingReadRegistry pendingReads,
         IRaftTickSource tickSource,
@@ -54,6 +62,13 @@ public sealed partial class RaftClusterHost
             new FixedMembershipConfiguration(
                 peerIds);
 
+        DurableRecoveryState recovery =
+            DurableHostRecovery.Reconcile(
+                storage,
+                stateMachine,
+                fixedMembership,
+                options.MaxTransportMessageBytes
+                - TransportEnvelopeReserve);
         var config = new RaftConfig
         {
             Id = options.NodeId,
@@ -62,10 +77,23 @@ public sealed partial class RaftClusterHost
             Storage = storage,
             PreVote = true,
             CheckQuorum = true,
+            Applied = recovery.Applied,
+            MaxSizePerMessage = (ulong)(
+                options.MaxTransportMessageBytes
+                - TransportEnvelopeReserve),
         };
-        node = RaftNode.Start(
-            config,
-            peerIds.Select(id => new Peer(id)));
+        node = recovery.StartNew
+            ? RaftNode.Start(
+                config,
+                peerIds.Select(
+                    id => new Peer(id)))
+            : RaftNode.Restart(config);
+        lastSnapshotAttemptIndex =
+            recovery.Applied;
+        if (recovery.Applied >= 3)
+        {
+            startupReady.TrySetResult();
+        }
     }
 
     public ulong NodeId => options.NodeId;
@@ -74,6 +102,9 @@ public sealed partial class RaftClusterHost
         Message message,
         CancellationToken cancellationToken)
     {
+        await WaitUntilReadyAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
         NetworkMessageValidator.Validate(
             message,
             options);
@@ -83,55 +114,61 @@ public sealed partial class RaftClusterHost
             .ConfigureAwait(false);
     }
 
-    public ValueTask CampaignAsync(
+    public async ValueTask CampaignAsync(
         CancellationToken cancellationToken)
     {
-        return node.CampaignAsync(
-            cancellationToken);
+        await WaitUntilReadyAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
+        await node.CampaignAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<ProposalResponse> PutAsync(
         string key,
         string value,
+        Guid? requestId,
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
         ArgumentNullException.ThrowIfNull(value);
+        return await MutateAsync(
+                new KvCommand(
+                    requestId ?? Guid.NewGuid(),
+                    KvCommandType.Set,
+                    key,
+                    value),
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
 
-        Guid requestId = Guid.NewGuid();
-        Task<ulong> applied =
-            pendingProposals.Register(requestId);
-        using CancellationTokenSource timeout =
-            CreateRequestTimeout(cancellationToken);
-        try
-        {
-            await node.ProposeAsync(
-                    KvCommandCodec.Encode(
-                        new KvSetCommand(
-                            requestId,
-                            key,
-                            value)),
-                    timeout.Token)
-                .ConfigureAwait(false);
-            ulong index = await applied.WaitAsync(
-                    timeout.Token)
-                .ConfigureAwait(false);
-            return new ProposalResponse(
-                options.NodeId,
-                requestId,
-                index,
-                stateMachine.PhysicalApplied);
-        }
-        catch (OperationCanceledException)
-            when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                $"Proposal {requestId} did not apply within {options.RequestTimeout}.");
-        }
-        finally
-        {
-            pendingProposals.Remove(requestId);
-        }
+    public Task<ProposalResponse> PutAsync(
+        string key,
+        string value,
+        CancellationToken cancellationToken)
+    {
+        return PutAsync(
+            key,
+            value,
+            requestId: null,
+            cancellationToken);
+    }
+
+    public async Task<ProposalResponse> DeleteAsync(
+        string key,
+        Guid? requestId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        return await MutateAsync(
+                new KvCommand(
+                    requestId ?? Guid.NewGuid(),
+                    KvCommandType.Delete,
+                    key,
+                    null),
+                cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public async Task<ReadResponse> ReadAsync(
@@ -139,6 +176,9 @@ public sealed partial class RaftClusterHost
         CancellationToken cancellationToken)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(key);
+        await WaitUntilReadyAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
         Guid requestId = Guid.NewGuid();
         Task<ulong> barrier =
             pendingReads.Register(requestId);
@@ -179,6 +219,7 @@ public sealed partial class RaftClusterHost
 
     public ReadResponse ReadLocal(string key)
     {
+        EnsureReady();
         KeyValueReadResult result =
             stateMachine.ReadLocal(key);
         return new ReadResponse(
@@ -194,6 +235,9 @@ public sealed partial class RaftClusterHost
     public async Task<ClusterStatusResponse> GetStatusAsync(
         CancellationToken cancellationToken)
     {
+        await WaitUntilReadyAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
         Status status = await node.GetStatusAsync(
                 cancellationToken)
             .ConfigureAwait(false);
@@ -287,10 +331,14 @@ public sealed partial class RaftClusterHost
 
         if (failure is not null)
         {
+            startupReady.TrySetException(failure);
             ExceptionDispatchInfo.Capture(
                     failure)
                 .Throw();
         }
+
+        startupReady.TrySetCanceled(
+            stoppingToken);
     }
 
     private async Task RunTickLoopAsync(
@@ -320,6 +368,8 @@ public sealed partial class RaftClusterHost
             await node.AdvanceAsync(
                     cancellationToken)
                 .ConfigureAwait(false);
+            MaybeCreateSnapshot();
+            TryCompleteStartup();
         }
     }
 
@@ -327,16 +377,7 @@ public sealed partial class RaftClusterHost
         Ready ready,
         CancellationToken cancellationToken)
     {
-        if (ready.Snapshot is not null)
-        {
-            storage.ApplySnapshot(ready.Snapshot);
-        }
-
-        storage.Append(ready.Entries);
-        if (ready.HardState is not null)
-        {
-            storage.SetHardState(ready.HardState);
-        }
+        storage.PersistReady(ready);
 
         foreach (Message message in ready.Messages)
         {
@@ -368,7 +409,24 @@ public sealed partial class RaftClusterHost
         {
             stateMachine.Restore(
                 ready.Snapshot.Metadata.Index,
-                ready.Snapshot.Data);
+                ready.Snapshot.Data,
+                ready.Snapshot.Metadata
+                    .ConfState);
+            HardState hardState =
+                storage.GetHardState()
+                ?? throw new InvalidDataException(
+                    "Persisted snapshot has no HardState.");
+            if (hardState.Commit
+                < ready.Snapshot.Metadata.Index)
+            {
+                hardState.Commit =
+                    ready.Snapshot.Metadata.Index;
+                storage.SetHardState(hardState);
+            }
+
+            storage.AcknowledgeApplicationSnapshot(
+                ready.Snapshot.Metadata.Index);
+            CompletePendingProposalsFromDurableState();
         }
 
         foreach (Entry entry in ready.CommittedEntries)
@@ -383,6 +441,9 @@ public sealed partial class RaftClusterHost
         {
             CompleteRead(readState);
         }
+
+        pendingReads.CompleteThrough(
+            stateMachine.PhysicalApplied);
     }
 
     private async Task ApplyEntryAsync(
@@ -395,12 +456,15 @@ public sealed partial class RaftClusterHost
             ProtocolConfChange bootstrap =
                 fixedMembership
                     .ValidateBootstrapEntry(entry);
-            await node.ApplyConfChangeAsync(
+            _ = await node.ApplyConfChangeAsync(
                     bootstrap,
                     cancellationToken)
                 .ConfigureAwait(false);
-            stateMachine.AdvanceNoOp(
-                entry.Index);
+            stateMachine.ApplyConfiguration(
+                entry.Index,
+                fixedMembership
+                    .ExpectedConfState(
+                        entry.Index));
             return;
         }
 
@@ -414,13 +478,12 @@ public sealed partial class RaftClusterHost
                     return;
                 }
 
-                KvSetCommand command =
-                    stateMachine.ApplySet(
+                KvApplyResult result =
+                    stateMachine.ApplyCommand(
                         entry.Index,
                         entry.Data);
                 pendingProposals.Complete(
-                    command.RequestId,
-                    entry.Index);
+                    result);
                 return;
             case EntryType.EntryConfChange:
                 stateMachine.AdvanceNoOp(
@@ -448,13 +511,235 @@ public sealed partial class RaftClusterHost
             return;
         }
 
-        stateMachine.EnsureApplied(
-            readState.Index);
         var requestId = new Guid(
             readState.RequestContext.Span);
-        pendingReads.Complete(
+        pendingReads.CompleteOrDefer(
             requestId,
-            readState.Index);
+            readState.Index,
+            stateMachine.PhysicalApplied);
+    }
+
+    private async Task<ProposalResponse> MutateAsync(
+        KvCommand command,
+        CancellationToken cancellationToken)
+    {
+        await WaitUntilReadyAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
+        KvRequestResolution? resolved =
+            stateMachine.ResolveRequest(command);
+        if (resolved is not null)
+        {
+            if (resolved.Conflict)
+            {
+                throw new KvRequestConflictException(
+                    command.RequestId);
+            }
+
+            return new ProposalResponse(
+                options.NodeId,
+                command.RequestId,
+                command.Type,
+                resolved.ResultIndex,
+                stateMachine.PhysicalApplied,
+                Duplicate: true);
+        }
+
+        using PendingProposalRegistry
+            .PendingProposalRegistration registration =
+            pendingProposals.Register(command);
+        using CancellationTokenSource timeout =
+            CreateRequestTimeout(cancellationToken);
+        try
+        {
+            byte[] payload =
+                DurableKvCommandCodec.Encode(
+                    command);
+            int maximumPayload =
+                options.MaxTransportMessageBytes
+                - TransportEnvelopeReserve;
+            if (payload.Length > maximumPayload)
+            {
+                throw new KvPayloadTooLargeException(
+                    payload.Length,
+                    maximumPayload);
+            }
+
+            if (registration.IsOwner)
+            {
+                PendingProposalRegistry
+                    .PendingProposalSubmission?
+                    submission =
+                        registration
+                            .BeginSubmission();
+                if (submission is not null)
+                {
+                    _ = SubmitProposalAsync(
+                        payload,
+                        submission);
+                }
+            }
+
+            KvApplyResult result =
+                await registration.Task.WaitAsync(
+                        timeout.Token)
+                    .ConfigureAwait(false);
+            if (result.Conflict)
+            {
+                throw new KvRequestConflictException(
+                    command.RequestId);
+            }
+
+            return new ProposalResponse(
+                options.NodeId,
+                command.RequestId,
+                command.Type,
+                result.ResultIndex,
+                result.PhysicalApplied,
+                result.Duplicate);
+        }
+        catch (OperationCanceledException)
+            when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException(
+                $"Proposal {command.RequestId} did not apply within {options.RequestTimeout}.");
+        }
+    }
+
+    private void MaybeCreateSnapshot()
+    {
+        ulong applied =
+            stateMachine.PhysicalApplied;
+        if (applied == 0)
+        {
+            return;
+        }
+
+        Snapshot current =
+            storage.GetSnapshot();
+        if (current.Metadata.Index >= applied)
+        {
+            return;
+        }
+
+        ConfState configuration =
+            stateMachine.ConfState;
+        bool configurationMismatch =
+            !current.Metadata.ConfState.Equals(
+                configuration);
+        ulong distance =
+            applied - current.Metadata.Index;
+        if (!configurationMismatch
+            && distance
+                < (ulong)options
+                    .SnapshotThresholdEntries)
+        {
+            return;
+        }
+
+        if (lastSnapshotAttemptIndex
+                > current.Metadata.Index
+            && applied
+                - lastSnapshotAttemptIndex
+                < (ulong)options
+                    .SnapshotThresholdEntries)
+        {
+            return;
+        }
+
+        ByteString snapshotData =
+            stateMachine.CreateSnapshotData();
+        lastSnapshotAttemptIndex = applied;
+        if (snapshotData.Length
+            > options.MaxTransportMessageBytes
+              - TransportEnvelopeReserve)
+        {
+            return;
+        }
+
+        storage.CreateSnapshot(
+            applied,
+            configuration,
+            snapshotData);
+        ulong compacted =
+            storage.GetFirstIndex() - 1;
+        if (compacted < applied)
+        {
+            storage.Compact(applied);
+        }
+    }
+
+    private async Task SubmitProposalAsync(
+        byte[] payload,
+        PendingProposalRegistry
+            .PendingProposalSubmission submission)
+    {
+        try
+        {
+            await node.ProposeAsync(
+                    payload,
+                    submission.CancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+            when (submission.CancellationToken
+                .IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            submission.Fail(exception);
+        }
+    }
+
+    private void
+        CompletePendingProposalsFromDurableState()
+    {
+        pendingProposals.CompleteResolved(
+            stateMachine.ResolveAppliedRequest);
+    }
+
+    private void TryCompleteStartup()
+    {
+        if (startupReady.Task.IsCompleted
+            || stateMachine.PhysicalApplied < 3)
+        {
+            return;
+        }
+
+        fixedMembership
+            .ValidateRecoveredConfiguration(
+                stateMachine.PhysicalApplied,
+                stateMachine.ConfState);
+        Snapshot snapshot =
+            storage.GetSnapshot();
+        if (snapshot.Metadata.Index
+                < stateMachine.PhysicalApplied
+            || !snapshot.Metadata.ConfState.Equals(
+                stateMachine.ConfState))
+        {
+            return;
+        }
+
+        startupReady.TrySetResult();
+    }
+
+    private async Task WaitUntilReadyAsync(
+        CancellationToken cancellationToken)
+    {
+        await startupReady.Task.WaitAsync(
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    private void EnsureReady()
+    {
+        if (!startupReady.Task
+                .IsCompletedSuccessfully)
+        {
+            throw new InvalidOperationException(
+                "The durable Raft host is still recovering.");
+        }
     }
 
     private CancellationTokenSource CreateRequestTimeout(

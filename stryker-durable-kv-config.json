@@ -1,0 +1,27 @@
+{
+  "stryker-config": {
+    "solution": "DotnetRaft.sln",
+    "project": "DotnetRaft.KvCluster.csproj",
+    "test-projects": [
+      "tests/DotnetRaft.Tests/DotnetRaft.Tests.csproj"
+    ],
+    "configuration": "Release",
+    "mutate": [
+      "**/DurableKvModels.cs",
+      "**/SqliteKeyValueStateMachine.cs",
+      "**/DurableHostRecovery.cs",
+      "**/PendingOperations.cs"
+    ],
+    "reporters": [
+      "cleartext",
+      "json"
+    ],
+    "coverage-analysis": "off",
+    "concurrency": 4,
+    "thresholds": {
+      "high": 85,
+      "low": 75,
+      "break": 0
+    }
+  }
+}

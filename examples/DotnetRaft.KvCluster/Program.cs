@@ -1,4 +1,5 @@
 using DotnetRaft.Examples.KvCluster;
+using DotnetRaft.Storage.Sqlite;
 
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 
@@ -13,11 +14,15 @@ ValidatedClusterOptions options =
 
 builder.WebHost.ConfigureKestrel(server =>
 {
+    server.Limits.MaxRequestBodySize =
+        options.MaxTransportMessageBytes;
     server.ListenLocalhost(
         options.HttpPort,
         endpoint =>
+        {
             endpoint.Protocols =
-                HttpProtocols.Http1);
+                HttpProtocols.Http1;
+        });
     server.ListenLocalhost(
         options.GrpcPort,
         endpoint =>
@@ -25,12 +30,30 @@ builder.WebHost.ConfigureKestrel(server =>
                 HttpProtocols.Http2);
 });
 
-builder.Services.AddGrpc();
+builder.Services.AddGrpc(grpc =>
+{
+    grpc.MaxReceiveMessageSize =
+        options.MaxTransportMessageBytes;
+    grpc.MaxSendMessageSize =
+        options.MaxTransportMessageBytes;
+});
 builder.Services.AddSingleton(options);
 builder.Services.AddSingleton<
-    DotnetRaft.Storage.MemoryStorage>();
+    SqliteStorage>(
+    _ => new SqliteStorage(
+        Path.Combine(
+            options.DataDirectory,
+            "raft.db")));
 builder.Services.AddSingleton<
-    KeyValueStateMachine>();
+    SqliteKeyValueStateMachine>(
+    services =>
+        DurableHostRecovery.OpenApplication(
+            services.GetRequiredService<
+                SqliteStorage>(),
+            Path.Combine(
+                options.DataDirectory,
+                "application.db"),
+            options.NodeId));
 builder.Services.AddSingleton<
     PendingProposalRegistry>();
 builder.Services.AddSingleton<
@@ -69,7 +92,9 @@ app.MapPut(
         {
             if (string.IsNullOrWhiteSpace(key)
                 || request is null
-                || request.Value is null)
+                || request.Value is null
+                || request.RequestId
+                    == Guid.Empty)
             {
                 return Results.BadRequest(new
                 {
@@ -84,9 +109,87 @@ app.MapPut(
                     await cluster.PutAsync(
                             key,
                             request.Value,
+                            request.RequestId,
                             context.RequestAborted)
                         .ConfigureAwait(false);
                 return Results.Ok(response);
+            }
+            catch (KvRequestConflictException exception)
+            {
+                return Results.Conflict(new
+                {
+                    error = exception.Message,
+                });
+            }
+            catch (KvPayloadTooLargeException exception)
+            {
+                return Results.Problem(
+                    exception.Message,
+                    statusCode:
+                        StatusCodes
+                            .Status413PayloadTooLarge);
+            }
+            catch (TimeoutException exception)
+            {
+                return Results.Problem(
+                    exception.Message,
+                    statusCode:
+                        StatusCodes
+                            .Status504GatewayTimeout);
+            }
+        })
+    .AddEndpointFilter(httpPort);
+
+app.MapDelete(
+        "/kv/{key}",
+        async (
+            string key,
+            Guid? requestId,
+            RaftClusterHost cluster,
+            HttpContext context) =>
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return Results.BadRequest(new
+                {
+                    error =
+                        "A nonempty key is required.",
+                });
+            }
+
+            if (requestId == Guid.Empty)
+            {
+                return Results.BadRequest(new
+                {
+                    error =
+                        "Request ID must be nonempty when supplied.",
+                });
+            }
+
+            try
+            {
+                ProposalResponse response =
+                    await cluster.DeleteAsync(
+                            key,
+                            requestId,
+                            context.RequestAborted)
+                        .ConfigureAwait(false);
+                return Results.Ok(response);
+            }
+            catch (KvRequestConflictException exception)
+            {
+                return Results.Conflict(new
+                {
+                    error = exception.Message,
+                });
+            }
+            catch (KvPayloadTooLargeException exception)
+            {
+                return Results.Problem(
+                    exception.Message,
+                    statusCode:
+                        StatusCodes
+                            .Status413PayloadTooLarge);
             }
             catch (TimeoutException exception)
             {
@@ -167,6 +270,7 @@ app.MapGet(
             options.NodeId,
             options.HttpPort,
             options.GrpcPort,
+            options.DataDirectory,
         }))
     .AddEndpointFilter(httpPort);
 

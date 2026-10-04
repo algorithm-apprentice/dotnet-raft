@@ -34,6 +34,9 @@ jobs:
       - name: Test Release
         run: dotnet test DotnetRaft.sln -c Release --no-restore --verbosity quiet
 
+      - name: Durable KV cluster smoke
+        run: ./eng/smoke-durable-kv-cluster.sh "$GITHUB_WORKSPACE"
+
       - name: Pack
         run: ./eng/pack-release.sh "$GITHUB_WORKSPACE" "${{ github.sha }}"
 

@@ -36,6 +36,39 @@ public sealed class FixedMembershipConfiguration
             && index <= (ulong)peerIds.Length;
     }
 
+    public ConfState ExpectedConfState(
+        ulong physicalApplied)
+    {
+        var result = new ConfState
+        {
+            AutoLeave = false,
+        };
+        int voterCount = physicalApplied == 0
+            ? 0
+            : checked(
+                (int)Math.Min(
+                    physicalApplied,
+                    (ulong)peerIds.Length));
+        result.Voters.Add(
+            peerIds.Take(voterCount));
+        return result;
+    }
+
+    public void ValidateRecoveredConfiguration(
+        ulong physicalApplied,
+        ConfState configuration)
+    {
+        ArgumentNullException.ThrowIfNull(
+            configuration);
+        ConfState expected =
+            ExpectedConfState(physicalApplied);
+        if (!expected.Equals(configuration))
+        {
+            throw new InvalidDataException(
+                $"Application configuration at index {physicalApplied} does not match fixed membership.");
+        }
+    }
+
     public ProtocolConfChange ValidateBootstrapEntry(
         Entry entry)
     {

@@ -84,6 +84,6 @@ physical-application, and recovery rules in the
 - **Available storage:** durable SQLite Raft log, hard state, snapshots, and
   restart support through `DotnetRaft.Sqlite`
 
-The example remains intentionally educational: it uses in-memory storage and
-state, while demonstrating transport, Ready processing, application, and
-read-index barriers.
+The example remains intentionally educational, but now persists both Raft and
+application state with SQLite, supports crash/restart recovery, request
+deduplication, snapshots, compaction, transport, and read-index barriers.

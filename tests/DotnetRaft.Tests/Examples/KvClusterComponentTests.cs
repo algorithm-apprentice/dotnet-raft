@@ -3,6 +3,8 @@ using DotnetRaft.Protocol;
 
 using Google.Protobuf;
 
+using Microsoft.Extensions.Logging.Abstractions;
+
 using ProtocolConfChange =
     DotnetRaft.Protocol.ConfChange;
 
@@ -20,6 +22,15 @@ public sealed class KvClusterComponentTests
         Assert.Equal(3, options.Peers.Count);
         Assert.Equal(7202, options.GrpcPort);
         Assert.False(options.AutomaticTicks);
+        Assert.True(
+            Path.IsPathFullyQualified(
+                options.DataDirectory));
+        Assert.Equal(
+            10,
+            options.SnapshotThresholdEntries);
+        Assert.Equal(
+            64 * 1024 * 1024,
+            options.MaxTransportMessageBytes);
     }
 
     [Fact]
@@ -42,70 +53,20 @@ public sealed class KvClusterComponentTests
             "http://example.com:7202";
         Assert.Throws<InvalidOperationException>(
             remote.Validate);
-    }
 
-    [Fact]
-    public void CommandCodecIsDeterministicAndStrict()
-    {
-        var command = new KvSetCommand(
-            Guid.Parse(
-                "11111111-2222-3333-4444-555555555555"),
-            "color",
-            "blue");
-
-        byte[] first =
-            KvCommandCodec.Encode(command);
-        byte[] second =
-            KvCommandCodec.Encode(command);
-
-        Assert.Equal(first, second);
-        Assert.Equal(
-            command,
-            KvCommandCodec.Decode(first));
-        Assert.Throws<InvalidDataException>(
-            () => KvCommandCodec.Decode(
-                "{\"key\":\"missing-id\"}"u8));
-    }
-
-    [Fact]
-    public void StateMachineAdvancesEveryIndexAndRestoresSnapshot()
-    {
-        var state = new KeyValueStateMachine();
-        var command = new KvSetCommand(
-            Guid.NewGuid(),
-            "color",
-            "blue");
-
-        KvSetCommand applied = state.ApplySet(
-            1,
-            ByteString.CopyFrom(
-                KvCommandCodec.Encode(command)));
-        state.AdvanceNoOp(2);
-
-        Assert.Equal(command, applied);
-        KeyValueReadResult value =
-            state.ReadAtLeast("color", 2);
-        Assert.True(value.Found);
-        Assert.Equal("blue", value.Value);
-        Assert.Equal(2UL, value.PhysicalApplied);
+        ClusterOptions tinyTransport =
+            Options(
+                nodeId: 1,
+                maxTransportMessageBytes:
+                    64 * 1024);
         Assert.Throws<InvalidOperationException>(
-            () => state.AdvanceNoOp(4));
-
-        ByteString snapshot =
-            state.CreateSnapshotData();
-        var restored = new KeyValueStateMachine();
-        restored.Restore(2, snapshot);
-
-        KeyValueReadResult restoredValue =
-            restored.ReadAtLeast("color", 2);
-        Assert.Equal("blue", restoredValue.Value);
-        Assert.Equal(2UL, restoredValue.PhysicalApplied);
+            tinyTransport.Validate);
     }
 
     [Fact]
     public async Task PendingRegistryCompletesAndRemovesRequests()
     {
-        var pending = new PendingProposalRegistry();
+        var pending = new PendingReadRegistry();
         Guid requestId = Guid.NewGuid();
         Task<ulong> completion =
             pending.Register(requestId);
@@ -119,6 +80,38 @@ public sealed class KvClusterComponentTests
         Guid removed = Guid.NewGuid();
         _ = pending.Register(removed);
         Assert.True(pending.Remove(removed));
+    }
+
+    [Fact]
+    public async Task PendingReadRegistryDefersUntilApplied()
+    {
+        var pending = new PendingReadRegistry();
+        Guid requestId = Guid.NewGuid();
+        Task<ulong> completion =
+            pending.Register(requestId);
+
+        pending.CompleteOrDefer(
+            requestId,
+            index: 9,
+            physicalApplied: 7);
+        Assert.False(completion.IsCompleted);
+        pending.CompleteThrough(8);
+        Assert.False(completion.IsCompleted);
+        pending.CompleteThrough(9);
+        Assert.Equal(9UL, await completion);
+
+        Guid removed = Guid.NewGuid();
+        _ = pending.Register(removed);
+        pending.CompleteOrDefer(
+            removed,
+            index: 12,
+            physicalApplied: 10);
+        Assert.True(pending.Remove(removed));
+        pending.CompleteThrough(12);
+        Assert.False(
+            pending.Complete(
+                removed,
+                12));
     }
 
     [Fact]
@@ -166,6 +159,42 @@ public sealed class KvClusterComponentTests
     }
 
     [Fact]
+    public async Task TransportRejectsOversizeMessageWithoutFault()
+    {
+        ValidatedClusterOptions options =
+            Options(
+                    nodeId: 1,
+                    maxTransportMessageBytes:
+                        256 * 1024)
+                .Validate();
+        var transport =
+            new GrpcRaftMessageTransport(
+                options,
+                NullLogger<
+                    GrpcRaftMessageTransport>
+                    .Instance);
+        var message = new Message
+        {
+            From = 1,
+            To = 2,
+            Type = MessageType.MsgApp,
+        };
+        message.Entries.Add(
+            new Entry
+            {
+                Data = ByteString.CopyFrom(
+                    new byte[300 * 1024]),
+            });
+
+        Assert.Equal(
+            RaftSendResult.Unavailable,
+            await transport.SendAsync(
+                message,
+                CancellationToken.None));
+        await transport.DisposeAsync();
+    }
+
+    [Fact]
     public void FixedMembershipRequiresExactBootstrapPrefix()
     {
         var membership =
@@ -201,7 +230,11 @@ public sealed class KvClusterComponentTests
 
     internal static ClusterOptions Options(
         ulong nodeId,
-        bool automaticTicks = false)
+        bool automaticTicks = false,
+        string? dataDirectory = null,
+        int maxTransportMessageBytes =
+            64 * 1024 * 1024,
+        int snapshotThresholdEntries = 10)
     {
         return new ClusterOptions
         {
@@ -214,6 +247,11 @@ public sealed class KvClusterComponentTests
             TickIntervalMilliseconds = 10,
             RequestTimeoutSeconds = 5,
             TransportTimeoutMilliseconds = 100,
+            DataDirectory = dataDirectory,
+            SnapshotThresholdEntries =
+                snapshotThresholdEntries,
+            MaxTransportMessageBytes =
+                maxTransportMessageBytes,
             Peers = new Dictionary<string, string>
             {
                 ["1"] =

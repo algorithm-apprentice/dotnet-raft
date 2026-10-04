@@ -111,3 +111,6 @@ presenting local state as universally consistent.
 Implemented as `examples/DotnetRaft.KvCluster` with component tests,
 deterministic three-node in-memory integration tests, and a real three-process
 gRPC smoke test.
+
+ADR 0007 later extends this same host with durable Raft/application SQLite
+state, deduplication, snapshots, compaction, and crash/restart recovery.
