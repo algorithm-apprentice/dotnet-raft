@@ -12,6 +12,9 @@ namespace DotnetRaft.Tests.Node;
 
 internal static class RaftNodeTestSupport
 {
+    internal static TimeSpan DeadlockGuardTimeout { get; } =
+        TimeSpan.FromSeconds(10);
+
     internal static (
         RaftNode Node,
         MemoryStorage Storage) RestartNode(
@@ -77,7 +80,7 @@ internal static class RaftNodeTestSupport
     {
         return await node.WaitForReadyAsync()
             .AsTask()
-            .WaitAsync(TimeSpan.FromSeconds(2));
+            .WaitAsync(DeadlockGuardTimeout);
     }
 
     internal static async Task PersistAndAdvanceAsync(

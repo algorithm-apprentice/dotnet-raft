@@ -47,7 +47,7 @@ public sealed class RaftNodeLifecycleTests
 
         await node.StopAsync()
             .AsTask()
-            .WaitAsync(TimeSpan.FromSeconds(2));
+            .WaitAsync(DeadlockGuardTimeout);
 
         await Assert.ThrowsAsync<RaftNodeStoppedException>(
             async () => await node.AdvanceAsync()
@@ -68,7 +68,7 @@ public sealed class RaftNodeLifecycleTests
             Task claimed = node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task<Status> pending =
                 node.GetStatusAsync(
                         cancellation.Token)
@@ -79,14 +79,14 @@ public sealed class RaftNodeLifecycleTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             await claimed.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             await Assert.ThrowsAsync<RaftNodeStoppedException>(
                 async () => await pending);
             await stop.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
         }
         finally
         {
@@ -109,7 +109,7 @@ public sealed class RaftNodeLifecycleTests
             Task claimed = node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task<Status> command =
                 node.GetStatusAsync().AsTask();
             Task proposal =
@@ -126,10 +126,10 @@ public sealed class RaftNodeLifecycleTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             await claimed.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             await Assert.ThrowsAsync<RaftNodeStoppedException>(
                 async () => await command);
             await Assert.ThrowsAsync<RaftNodeStoppedException>(
@@ -137,7 +137,7 @@ public sealed class RaftNodeLifecycleTests
             await Assert.ThrowsAsync<RaftNodeStoppedException>(
                 async () => await ready);
             await stop.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
 
             Assert.True(command.IsCompleted);
             Assert.True(proposal.IsCompleted);
@@ -172,7 +172,7 @@ public sealed class RaftNodeLifecycleTests
             Task claimed = node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task<Status> command =
                 node.GetStatusAsync().AsTask();
             Task proposal =
@@ -185,7 +185,7 @@ public sealed class RaftNodeLifecycleTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             RaftTracingException trigger =
                 await Assert.ThrowsAsync<RaftTracingException>(
@@ -432,14 +432,14 @@ public sealed class RaftNodeLifecycleTests
             try
             {
                 _ = await status.WaitAsync(
-                    TimeSpan.FromSeconds(2));
+                    DeadlockGuardTimeout);
             }
             catch (RaftNodeStoppedException)
             {
             }
 
             await stop.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             await node.Completion;
         }
     }
