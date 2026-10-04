@@ -736,14 +736,15 @@ Read:
 | `CommittedEntries` | Entries ready for ordered application |
 | `Messages` | Network or local messages to deliver |
 | `ReadStates` | Completed linearizable-read barriers |
-| `MustSync` | Whether entries or a term/vote change require forced durability; snapshot forcing is independent |
+| `MustSync` | Whether entries or a term/vote change require a synchronous stable-storage write; snapshot presence is not part of the calculation |
 
 Safe synchronous order:
 
 ```text
 Ready
   -> atomically persist Snapshot + Entries + HardState
-  -> force durability when MustSync is true or Snapshot is present
+  -> honor MustSync for Entries + HardState
+  -> complete Snapshot persistence under the snapshot store's durability contract
   -> send Messages
   -> restore application Snapshot
   -> apply CommittedEntries in order
@@ -755,8 +756,9 @@ Never send a vote grant or append acknowledgement before the state it
 acknowledges is durable.
 
 A commit-only `HardState` update may have `MustSync == false`. A snapshot-only
-generation may also have `MustSync == false`, but the snapshot must still be
-forced durable before its acknowledgement is published.
+generation may also have `MustSync == false`. The snapshot must still be
+successfully stored before its dependent acknowledgement is published, but
+`MustSync` does not define an additional generic snapshot flush.
 
 Run:
 

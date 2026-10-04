@@ -189,20 +189,6 @@ public sealed class RawNodePersistenceTests
         application.Compact(storage, 2);
     }
 
-    [Theory]
-    [InlineData(false, false, false)]
-    [InlineData(true, false, true)]
-    [InlineData(false, true, true)]
-    public void PersistenceForceDecisionIncludesSnapshots(
-        bool mustSync,
-        bool hasSnapshot,
-        bool expectedForce)
-    {
-        bool force = mustSync || hasSnapshot;
-
-        Assert.Equal(expectedForce, force);
-    }
-
     [Fact]
     public void SameTermSnapshotDoesNotSetMustSync()
     {
