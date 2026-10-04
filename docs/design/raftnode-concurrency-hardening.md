@@ -123,6 +123,12 @@ the gate in `finally`. `Task.WaitAsync` or a bounded event wait remains only
 outside the owner callback so a deadlock fails the test without injecting a
 `TimeoutException` into production execution.
 
+All bounded waits in the RaftNode tests use one shared ten-second outer
+guard. A constrained two-core full-suite run demonstrated that the former
+two-second value could expire before the thread-pool scheduled the owner
+loop. The larger guard changes only failure latency; successful tests still
+complete as soon as their deterministic gate or task settles.
+
 The default trigger remains the first `MessageReceived` trace event. If a
 test needs another deterministic boundary, the helper accepts a predicate
 rather than adding a production hook.
@@ -336,7 +342,8 @@ Acceptance:
 | fresh-process tick-warning repetitions | 50 / 50 passed |
 
 The callback helper has no internal timeout. All bounded waits remain at the
-outer test boundary as deadlock guards.
+outer test boundary as deadlock guards. The shared ten-second guard tolerates
+CI scheduler contention without weakening any ordering assertion.
 
 ### Mutation
 

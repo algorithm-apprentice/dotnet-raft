@@ -111,7 +111,7 @@ public sealed class RaftNodeReadyTests
                 await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await node.WaitForReadyAsync()
                     .AsTask()
-                    .WaitAsync(TimeSpan.FromSeconds(2)));
+                    .WaitAsync(DeadlockGuardTimeout));
             Assert.Equal(
                 "Only one Ready wait or outstanding batch is allowed.",
                 secondWait.Message);
@@ -126,7 +126,7 @@ public sealed class RaftNodeReadyTests
                 await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await node.WaitForReadyAsync()
                     .AsTask()
-                    .WaitAsync(TimeSpan.FromSeconds(2)));
+                    .WaitAsync(DeadlockGuardTimeout));
             Assert.Equal(
                 "Only one Ready wait or outstanding batch is allowed.",
                 outstandingWait.Message);
@@ -184,7 +184,7 @@ public sealed class RaftNodeReadyTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task<Ready> canceled =
                 node.WaitForReadyAsync(
                         cancellation.Token)
@@ -196,9 +196,9 @@ public sealed class RaftNodeReadyTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
 
             Ready ready = await WaitReadyAsync(node);
             Assert.NotNull(ready.SoftState);
@@ -230,20 +230,20 @@ public sealed class RaftNodeReadyTests
                     .AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             cancellation.Cancel();
             Task stop = node.StopAsync().AsTask();
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             Ready ready = await readyTask.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             Assert.NotNull(ready.SoftState);
             await stop.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             await Assert.ThrowsAsync<RaftNodeStoppedException>(
                 async () => await node.AdvanceAsync()
                     .AsTask());
@@ -279,15 +279,15 @@ public sealed class RaftNodeReadyTests
                 .AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             cancellation.Cancel();
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             await advance.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             Assert.False(node.Completion.IsCompleted);
         }
         finally
@@ -311,7 +311,7 @@ public sealed class RaftNodeReadyTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task advance = node.AdvanceAsync(
                     cancellation.Token)
                 .AsTask();
@@ -322,9 +322,9 @@ public sealed class RaftNodeReadyTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
         }
         finally
         {
@@ -351,11 +351,11 @@ public sealed class RaftNodeReadyTests
                 node.WaitForReadyAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             RaftTracingException trigger =
                 await Assert.ThrowsAsync<RaftTracingException>(
@@ -401,11 +401,11 @@ public sealed class RaftNodeReadyTests
             Task advance = node.AdvanceAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             RaftTracingException trigger =
                 await Assert.ThrowsAsync<RaftTracingException>(

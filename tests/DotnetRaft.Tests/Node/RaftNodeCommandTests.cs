@@ -36,7 +36,7 @@ public sealed class RaftNodeCommandTests
                 storage,
                 election);
             await proposal.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
 
             Ready leadership = await WaitReadyAsync(node);
             Assert.Equal(2, leadership.Entries.Count);
@@ -210,7 +210,7 @@ public sealed class RaftNodeCommandTests
 
             Status status = await node.GetStatusAsync()
                 .AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(2));
+                .WaitAsync(DeadlockGuardTimeout);
             Assert.Equal(RaftRole.Follower, status.Basic.Role);
 
             for (var tick = 0; tick < 4; tick++)
@@ -252,16 +252,16 @@ public sealed class RaftNodeCommandTests
                 .AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             cancellation.Cancel();
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
         }
         finally
         {
@@ -284,7 +284,7 @@ public sealed class RaftNodeCommandTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task canceled = node.StepAsync(
                     new Message
                     {
@@ -302,9 +302,9 @@ public sealed class RaftNodeCommandTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await claimed.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
 
             Status status = await node.GetStatusAsync();
             Assert.NotEqual(50UL, status.Basic.Term);
@@ -330,7 +330,7 @@ public sealed class RaftNodeCommandTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task<Status> canceled =
                 node.GetStatusAsync(
                         cancellation.Token)
@@ -342,9 +342,9 @@ public sealed class RaftNodeCommandTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await claimed.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
 
             _ = await node.GetStatusAsync();
         }
@@ -607,7 +607,7 @@ public sealed class RaftNodeCommandTests
                 .AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             var v1 = new ProtocolConfChange
             {
@@ -640,13 +640,13 @@ public sealed class RaftNodeCommandTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await Task.WhenAll(
                     blocker,
                     first,
                     second,
                     read)
-                .WaitAsync(TimeSpan.FromSeconds(2));
+                .WaitAsync(DeadlockGuardTimeout);
 
             Ready ready = await WaitReadyAsync(node);
             Message[] proposals =
@@ -707,7 +707,7 @@ public sealed class RaftNodeCommandTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             var change = new ConfChangeV2();
             change.Changes.Add(new ConfChangeSingle
             {
@@ -723,12 +723,12 @@ public sealed class RaftNodeCommandTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             ConfState result = await apply.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             Assert.Equal([2UL], result.Learners);
             result.Learners[0] = 99;
 

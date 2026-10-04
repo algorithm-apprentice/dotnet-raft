@@ -25,7 +25,7 @@ public sealed class RaftNodeTickTests
             }
 
             await Task.WhenAll(statuses)
-                .WaitAsync(TimeSpan.FromSeconds(2));
+                .WaitAsync(DeadlockGuardTimeout);
             Ready ready = await WaitReadyAsync(node);
             Assert.Equal(
                 RaftRole.Candidate,
@@ -51,7 +51,7 @@ public sealed class RaftNodeTickTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             int callerThread =
                 Environment.CurrentManagedThreadId;
 
@@ -63,12 +63,12 @@ public sealed class RaftNodeTickTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             Assert.True(
                 logger.WarningWritten.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             (
                 RaftLogLevel Level,
@@ -112,7 +112,7 @@ public sealed class RaftNodeTickTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             for (var tick = 0; tick < 400; tick++)
             {
                 node.Tick();
@@ -121,9 +121,9 @@ public sealed class RaftNodeTickTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             await Assert.ThrowsAsync<RaftNodeFaultedException>(
                 async () => await node.Completion);
             Assert.True(
@@ -160,7 +160,7 @@ public sealed class RaftNodeTickTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             for (var tick = 0; tick < 400; tick++)
             {
                 node.Tick();
@@ -169,12 +169,12 @@ public sealed class RaftNodeTickTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             _ = await node.GetStatusAsync()
                 .AsTask()
-                .WaitAsync(TimeSpan.FromSeconds(2));
+                .WaitAsync(DeadlockGuardTimeout);
 
             Assert.DoesNotContain(
                 logger.Events,
@@ -204,15 +204,15 @@ public sealed class RaftNodeTickTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             node.Tick();
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             _ = await node.GetStatusAsync();
 
             Assert.DoesNotContain(
@@ -256,7 +256,7 @@ public sealed class RaftNodeTickTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             for (var tick = 0; tick < 400; tick++)
             {
                 node.Tick();
@@ -265,12 +265,12 @@ public sealed class RaftNodeTickTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await campaign.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             Assert.True(
                 logger.WarningWritten.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
         }
         finally
         {

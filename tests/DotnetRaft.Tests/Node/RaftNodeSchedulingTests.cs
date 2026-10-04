@@ -61,7 +61,7 @@ public sealed class RaftNodeSchedulingTests
                 .AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task[] commands =
             [
                 .. Enumerable.Range(0, CommandCount)
@@ -87,10 +87,10 @@ public sealed class RaftNodeSchedulingTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Assert.True(
                 candidateObserved.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
 
             RaftTraceEvent[] events =
                 trace.Events.ToArray();
@@ -124,9 +124,9 @@ public sealed class RaftNodeSchedulingTests
                 ProposalCount - 1);
 
             await blocker.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
             await Task.WhenAll(commands)
-                .WaitAsync(TimeSpan.FromSeconds(2));
+                .WaitAsync(DeadlockGuardTimeout);
             int completedBeforeCancellation =
                 proposals.Count(
                     proposal =>
@@ -195,7 +195,7 @@ public sealed class RaftNodeSchedulingTests
                 .AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task[] commands =
             [
                 .. Enumerable.Range(0, WorkCount)
@@ -220,12 +220,12 @@ public sealed class RaftNodeSchedulingTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Assert.True(
                 fourBeatsObserved.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             await blocker.WaitAsync(
-                TimeSpan.FromSeconds(2));
+                DeadlockGuardTimeout);
 
             MessageType[] messageTypes =
             [
@@ -284,9 +284,9 @@ public sealed class RaftNodeSchedulingTests
             Assert.True(sawMissingLane);
             Assert.True(sawRepeatedAcrossBoundary);
             await Task.WhenAll(commands)
-                .WaitAsync(TimeSpan.FromSeconds(2));
+                .WaitAsync(DeadlockGuardTimeout);
             await Task.WhenAll(proposals)
-                .WaitAsync(TimeSpan.FromSeconds(2));
+                .WaitAsync(DeadlockGuardTimeout);
         }
         finally
         {
@@ -328,7 +328,7 @@ public sealed class RaftNodeSchedulingTests
                 node.CampaignAsync().AsTask();
             Assert.True(
                 trace.Entered.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             Task<bool> continuation =
                 firstCampaign.ContinueWith(
                     _ =>
@@ -355,10 +355,10 @@ public sealed class RaftNodeSchedulingTests
             trace.Release.Set();
             Assert.True(
                 trace.Exited.Wait(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
             bool observed =
                 secondCampaignObserved.Wait(
-                    TimeSpan.FromSeconds(2));
+                    DeadlockGuardTimeout);
             if (!observed)
             {
                 continuationCancellation.Cancel();
@@ -367,7 +367,7 @@ public sealed class RaftNodeSchedulingTests
             Assert.True(observed);
             Assert.True(
                 await continuation.WaitAsync(
-                    TimeSpan.FromSeconds(2)));
+                    DeadlockGuardTimeout));
         }
         finally
         {

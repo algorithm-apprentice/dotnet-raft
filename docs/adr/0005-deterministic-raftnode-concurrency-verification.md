@@ -162,3 +162,9 @@ Implemented without changing the public API or single-owner architecture.
   Stryker reports 100% when the reviewed timeout detections are included; and
 - the formerly flaky tick-warning logger-failure test passed 50 of 50 fresh
   test-host executions with no retries.
+
+A later constrained full-suite run reproduced the same test failure before
+the owner loop entered its trace gate. The fixed two-second outer wait was a
+test scheduler deadline, not a Raft liveness requirement. RaftNode tests now
+share a ten-second outer deadlock guard. The guard remains outside production
+callbacks and does not delay successful tests.
