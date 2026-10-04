@@ -56,6 +56,10 @@ These are documented design choices, not unknown parity gaps:
     at the public `RawNode` boundary before core mutation. The pinned
     implementation relies on its host and generated messages for those
     preconditions.
+11. ADR 0009 immediately retries a transfer-blocked automatic joint exit when
+    leadership transfer times out. The pinned implementation waits for another
+    application acknowledgement, which can leave an idle cluster in joint
+    consensus indefinitely.
 
 ## Corpus integrity
 
