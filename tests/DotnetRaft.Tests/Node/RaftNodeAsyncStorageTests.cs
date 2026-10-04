@@ -1,3 +1,4 @@
+using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
@@ -18,9 +19,13 @@ public sealed class RaftNodeAsyncStorageTests
             await node.CampaignAsync();
             Ready election = await WaitReadyAsync(node);
 
-            await Assert.ThrowsAsync<NotSupportedException>(
+            NotSupportedException exception =
+                await Assert.ThrowsAsync<NotSupportedException>(
                 async () => await node.AdvanceAsync()
                     .AsTask());
+            Assert.Equal(
+                "Advance is replaced by storage response messages when asynchronous storage writes are enabled.",
+                exception.Message);
             await ProcessReadyAsync(
                 node,
                 storage,
@@ -116,6 +121,33 @@ public sealed class RaftNodeAsyncStorageTests
                         Type =
                             MessageType.MsgStorageAppendResp,
                         Term = 1,
+                    }).AsTask());
+
+            Assert.False(node.Completion.IsCompleted);
+            _ = await node.GetStatusAsync();
+        }
+        finally
+        {
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReservedSenderWithNonStorageMessageIsNonterminal()
+    {
+        (RaftNode node, _) =
+            RestartAsyncNode();
+        try
+        {
+            await Assert.ThrowsAsync<StorageResponseValidationException>(
+                async () => await node.StepAsync(
+                    new Message
+                    {
+                        From =
+                            RaftLocalMessageTargets
+                                .ApplyThread,
+                        To = 1,
+                        Type = MessageType.MsgAppResp,
                     }).AsTask());
 
             Assert.False(node.Completion.IsCompleted);

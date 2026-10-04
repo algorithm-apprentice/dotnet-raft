@@ -669,10 +669,10 @@ internal sealed class RaftLog
 
     private void LogInformation(string message)
     {
-        if (_logger.IsEnabled(RaftLogLevel.Information))
-        {
-            _logger.Log(RaftLogLevel.Information, message);
-        }
+        RaftLogging.Write(
+            _logger,
+            RaftLogLevel.Information,
+            message);
     }
 
     private static Entry[] MaterializeAndValidateEntries(

@@ -1023,7 +1023,10 @@ public sealed partial class RawNode
         {
             action();
         }
-        catch (RaftTracingException exception)
+        catch (Exception exception)
+            when (exception is
+                RaftTracingException
+                or RaftLoggingException)
         {
             Fault(exception);
             throw;
@@ -1041,7 +1044,10 @@ public sealed partial class RawNode
         {
             return action();
         }
-        catch (RaftTracingException exception)
+        catch (Exception exception)
+            when (exception is
+                RaftTracingException
+                or RaftLoggingException)
         {
             Fault(exception);
             throw;

@@ -146,11 +146,7 @@ public sealed class RaftNode : IRaftNode
         CancellationToken cancellationToken = default)
     {
         return QueueOperation(
-            rawNode =>
-            {
-                rawNode.Campaign();
-                return true;
-            },
+            rawNode => rawNode.Campaign(),
             cancellationToken);
     }
 
@@ -160,11 +156,7 @@ public sealed class RaftNode : IRaftNode
     {
         byte[] owned = data.ToArray();
         return QueueProposal(
-            rawNode =>
-            {
-                rawNode.Propose(owned);
-                return true;
-            },
+            rawNode => rawNode.Propose(owned),
             cancellationToken);
     }
 
@@ -176,10 +168,7 @@ public sealed class RaftNode : IRaftNode
         ProtocolConfChange owned = change.Clone();
         return QueueProposal(
             rawNode =>
-            {
-                rawNode.ProposeConfChange(owned);
-                return true;
-            },
+                rawNode.ProposeConfChange(owned),
             cancellationToken);
     }
 
@@ -191,10 +180,7 @@ public sealed class RaftNode : IRaftNode
         ConfChangeV2 owned = change.Clone();
         return QueueProposal(
             rawNode =>
-            {
-                rawNode.ProposeConfChange(owned);
-                return true;
-            },
+                rawNode.ProposeConfChange(owned),
             cancellationToken);
     }
 
@@ -220,11 +206,7 @@ public sealed class RaftNode : IRaftNode
             }
 
             return QueueOperation(
-                rawNode =>
-                {
-                    rawNode.Step(owned);
-                    return true;
-                },
+                rawNode => rawNode.Step(owned),
                 cancellationToken);
         }
 
@@ -232,11 +214,7 @@ public sealed class RaftNode : IRaftNode
         {
             return _asyncStorageWrites
                 ? QueueOperation(
-                    rawNode =>
-                    {
-                        rawNode.Step(owned);
-                        return true;
-                    },
+                    rawNode => rawNode.Step(owned),
                     cancellationToken)
                 : QueueOperation(
                     _ => throw new NotSupportedException(
@@ -247,27 +225,27 @@ public sealed class RaftNode : IRaftNode
         if (MessageClassifier.IsLocal(owned.Type))
         {
             return QueueOperation(
-                _ => true,
+                _ =>
+                {
+                },
                 cancellationToken);
         }
 
-        Func<RawNode, bool> step = rawNode =>
+        Action<RawNode> step = rawNode =>
         {
             if (MessageClassifier.IsResponse(owned.Type)
                 && !IsKnownPeer(
                     rawNode,
                     owned.From))
             {
-                return true;
+                return;
             }
 
             if (owned.Type == MessageType.MsgProp)
             {
                 owned.From = _id;
             }
-
             rawNode.Step(owned);
-            return true;
         };
         return owned.Type == MessageType.MsgProp
             ? QueueProposal(
@@ -282,11 +260,7 @@ public sealed class RaftNode : IRaftNode
         CancellationToken cancellationToken = default)
     {
         return QueueOperation(
-            rawNode =>
-            {
-                rawNode.ForgetLeader();
-                return true;
-            },
+            rawNode => rawNode.ForgetLeader(),
             cancellationToken);
     }
 
@@ -296,11 +270,7 @@ public sealed class RaftNode : IRaftNode
     {
         byte[] owned = context.ToArray();
         return QueueOperation(
-            rawNode =>
-            {
-                rawNode.ReadIndex(owned);
-                return true;
-            },
+            rawNode => rawNode.ReadIndex(owned),
             cancellationToken);
     }
 
@@ -310,10 +280,7 @@ public sealed class RaftNode : IRaftNode
     {
         return QueueOperation(
             rawNode =>
-            {
-                rawNode.TransferLeader(transferee);
-                return true;
-            },
+                rawNode.TransferLeader(transferee),
             cancellationToken);
     }
 
@@ -323,10 +290,7 @@ public sealed class RaftNode : IRaftNode
     {
         return QueueOperation(
             rawNode =>
-            {
-                rawNode.ReportUnreachable(id);
-                return true;
-            },
+                rawNode.ReportUnreachable(id),
             cancellationToken);
     }
 
@@ -337,10 +301,7 @@ public sealed class RaftNode : IRaftNode
     {
         return QueueOperation(
             rawNode =>
-            {
-                rawNode.ReportSnapshot(id, status);
-                return true;
-            },
+                rawNode.ReportSnapshot(id, status),
             cancellationToken);
     }
 
@@ -470,7 +431,6 @@ public sealed class RaftNode : IRaftNode
         {
             while (Volatile.Read(ref _state) == Running)
             {
-                PurgeCanceledReadyWaiter();
                 TryEmitMissedTickWarning();
                 TryPublishReady();
 
@@ -665,7 +625,7 @@ public sealed class RaftNode : IRaftNode
             return;
         }
 
-        bool hasReady;
+        var hasReady = false;
         try
         {
             hasReady = ExecuteOwned(
@@ -804,18 +764,13 @@ public sealed class RaftNode : IRaftNode
                 RefreshLocalProgress();
             });
             _outstandingReady = null;
-            request.Succeed(true);
+            request.Succeed();
         }
         catch (Exception exception)
         {
             request.Fail(exception);
-            if (_rawNode.IsFaulted)
-            {
-                throw new RaftNodeFaultedException(
-                    exception);
-            }
-
-            throw;
+            throw new RaftNodeFaultedException(
+                exception);
         }
     }
 
@@ -832,16 +787,6 @@ public sealed class RaftNode : IRaftNode
                 .LeaderId != 0);
     }
 
-    private void PurgeCanceledReadyWaiter()
-    {
-        if (_readyWaiter is not null
-            && !_readyWaiter.IsWaiting)
-        {
-            _readyWaiter.ReleaseRegistration();
-            _readyWaiter = null;
-        }
-    }
-
     private void TryEmitMissedTickWarning()
     {
         if (Interlocked.Exchange(
@@ -855,15 +800,10 @@ public sealed class RaftNode : IRaftNode
         try
         {
             ExecuteOwned(() =>
-            {
-                if (_logger.IsEnabled(
-                        RaftLogLevel.Warning))
-                {
-                    _logger.Log(
-                        RaftLogLevel.Warning,
-                        $"{_id:x} missed one or more ticks because the Node loop was busy.");
-                }
-            });
+                RaftLogging.Write(
+                    _logger,
+                    RaftLogLevel.Warning,
+                    $"{_id:x} missed one or more ticks because the Node loop was busy."));
         }
         catch (Exception exception)
         {
@@ -946,6 +886,16 @@ public sealed class RaftNode : IRaftNode
         return known;
     }
 
+    private static bool IsExpectedRequestException(
+        Exception exception)
+    {
+        return exception is
+            ProposalDroppedException
+            or ArgumentException
+            or StorageResponseValidationException
+            or NotSupportedException;
+    }
+
     private bool TryClaimForDispatch(
         NodeRequest request)
     {
@@ -986,16 +936,31 @@ public sealed class RaftNode : IRaftNode
     }
 
     private ValueTask QueueOperation(
-        Func<RawNode, bool> operation,
+        Action<RawNode> operation,
         CancellationToken cancellationToken)
     {
-        ValueTask<bool> result =
-            QueueOperation<bool>(
-                operation,
+        ArgumentNullException.ThrowIfNull(operation);
+        EnsureNotReentrant();
+        Exception? unavailable =
+            GetUnavailableException();
+        if (unavailable is not null)
+        {
+            return ValueTask.FromException(
+                unavailable);
+        }
+
+        if (cancellationToken.IsCancellationRequested)
+        {
+            return ValueTask.FromCanceled(
                 cancellationToken);
-        return result.IsCompletedSuccessfully
-            ? ValueTask.CompletedTask
-            : new ValueTask(result.AsTask());
+        }
+
+        var request = new OperationRequest(
+            operation,
+            CancelRequest,
+            cancellationToken);
+        Enqueue(request);
+        return new ValueTask(request.Task);
     }
 
     private ValueTask<T> QueueOperation<T>(
@@ -1027,7 +992,7 @@ public sealed class RaftNode : IRaftNode
     }
 
     private ValueTask QueueProposal(
-        Func<RawNode, bool> operation,
+        Action<RawNode> operation,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
@@ -1189,11 +1154,17 @@ public sealed class RaftNode : IRaftNode
 
     private void ExecuteOwned(Action action)
     {
-        ExecuteOwned(() =>
+        ArgumentNullException.ThrowIfNull(action);
+        RaftNode? previous = ActiveOwner.Value;
+        ActiveOwner.Value = this;
+        try
         {
             action();
-            return true;
-        });
+        }
+        finally
+        {
+            ActiveOwner.Value = previous;
+        }
     }
 
     private interface ICommand
@@ -1374,6 +1345,105 @@ public sealed class RaftNode : IRaftNode
         }
     }
 
+    private abstract class VoidNodeRequest : NodeRequest
+    {
+        private readonly TaskCompletionSource _completion =
+            new(
+                TaskCreationOptions
+                    .RunContinuationsAsynchronously);
+
+        protected VoidNodeRequest(
+            Action<NodeRequest> cancelRequest,
+            CancellationToken cancellationToken)
+            : base(cancelRequest, cancellationToken)
+        {
+        }
+
+        internal Task Task => _completion.Task;
+
+        internal void Succeed()
+        {
+            if (TryComplete())
+            {
+                _completion.TrySetResult();
+            }
+        }
+
+        protected override void CompleteCanceled(
+            CancellationToken cancellationToken)
+        {
+            _completion.TrySetCanceled(
+                cancellationToken);
+        }
+
+        protected override void CompleteException(
+            Exception exception)
+        {
+            _completion.TrySetException(exception);
+        }
+    }
+
+    private class OperationRequest : VoidNodeRequest
+    {
+        internal OperationRequest(
+            Action<RawNode> operation,
+            Action<NodeRequest> cancelRequest,
+            CancellationToken cancellationToken)
+            : base(cancelRequest, cancellationToken)
+        {
+            Operation = operation;
+        }
+
+        internal Action<RawNode>? Operation
+        {
+            get;
+            set;
+        }
+
+        public override void Execute(RaftNode owner)
+        {
+            if (!owner.TryClaimForDispatch(this))
+            {
+                ReleaseRegistration();
+                if (this is ProposalRequest proposal)
+                {
+                    proposal.ReleasePayload();
+                }
+
+                Fail(
+                    owner.GetUnavailableException()
+                    ?? new RaftNodeStoppedException());
+                return;
+            }
+
+            try
+            {
+                Action<RawNode> operation =
+                    Operation
+                    ?? throw new InvalidOperationException(
+                        "The queued operation payload is unavailable.");
+                Operation = null;
+                owner.ExecuteOwned(() =>
+                {
+                    operation(owner._rawNode);
+                    owner.RefreshLocalProgress();
+                });
+                Succeed();
+            }
+            catch (Exception exception)
+            {
+                Fail(exception);
+                if (!IsExpectedRequestException(
+                        exception)
+                    || owner._rawNode.IsFaulted)
+                {
+                    throw new RaftNodeFaultedException(
+                        exception);
+                }
+            }
+        }
+    }
+
     private class OperationRequest<T> : NodeRequest<T>
     {
         internal OperationRequest(
@@ -1396,11 +1466,6 @@ public sealed class RaftNode : IRaftNode
             if (!owner.TryClaimForDispatch(this))
             {
                 ReleaseRegistration();
-                if (this is ProposalRequest proposal)
-                {
-                    proposal.ReleasePayload();
-                }
-
                 Fail(
                     owner.GetUnavailableException()
                     ?? new RaftNodeStoppedException());
@@ -1425,9 +1490,9 @@ public sealed class RaftNode : IRaftNode
             catch (Exception exception)
             {
                 Fail(exception);
-                if (owner._rawNode.IsFaulted
-                    || !IsExpectedRequestException(
-                        exception))
+                if (!IsExpectedRequestException(
+                        exception)
+                    || owner._rawNode.IsFaulted)
                 {
                     throw new RaftNodeFaultedException(
                         exception);
@@ -1435,22 +1500,13 @@ public sealed class RaftNode : IRaftNode
             }
         }
 
-        private static bool IsExpectedRequestException(
-            Exception exception)
-        {
-            return exception is
-                ProposalDroppedException
-                or ArgumentException
-                or StorageResponseValidationException
-                or NotSupportedException;
-        }
     }
 
     private sealed class ProposalRequest(
-        Func<RawNode, bool> operation,
+        Action<RawNode> operation,
         Action<NodeRequest> cancelRequest,
         CancellationToken cancellationToken)
-        : OperationRequest<bool>(
+        : OperationRequest(
             operation,
             cancelRequest,
             cancellationToken)
@@ -1484,7 +1540,7 @@ public sealed class RaftNode : IRaftNode
     private sealed class AdvanceRequest(
         Action<NodeRequest> cancelRequest,
         CancellationToken cancellationToken)
-        : NodeRequest<bool>(
+        : VoidNodeRequest(
             cancelRequest,
             cancellationToken)
     {

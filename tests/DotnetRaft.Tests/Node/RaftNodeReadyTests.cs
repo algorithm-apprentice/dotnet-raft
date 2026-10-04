@@ -1,3 +1,4 @@
+using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
@@ -106,10 +107,14 @@ public sealed class RaftNodeReadyTests
                     cancellation.Token)
                 .AsTask();
 
-            await Assert.ThrowsAsync<InvalidOperationException>(
+            InvalidOperationException secondWait =
+                await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await node.WaitForReadyAsync()
                     .AsTask()
                     .WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Equal(
+                "Only one Ready wait or outstanding batch is allowed.",
+                secondWait.Message);
 
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -117,10 +122,14 @@ public sealed class RaftNodeReadyTests
 
             await node.CampaignAsync();
             Ready ready = await WaitReadyAsync(node);
-            await Assert.ThrowsAsync<InvalidOperationException>(
+            InvalidOperationException outstandingWait =
+                await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await node.WaitForReadyAsync()
                     .AsTask()
                     .WaitAsync(TimeSpan.FromSeconds(2)));
+            Assert.Equal(
+                "Only one Ready wait or outstanding batch is allowed.",
+                outstandingWait.Message);
             await node.AdvanceAsync();
         }
         finally
@@ -162,22 +171,332 @@ public sealed class RaftNodeReadyTests
     }
 
     [Fact]
+    public async Task CancellationBeforeOwnerDispatchSkipsReadyRequest()
+    {
+        var trace = new BlockingTraceSink();
+        (RaftNode node, _) = RestartNode(
+            traceSink: trace);
+        using var cancellation =
+            new CancellationTokenSource();
+        try
+        {
+            Task campaign =
+                node.CampaignAsync().AsTask();
+            Assert.True(
+                trace.Entered.Wait(
+                    TimeSpan.FromSeconds(2)));
+            Task<Ready> canceled =
+                node.WaitForReadyAsync(
+                        cancellation.Token)
+                    .AsTask();
+
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await canceled);
+            trace.Release.Set();
+            Assert.True(
+                trace.Exited.Wait(
+                    TimeSpan.FromSeconds(2)));
+            await campaign.WaitAsync(
+                TimeSpan.FromSeconds(2));
+
+            Ready ready = await WaitReadyAsync(node);
+            Assert.NotNull(ready.SoftState);
+        }
+        finally
+        {
+            trace.Release.Set();
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReadyClaimWinsOverCancellationAndStop()
+    {
+        var trace = new BlockingTraceSink(
+            traceEvent =>
+                traceEvent.Type
+                == RaftTraceEventType.ReadyAccepted);
+        (RaftNode node, _) = RestartNode(
+            traceSink: trace);
+        using var cancellation =
+            new CancellationTokenSource();
+        try
+        {
+            await node.CampaignAsync();
+            Task<Ready> readyTask =
+                node.WaitForReadyAsync(
+                        cancellation.Token)
+                    .AsTask();
+            Assert.True(
+                trace.Entered.Wait(
+                    TimeSpan.FromSeconds(2)));
+
+            cancellation.Cancel();
+            Task stop = node.StopAsync().AsTask();
+            trace.Release.Set();
+            Assert.True(
+                trace.Exited.Wait(
+                    TimeSpan.FromSeconds(2)));
+
+            Ready ready = await readyTask.WaitAsync(
+                TimeSpan.FromSeconds(2));
+            Assert.NotNull(ready.SoftState);
+            await stop.WaitAsync(
+                TimeSpan.FromSeconds(2));
+            await Assert.ThrowsAsync<RaftNodeStoppedException>(
+                async () => await node.AdvanceAsync()
+                    .AsTask());
+        }
+        finally
+        {
+            trace.Release.Set();
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task AdvanceClaimWinsOverLaterCancellation()
+    {
+        var block = 0;
+        var trace = new BlockingTraceSink(
+            traceEvent =>
+                Volatile.Read(ref block) != 0
+                && traceEvent.Type
+                    == RaftTraceEventType.MessageReceived);
+        (RaftNode node, _) = RestartNode(
+            traceSink: trace);
+        using var cancellation =
+            new CancellationTokenSource();
+        try
+        {
+            await node.CampaignAsync();
+            _ = await WaitReadyAsync(node);
+
+            Volatile.Write(ref block, 1);
+            Task advance = node.AdvanceAsync(
+                    cancellation.Token)
+                .AsTask();
+            Assert.True(
+                trace.Entered.Wait(
+                    TimeSpan.FromSeconds(2)));
+            cancellation.Cancel();
+            trace.Release.Set();
+            Assert.True(
+                trace.Exited.Wait(
+                    TimeSpan.FromSeconds(2)));
+
+            await advance.WaitAsync(
+                TimeSpan.FromSeconds(2));
+            Assert.False(node.Completion.IsCompleted);
+        }
+        finally
+        {
+            trace.Release.Set();
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CanceledQueuedAdvanceNeverObservesMissingBatch()
+    {
+        var trace = new BlockingTraceSink();
+        (RaftNode node, _) = RestartNode(
+            traceSink: trace);
+        using var cancellation =
+            new CancellationTokenSource();
+        try
+        {
+            Task campaign =
+                node.CampaignAsync().AsTask();
+            Assert.True(
+                trace.Entered.Wait(
+                    TimeSpan.FromSeconds(2)));
+            Task advance = node.AdvanceAsync(
+                    cancellation.Token)
+                .AsTask();
+
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await advance);
+            trace.Release.Set();
+            Assert.True(
+                trace.Exited.Wait(
+                    TimeSpan.FromSeconds(2)));
+            await campaign.WaitAsync(
+                TimeSpan.FromSeconds(2));
+        }
+        finally
+        {
+            trace.Release.Set();
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
+    public async Task ReadyCallbackFailurePreservesTriggerException()
+    {
+        var trace = new BlockingTraceSink(
+            traceEvent =>
+                traceEvent.Type
+                == RaftTraceEventType.ReadyAccepted,
+            _ => throw new InvalidOperationException(
+                "ready trace failed"));
+        (RaftNode node, _) = RestartNode(
+            traceSink: trace);
+        try
+        {
+            await node.CampaignAsync();
+            Task<Ready> ready =
+                node.WaitForReadyAsync().AsTask();
+            Assert.True(
+                trace.Entered.Wait(
+                    TimeSpan.FromSeconds(2)));
+            trace.Release.Set();
+            Assert.True(
+                trace.Exited.Wait(
+                    TimeSpan.FromSeconds(2)));
+
+            RaftTracingException trigger =
+                await Assert.ThrowsAsync<RaftTracingException>(
+                    async () => await ready);
+            Assert.IsType<InvalidOperationException>(
+                trigger.InnerException);
+            await Assert.ThrowsAsync<RaftNodeFaultedException>(
+                async () => await node.Completion);
+            Assert.NotNull(node.TerminalStatus);
+        }
+        finally
+        {
+            trace.Release.Set();
+            try
+            {
+                await node.StopAsync();
+            }
+            catch (RaftNodeFaultedException)
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AdvanceCallbackFailurePreservesTriggerException()
+    {
+        var block = 0;
+        var trace = new BlockingTraceSink(
+            traceEvent =>
+                Volatile.Read(ref block) != 0
+                && traceEvent.Type
+                    == RaftTraceEventType.MessageReceived,
+            _ => throw new InvalidOperationException(
+                "advance trace failed"));
+        (RaftNode node, _) = RestartNode(
+            traceSink: trace);
+        try
+        {
+            await node.CampaignAsync();
+            _ = await WaitReadyAsync(node);
+
+            Volatile.Write(ref block, 1);
+            Task advance = node.AdvanceAsync().AsTask();
+            Assert.True(
+                trace.Entered.Wait(
+                    TimeSpan.FromSeconds(2)));
+            trace.Release.Set();
+            Assert.True(
+                trace.Exited.Wait(
+                    TimeSpan.FromSeconds(2)));
+
+            RaftTracingException trigger =
+                await Assert.ThrowsAsync<RaftTracingException>(
+                    async () => await advance);
+            Assert.IsType<InvalidOperationException>(
+                trigger.InnerException);
+            await Assert.ThrowsAsync<RaftNodeFaultedException>(
+                async () => await node.Completion);
+            Assert.NotNull(node.TerminalStatus);
+        }
+        finally
+        {
+            trace.Release.Set();
+            try
+            {
+                await node.StopAsync();
+            }
+            catch (RaftNodeFaultedException)
+            {
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AdvanceLoggerFailurePreservesWrappedTrigger()
+    {
+        var logger = new RecordingLogger();
+        (RaftNode node, _) = RestartNode(
+            logger: logger);
+        try
+        {
+            await node.CampaignAsync();
+            _ = await WaitReadyAsync(node);
+            logger.ThrowOnInformation = true;
+
+            RaftLoggingException trigger =
+                await Assert.ThrowsAsync<RaftLoggingException>(
+                    async () => await node.AdvanceAsync()
+                        .AsTask());
+            InvalidOperationException loggerFailure =
+                Assert.IsType<InvalidOperationException>(
+                    trigger.InnerException);
+            Assert.Contains(
+                "Injected information",
+                loggerFailure.Message,
+                StringComparison.Ordinal);
+            RaftNodeFaultedException completion =
+                await Assert.ThrowsAsync<RaftNodeFaultedException>(
+                async () => await node.Completion);
+            Assert.Same(
+                trigger,
+                completion.InnerException);
+            Assert.NotNull(node.TerminalStatus);
+        }
+        finally
+        {
+            try
+            {
+                await node.StopAsync();
+            }
+            catch (RaftNodeFaultedException)
+            {
+            }
+        }
+    }
+
+    [Fact]
     public async Task MissingAndDuplicateAdvanceFail()
     {
         (RaftNode node, _) = RestartNode();
         try
         {
-            await Assert.ThrowsAsync<InvalidOperationException>(
+            InvalidOperationException missing =
+                await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await node.AdvanceAsync()
                     .AsTask());
+            Assert.Equal(
+                "No Ready is awaiting advancement.",
+                missing.Message);
 
             await node.CampaignAsync();
             _ = await WaitReadyAsync(node);
             await node.AdvanceAsync();
 
-            await Assert.ThrowsAsync<InvalidOperationException>(
+            InvalidOperationException duplicate =
+                await Assert.ThrowsAsync<InvalidOperationException>(
                 async () => await node.AdvanceAsync()
                     .AsTask());
+            Assert.Equal(
+                "No Ready is awaiting advancement.",
+                duplicate.Message);
         }
         finally
         {

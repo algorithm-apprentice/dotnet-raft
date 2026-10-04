@@ -2357,33 +2357,33 @@ internal sealed class RaftCore
 
     private void LogInformation(string message)
     {
-        if (Logger.IsEnabled(RaftLogLevel.Information))
-        {
-            Logger.Log(RaftLogLevel.Information, message);
-        }
+        RaftLogging.Write(
+            Logger,
+            RaftLogLevel.Information,
+            message);
     }
 
     private void LogDebug(string message)
     {
-        if (Logger.IsEnabled(RaftLogLevel.Debug))
-        {
-            Logger.Log(RaftLogLevel.Debug, message);
-        }
+        RaftLogging.Write(
+            Logger,
+            RaftLogLevel.Debug,
+            message);
     }
 
     private void LogError(string message)
     {
-        if (Logger.IsEnabled(RaftLogLevel.Error))
-        {
-            Logger.Log(RaftLogLevel.Error, message);
-        }
+        RaftLogging.Write(
+            Logger,
+            RaftLogLevel.Error,
+            message);
     }
 
     private void LogWarning(string message)
     {
-        if (Logger.IsEnabled(RaftLogLevel.Warning))
-        {
-            Logger.Log(RaftLogLevel.Warning, message);
-        }
+        RaftLogging.Write(
+            Logger,
+            RaftLogLevel.Warning,
+            message);
     }
 }

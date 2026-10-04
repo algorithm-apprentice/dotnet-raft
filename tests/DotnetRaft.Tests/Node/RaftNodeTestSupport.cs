@@ -19,6 +19,7 @@ internal static class RaftNodeTestSupport
         IEnumerable<ulong>? learners = null,
         int electionTick = 10,
         ulong maxCommittedSizePerReady = 0,
+        ulong maxUncommittedEntriesSize = 0,
         IRaftTraceSink? traceSink = null,
         IRaftLogger? logger = null)
     {
@@ -35,6 +36,8 @@ internal static class RaftNodeTestSupport
             MaxSizePerMessage = ulong.MaxValue,
             MaxCommittedSizePerReady =
                 maxCommittedSizePerReady,
+            MaxUncommittedEntriesSize =
+                maxUncommittedEntriesSize,
             MaxInflightMessages = 256,
             TraceSink = traceSink,
             Logger = logger,
@@ -158,7 +161,32 @@ internal sealed class CallbackTraceSink : IRaftTraceSink
 
 internal sealed class BlockingTraceSink : IRaftTraceSink
 {
+    private readonly Func<RaftTraceEvent, bool>
+        _shouldBlock;
+    private readonly Action<RaftTraceEvent>?
+        _afterRelease;
+    private readonly Action<RaftTraceEvent>?
+        _onTrace;
     private int _blocked;
+
+    internal BlockingTraceSink(
+        Func<RaftTraceEvent, bool>? shouldBlock = null,
+        Action<RaftTraceEvent>? afterRelease = null,
+        Action<RaftTraceEvent>? onTrace = null)
+    {
+        _shouldBlock =
+            shouldBlock
+            ?? (traceEvent =>
+                traceEvent.Type
+                == RaftTraceEventType.MessageReceived);
+        _afterRelease = afterRelease;
+        _onTrace = onTrace;
+    }
+
+    internal ConcurrentQueue<RaftTraceEvent> Events
+    {
+        get;
+    } = new();
 
     internal ManualResetEventSlim Entered { get; } =
         new(false);
@@ -166,20 +194,28 @@ internal sealed class BlockingTraceSink : IRaftTraceSink
     internal ManualResetEventSlim Release { get; } =
         new(false);
 
+    internal ManualResetEventSlim Exited { get; } =
+        new(false);
+
     public void Trace(RaftTraceEvent traceEvent)
     {
-        if (traceEvent.Type
-                != RaftTraceEventType.MessageReceived
+        Events.Enqueue(traceEvent);
+        _onTrace?.Invoke(traceEvent);
+        if (!_shouldBlock(traceEvent)
             || Interlocked.Exchange(ref _blocked, 1) != 0)
         {
             return;
         }
 
         Entered.Set();
-        if (!Release.Wait(TimeSpan.FromSeconds(2)))
+        try
         {
-            throw new TimeoutException(
-                "Blocking trace sink was not released.");
+            Release.Wait();
+            _afterRelease?.Invoke(traceEvent);
+        }
+        finally
+        {
+            Exited.Set();
         }
     }
 }
@@ -201,9 +237,14 @@ internal sealed class RecordingLogger : IRaftLogger
 
     internal bool ThrowOnInformation { get; set; }
 
+    internal Exception? InformationFailure { get; set; }
+
+    internal bool WarningEnabled { get; set; } = true;
+
     public bool IsEnabled(RaftLogLevel level)
     {
-        return true;
+        return level != RaftLogLevel.Warning
+            || WarningEnabled;
     }
 
     public void Log(
@@ -220,6 +261,12 @@ internal sealed class RecordingLogger : IRaftLogger
                 throw new InvalidOperationException(
                     "Injected logger failure.");
             }
+        }
+
+        if (level == RaftLogLevel.Information
+            && InformationFailure is not null)
+        {
+            throw InformationFailure;
         }
 
         if (level == RaftLogLevel.Information
