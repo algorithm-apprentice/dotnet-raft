@@ -421,14 +421,24 @@ faults the host and stops ASP.NET.
 
 ### Real processes
 
+- require `curl`, `jq`, and `python3`, a prebuilt Release host, and unused
+  loopback ports before starting;
 - launch three Kestrel processes with separate data directories;
-- elect and write through a follower;
+- elect a leader, wait until every active node observes it, and write through
+  a follower;
+- retry only transport failures and HTTP 408, 429, 500, 502, 503, or 504
+  mutation responses with the same durable request ID;
 - kill the leader by PID;
 - use SIGKILL for the crash phase and bounded curl/process deadlines;
 - restart it with the same directory;
 - continue quorum writes while it is down;
 - verify the restarted node catches up and serves a linearizable read;
-- stop and restart all nodes, then verify retained data.
+- stop and restart all nodes, then verify retained data; and
+- print every node log when any smoke step fails.
+
+The bounded retry path exercises the documented client contract rather than
+masking deterministic failures: mutation retries reuse the exact request ID,
+while all other HTTP errors fail immediately.
 
 Pending-snapshot recovery additionally terminates at:
 
