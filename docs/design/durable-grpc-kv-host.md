@@ -41,6 +41,14 @@ Each node owns:
 <DataDirectory>/application.db
 ```
 
+## Security and deployment boundary
+
+Kestrel binds both HTTP and gRPC endpoints with `ListenLocalhost`. The example
+has no TLS, client authentication, peer authentication, or authorization.
+Structural Raft message validation does not bind `Message.From` to a transport
+identity. The listeners must not be exposed outside a trusted local teaching
+environment.
+
 ## Projects and dependencies
 
 `examples/DotnetRaft.KvCluster` references:
@@ -128,6 +136,21 @@ newly created; a missing/recreated application database beside nonempty Raft
 state is always rejected. Process-crash recovery assumes both durable database
 files remain present.
 
+### Backup and restore set
+
+`raft.db` and `application.db` form one recovery set even though they do not
+share a transaction. Pending-snapshot reconciliation handles supported
+process-crash orderings, not arbitrary backup mixing. Startup detects
+missing/recreated application storage and cursor/configuration contradictions
+that can be proven from retained Raft state, but it cannot prove that every
+valid-looking application database contains the bytes produced by that Raft
+generation.
+
+The simple supported backup procedure stops the node and preserves its complete
+data directory as one unit. A production host would need a coordinated online
+backup protocol. Independently backing up, replacing, or restoring either
+database is unsupported.
+
 ## Application invariants
 
 Metadata always represents one physically complete prefix:
@@ -183,6 +206,14 @@ current physical-applied index
 duplicate flag
 conflict flag
 ```
+
+### Deduplication retention
+
+The MVP never deletes rows from `requests`. Every unique mutation request ID
+therefore remains in `application.db` and in every later application snapshot.
+Storage and snapshot size grow with unique mutation history. A production
+retention protocol would need to define the retry horizon and coordinate safe
+pruning across replicas and snapshots; that policy is outside this example.
 
 ## Configuration and no-op entries
 

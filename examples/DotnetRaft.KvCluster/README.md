@@ -15,6 +15,10 @@ It is still an educational fixed-membership database. There is no TLS,
 authentication, dynamic membership, MVCC, transaction API, watch, lease,
 sharding, or deployment automation.
 
+Both listeners bind to loopback only. Raft message validation rejects malformed
+protocol input but does not authenticate `Message.From` or authorize clients.
+Do not expose this host outside a trusted local teaching environment.
+
 ## Run three nodes
 
 Open three terminals from the repository root.
@@ -60,6 +64,10 @@ curl -X PUT http://127.0.0.1:7102/kv/color \
 Safely retryable mutations must supply and reuse the same request ID. Omitting
 it asks the server to generate an ID, but an unknown timeout outcome is then
 not safely retryable.
+
+The MVP retains every unique request ID permanently, including in application
+snapshots. There is no retention window or pruning protocol, so storage grows
+with unique mutation history.
 
 Delete:
 
@@ -110,8 +118,12 @@ directories:
 --Raft:DataDirectory=/absolute/path/node-1
 ```
 
-Do not delete or copy one database independently of the other. Live SQLite
-databases must be backed up through SQLite-aware tooling.
+Treat both databases as one recovery set. Pending-snapshot recovery handles
+process crashes, but startup cannot prove that every arbitrary independently
+captured pair belongs together. The simple supported backup procedure stops
+the node and copies its complete data directory as one unit. Do not delete,
+replace, copy, or restore either database independently; this example does not
+implement coordinated online backup.
 
 ## Snapshot policy
 

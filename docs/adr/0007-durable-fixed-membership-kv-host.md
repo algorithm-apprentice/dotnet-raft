@@ -30,7 +30,13 @@ fixed-membership distributed KV host.
    - `application.db` stores KV state, physical-applied index, application
      `ConfState`, and request deduplication results;
    - both use SQLite WAL, exclusive ownership, and FULL synchronous commits;
-   - no cross-database atomicity is claimed.
+   - no cross-database atomicity is claimed;
+   - backup and restore treat both databases as one recovery set; the supported
+     simple procedure stops the host and preserves the complete data directory
+     as one unit; and
+   - startup rejects missing/recreated application state and provably
+     incompatible cursors/configuration, but cannot prove that every arbitrary
+     independently captured pair belongs to the same application generation.
 2. **Recovery protocol**
    - reconcile any pending Raft application snapshot first;
    - restore application bytes, physical cursor, and `ConfState`
@@ -61,9 +67,11 @@ fixed-membership distributed KV host.
      committed winner completes them as conflict rather than false success;
    - one shared proposal submission remains live while any identical local
      waiter remains, so cancellation of the first caller cannot strand the
-     others; and
+     others;
    - snapshot restore resolves live proposal waiters from the restored durable
-     request table.
+     request table; and
+   - request rows are retained without pruning and every application snapshot
+     includes the complete request table.
 4. **Client identity**
    - PUT accepts an optional request ID and returns the effective ID;
    - DELETE accepts an optional request ID;
@@ -100,6 +108,9 @@ fixed-membership distributed KV host.
    - exactly three fixed peers;
    - durable application metadata is bound to one immutable local node ID;
    - set, delete, linearizable get, local get, status, and manual campaign;
+   - HTTP and gRPC listeners bind to loopback only and provide no TLS,
+     authentication, or authorization; structural Raft message validation is
+     not a security boundary;
    - no MVCC history, compare/transaction, watch, lease, auth, dynamic
      membership API, sharding, or etcd wire compatibility.
 
@@ -133,9 +144,14 @@ client protocol concerns in the consensus library.
 
 - Each node performs FULL synchronous writes to both Raft and application
   databases.
+- The two databases must be backed up and restored as a compatible recovery
+  set; arbitrary independent generations can be valid-looking but semantically
+  unrelated.
 - The fixed-membership sample remains a single replicated shard; every node
   stores all data.
-- Request deduplication history is retained without pruning in the MVP.
+- Request deduplication history is retained without pruning in the MVP, so
+  application storage and snapshot size grow with the number of unique
+  mutation request IDs.
 - Application snapshots materialize state in memory as required by the
   existing snapshot API.
 - Very large state can defer compaction so lagging replicas remain recoverable

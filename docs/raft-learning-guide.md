@@ -893,6 +893,11 @@ physicalApplied
 
 all commit together in `application.db`.
 
+The MVP retains every unique request ID in the application database and in
+later snapshots. This makes retries idempotent without a time window, but
+storage and snapshot size grow with mutation history because pruning is
+deliberately out of scope.
+
 The example is:
 
 - one Raft group;
@@ -908,6 +913,9 @@ It is not:
 - an MVCC database;
 - a watch/lease/auth system; or
 - a dynamic production deployment platform.
+
+Both listeners are loopback-only and unauthenticated. Structural Raft message
+validation is not peer authentication or client authorization.
 
 Run its tests:
 
@@ -1273,6 +1281,11 @@ Consensus storage and application state have different schemas and lifecycle
 responsibilities. The separation exposes the real recovery boundary and is
 similar to production systems that separate a WAL/consensus log from an
 application backend.
+
+The two files must still be backed up and restored as one compatible recovery
+set. Crash reconciliation can replay or restore supported in-flight states,
+but it cannot prove that every independently captured, valid-looking pair came
+from the same application generation.
 
 ## 12. Suggested four-week plan
 

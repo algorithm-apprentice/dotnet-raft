@@ -13,7 +13,23 @@ It persists:
 
 ## Install
 
+Version `1.0.0` is not currently published to NuGet.org. Build both packages
+from a repository checkout so the SQLite package can resolve its core
+dependency:
+
 ```bash
+dotnet restore DotnetRaft.sln
+dotnet pack src/DotnetRaft/DotnetRaft.csproj -c Release
+dotnet pack src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj -c Release
+```
+
+In the consumer project, create `NuGet.Config` if needed, add the generated
+package directory alongside NuGet.org, and install:
+
+```bash
+dotnet new nugetconfig
+dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
+  --name dotnet-raft-local --configfile NuGet.Config
 dotnet add package DotnetRaft.Sqlite --version 1.0.0
 ```
 
