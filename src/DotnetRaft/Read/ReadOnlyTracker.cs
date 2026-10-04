@@ -74,6 +74,36 @@ internal sealed class ReadOnlyTracker : IAckedIndexer
         }
     }
 
+    internal void ValidateAcknowledgementContext(
+        ByteString context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (context.Length == 0)
+        {
+            return;
+        }
+
+        if (context.Length != sizeof(ulong))
+        {
+            throw new ArgumentException(
+                "Read-only acknowledgement context must contain exactly eight bytes.",
+                nameof(context));
+        }
+
+        ulong position =
+            BinaryPrimitives.ReadUInt64LittleEndian(
+                context.Span);
+        ulong currentPosition = GetCurrentPosition();
+        if (position == 0
+            || position > currentPosition)
+        {
+            throw new ArgumentException(
+                $"Read-only acknowledgement position {position} is outside " +
+                $"the valid range 1..{currentPosition}.",
+                nameof(context));
+        }
+    }
+
     internal ReadIndexRequest[] Advance(JointConfig voters)
     {
         ArgumentNullException.ThrowIfNull(voters);

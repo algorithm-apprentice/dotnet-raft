@@ -238,7 +238,8 @@ Leader knowledge remains the second independent gate.
 
 ## Network Step filtering
 
-`StepAsync` mirrors pinned `Node.Step` before entering `RawNode`:
+`StepAsync` rejects an absent or unknown message type, then mirrors pinned
+`Node.Step` before entering `RawNode`:
 
 - `null` is rejected;
 - classifier-local messages from ordinary network senders are ignored and
@@ -250,6 +251,11 @@ Leader knowledge remains the second independent gate.
 
 Filtering and dispatch use the owned clone. Unknown-response inspection and
 `RawNode.Step` occur in the same serialized loop turn.
+
+ADR 0008 structural failures surface as `ArgumentException` for the
+individual operation. They do not fault the owner loop, and later valid
+commands continue to run. Internal invariant, storage, and committed
+configuration failures remain terminal.
 
 For `MsgProp`, the wrapper:
 

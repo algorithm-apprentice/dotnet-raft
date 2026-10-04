@@ -418,6 +418,86 @@ internal sealed class RaftCore
         }
     }
 
+    internal void ValidateNetworkMessage(
+        Message message)
+    {
+        bool handlesLeaderMessages =
+            HandlesLeaderMessage(message);
+        NetworkMessageValidation.Validate(
+            message,
+            Log.LastIndex,
+            handlesLeaderMessages,
+            Role == RaftRole.Leader
+                && (message.Term == 0
+                    || message.Term == Term),
+            reads.ValidateAcknowledgementContext,
+            ValidateNetworkSnapshot);
+    }
+
+    private void ValidateNetworkSnapshot(
+        Snapshot? snapshot)
+    {
+        Snapshot normalized =
+            ProtocolDefaults.EnsureSnapshot(
+                snapshot?.Clone());
+        ulong snapshotIndex =
+            normalized.Metadata.Index;
+        ConfState state =
+            normalized.Metadata.ConfState;
+        if (snapshotIndex <= Log.Committed
+            || !ContainsLocalNode(state))
+        {
+            return;
+        }
+
+        var snapshotEntry = new EntryId(
+            Term: normalized.Metadata.Term,
+            Index: snapshotIndex);
+        if (Log.MatchTerm(snapshotEntry))
+        {
+            return;
+        }
+
+        if (snapshotIndex == ulong.MaxValue)
+        {
+            throw new ArgumentException(
+                $"Snapshot index {ulong.MaxValue} has no representable successor.",
+                nameof(snapshot));
+        }
+
+        try
+        {
+            var scratch = new ProgressTracker(
+                Tracker.MaxInflightMessages,
+                Tracker.MaxInflightBytes);
+            _ = ConfigurationRestore.Restore(
+                new ConfigurationChanger(
+                    scratch,
+                    snapshotIndex),
+                state);
+        }
+        catch (ConfigurationChangeException exception)
+        {
+            throw new ArgumentException(
+                $"Snapshot configuration is invalid: {exception.Message}",
+                nameof(snapshot),
+                exception);
+        }
+    }
+
+    private bool HandlesLeaderMessage(
+        Message message)
+    {
+        if (message.Term != 0
+            && message.Term < Term)
+        {
+            return false;
+        }
+
+        return Role != RaftRole.Leader
+            || message.Term > Term;
+    }
+
     internal void Campaign()
     {
         Campaign(CampaignType.Election);

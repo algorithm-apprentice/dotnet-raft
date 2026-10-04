@@ -254,7 +254,9 @@ handling:
    message;
 3. any response message whose sender is absent from `Tracker.Progress`,
    including sender zero, is rejected as an unknown peer response; and
-4. accepted messages are delegated to `RaftCore.Step`.
+4. ADR 0008 validates host-independent message structure before any core
+   mutation; and
+5. accepted messages are delegated to `RaftCore.Step`.
 
 D25 will replace the blanket reserved-target rejection with exact allowed
 pairings:
@@ -271,6 +273,12 @@ The pinned `MessageClassifier.IsLocal` set does not include
 boundary is responsible for authenticating peers and restricting which Raft
 message types it accepts. Applications should use the dedicated
 `ForgetLeader()` facade for local intent.
+
+Structural validation reports `ArgumentException`. It covers message shapes
+that would otherwise violate deterministic core invariants, while
+`RaftInvariantException` remains terminal evidence of an internal bug or
+corrupt durable state. Validation does not authenticate `Message.From` or
+verify that `Message.To` names the local node.
 
 Rejecting an unknown higher-term response before core stepping is intentional.
 It prevents forged responses, including zero-origin `MsgReadIndexResp`, from

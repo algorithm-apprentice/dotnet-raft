@@ -190,6 +190,8 @@ public sealed class RaftNode : IRaftNode
     {
         ArgumentNullException.ThrowIfNull(message);
         Message owned = message.Clone();
+        NetworkMessageValidation.ValidateType(
+            owned);
 
         if (owned.Type is
             MessageType.MsgStorageAppendResp

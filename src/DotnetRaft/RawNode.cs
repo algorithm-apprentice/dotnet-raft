@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 
+using DotnetRaft.ConfChange;
 using DotnetRaft.Core;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
@@ -137,6 +138,10 @@ public sealed partial class RawNode
         Execute(() =>
         {
             ArgumentNullException.ThrowIfNull(change);
+            ConfigurationChangeValidation
+                .ValidateProposal(
+                    change,
+                    nameof(change));
             Activate();
             var proposal = LocalMessage(
                 MessageType.MsgProp);
@@ -155,6 +160,10 @@ public sealed partial class RawNode
         Execute(() =>
         {
             ArgumentNullException.ThrowIfNull(change);
+            ConfigurationChangeValidation
+                .ValidateProposal(
+                    change,
+                    nameof(change));
             Activate();
             var proposal = LocalMessage(
                 MessageType.MsgProp);
@@ -199,6 +208,8 @@ public sealed partial class RawNode
         {
             ArgumentNullException.ThrowIfNull(message);
             Message owned = message.Clone();
+            NetworkMessageValidation.ValidateType(
+                owned);
 
             if (IsStorageResponse(owned.Type)
                 || RaftMessageTargets.IsLocal(owned.From))
@@ -223,6 +234,7 @@ public sealed partial class RawNode
                     $"Response sender {owned.From} is not a known peer.");
             }
 
+            _core.ValidateNetworkMessage(owned);
             Activate();
             _core.Step(owned);
         });

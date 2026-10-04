@@ -197,6 +197,16 @@ carry context handled outside the Raft library.
 
 An unknown `ConfChangeType` throws `ConfigurationChangeException`.
 
+ADR 0008 adds structural validation at proposal ingress:
+
+- public and network proposals reject unknown `ConfChangeType` and
+  `ConfChangeTransition` values before log mutation;
+- member ID zero retains the pinned no-op behavior; and
+- the IDs reserved for local append/apply workers are rejected by proposal,
+  application, bootstrap, and restoration paths.
+
+`DisableConfChangeValidation` does not disable these structural checks.
+
 ## New progress initialization
 
 A new node receives:

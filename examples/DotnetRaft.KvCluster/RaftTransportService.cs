@@ -68,6 +68,10 @@ public sealed class RaftTransportService
                     context.CancellationToken)
                 .ConfigureAwait(false);
         }
+        catch (ArgumentException exception)
+        {
+            throw InvalidArgument(exception.Message);
+        }
         catch (RaftNodeStoppedException exception)
         {
             throw Unavailable(exception.Message);

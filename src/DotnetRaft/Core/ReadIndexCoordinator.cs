@@ -149,6 +149,13 @@ internal sealed class ReadIndexCoordinator
         return readOnly.GetHeartbeatContext();
     }
 
+    internal void ValidateAcknowledgementContext(
+        ByteString context)
+    {
+        readOnly.ValidateAcknowledgementContext(
+            context);
+    }
+
     internal void Reset()
     {
         readOnly =

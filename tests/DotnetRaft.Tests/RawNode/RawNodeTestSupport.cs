@@ -50,7 +50,8 @@ internal static class RawNodeTestSupport
         bool checkQuorum = false,
         bool preVote = false,
         ReadOnlyOption readOnlyOption = ReadOnlyOption.Safe,
-        IRaftTraceSink? traceSink = null)
+        IRaftTraceSink? traceSink = null,
+        bool disableConfChangeValidation = false)
     {
         return new RaftConfig
         {
@@ -68,6 +69,8 @@ internal static class RawNodeTestSupport
             PreVote = preVote,
             ReadOnlyOption = readOnlyOption,
             TraceSink = traceSink,
+            DisableConfChangeValidation =
+                disableConfChangeValidation,
         };
     }
 
@@ -83,7 +86,8 @@ internal static class RawNodeTestSupport
         bool checkQuorum = false,
         bool preVote = false,
         ReadOnlyOption readOnlyOption = ReadOnlyOption.Safe,
-        IRaftTraceSink? traceSink = null)
+        IRaftTraceSink? traceSink = null,
+        bool disableConfChangeValidation = false)
     {
         return new DotnetRaft.RawNode(CreateConfig(
             storage,
@@ -97,7 +101,8 @@ internal static class RawNodeTestSupport
             checkQuorum,
             preVote,
             readOnlyOption,
-            traceSink));
+            traceSink,
+            disableConfChangeValidation));
     }
 
     internal static void Persist(
