@@ -11,7 +11,7 @@ namespace DotnetRaft.Tests.Core;
 public sealed class RaftCoreReadIndexTests
 {
     [Fact]
-    public void LocalSingletonAnswersBeforeCurrentTermNoOpPersists()
+    public void LocalSingletonAnswersWithoutHeartbeatAfterCurrentTermCommit()
     {
         RaftCore core = Create(voters: [1]).Core;
         core.BecomeCandidate();
@@ -19,9 +19,14 @@ public sealed class RaftCoreReadIndexTests
 
         core.Step(ReadRequest("local"));
 
+        Assert.Empty(core.TakeReadStates());
+        Assert.Empty(core.TakeMessages());
+
+        core.Step(Assert.Single(core.TakeMessagesAfterAppend()));
+
         ReadState state = Assert.Single(
             core.TakeReadStates());
-        Assert.Equal(0UL, state.Index);
+        Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "local",
             state.RequestContext.ToStringUtf8());

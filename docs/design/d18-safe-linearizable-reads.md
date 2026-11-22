@@ -1,5 +1,10 @@
 # D18 Safe Linearizable Reads Design
 
+> **Milestone record.** The pre-commit singleton fast path below describes
+> the original port. The [PR 535 backport](../parity-matrix.md#intentional-deviations)
+> now requires a current-term commit for all leaders. See the
+> [current read contract](../public-api.md#read-index).
+
 - **Status:** Accepted
 - **Date:** 2026-10-01
 - **DAG node:** D18
@@ -133,8 +138,8 @@ The leader answers immediately at `Log.Committed` only when the tracker is a
 non-joint single-voter configuration whose sole incoming voter is the local
 node and whose local progress is voting progress.
 
-This check occurs before the current-term commit gate and before the configured
-read-only option. It matches the ordinary reference fast path while tightening
+At D18 this check ran before the current-term commit gate and before the
+configured read-only option. It matched the reference fast path while tightening
 the retained-leader edge created by D17. The pinned implementation checks only
 the number of voters, but D17 allows a removed or demoted node to remain leader
 temporarily. Such a node must not answer immediately when the sole voter is a

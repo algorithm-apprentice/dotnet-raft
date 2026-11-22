@@ -99,16 +99,28 @@ There are several ways to engineer a solution:
 
 ### Derive ReadIndex from two separate conditions
 
-For a normal multi-voter leader, the safe path has two consensus questions:
+The safe-read path has two consensus questions. The first applies even when
+the local leader is the sole voter:
 
 1. **Do I know the committed prefix in this term?** A newly elected leader
    may have inherited entries that were committed before it was elected but
    not yet know the latest commit. It establishes a current-term commitment
    (often the no-op), then releases gated requests.
 2. **Am I still allowed to act as leader for this read?** For a safe read,
-   queue a request at the observed commit index and collect sufficient
-   current-term heartbeat acknowledgements of its read position. Without
+   a multi-voter leader queues the request at the observed commit index and
+   collects current-term heartbeat acknowledgements from its quorum. Without
    this exchange, the isolated old leader could answer the example above.
+   A leader that is itself the only voter can skip this exchange once the
+   current-term gate opens.
+
+For example, the old leader commits its removal at index 2 and a write at
+index 3 before applying the removal. The remaining voter has both entries
+but only learns the commit through index 2 before it becomes leader. Its
+election does not tell it the write was already committed. Committing the
+current-term no-op at index 4 establishes a read barrier that includes the
+write. Answering at index 2 could let a read miss a write that already
+completed. This is the scenario covered by the
+[single-voter regression](../../tests/DotnetRaft.Tests/RawNode/RawNodeReadIndexTests.cs).
 
 Those conditions establish an index, not a value. A third, host-side
 condition is `physicalApplied >= ReadState.Index`, after any required
@@ -127,9 +139,9 @@ admits an order consistent with real time.
    routing can forward a follower's `MsgReadIndex` to its known leader.
    See the [host contract](../public-api.md#read-index) for timeouts and retries.
 2. In [`RaftCore.HandleLeaderReadIndex`](../../src/DotnetRaft/Core/RaftCore.cs),
-   inspect the current-term gate and the local singleton fast path. A single
-   local voter has no remote peer to confirm leadership with; it still
-   cannot bypass the application's physical read barrier.
+   follow the current-term gate before the local singleton fast path. Neither
+   that fast path nor a lease-based reply bypasses the application's physical
+   read barrier.
 3. [`ReadIndexCoordinator`](../../src/DotnetRaft/Core/ReadIndexCoordinator.cs)
    and [`ReadOnlyTracker`](../../src/DotnetRaft/Read/ReadOnlyTracker.cs) track
    pending reads. The heartbeat context on this path is an internally

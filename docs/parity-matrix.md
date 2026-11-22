@@ -60,6 +60,12 @@ These are documented design choices, not unknown parity gaps:
     leadership transfer times out. The pinned implementation waits for another
     application acknowledgement, which can leave an idle cluster in joint
     consensus indefinitely.
+12. The fix from upstream [PR 535](https://github.com/etcd-io/raft/pull/535)
+    ([`b8a3280`](https://github.com/etcd-io/raft/commit/b8a328036d892fde13ed779b5793e206cc285c49))
+    requires a current-term commit before the sole-voter ReadIndex fast path.
+    The reference pin and corpus are unchanged; the
+    [RawNode regression](../tests/DotnetRaft.Tests/RawNode/RawNodeReadIndexTests.cs)
+    covers both storage modes and both read options.
 
 ## Corpus integrity
 

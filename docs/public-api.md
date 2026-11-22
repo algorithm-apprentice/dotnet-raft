@@ -453,6 +453,11 @@ stale waiters; the API cancellation token does not remove an already
 dispatched protocol request. Do not substitute a stale local value for a
 timed-out linearizable read.
 
+Every leader waits until it has committed an entry in its own term before
+answering, even if it is the sole voter. A sole-voter leader then needs no
+heartbeat quorum round, but the application's physical read barrier still
+applies.
+
 Lease-based reads additionally depend on the host's bounded-clock-drift
 assumption.
 

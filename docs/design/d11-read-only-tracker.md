@@ -36,9 +36,9 @@ lease-based reads.
 
 - Handling `MsgReadIndex`, heartbeat, or heartbeat-response messages; D18 owns
   core integration.
-- Verifying that a current-term entry is committed before accepting reads; D18
-  gates non-singleton requests before D11. The D18 singleton fast path precedes
-  that gate, matching the pinned implementation.
+- Verifying that a current-term entry is committed before accepting reads;
+  this is a core admission rule, not a tracker rule. See the
+  [current read contract](../public-api.md#read-index).
 - Producing public `ReadState` values or `Ready` output; D18 and D21 own those
   surfaces.
 - Implementing leader leases; D19 adds the safety prerequisites and behavior.

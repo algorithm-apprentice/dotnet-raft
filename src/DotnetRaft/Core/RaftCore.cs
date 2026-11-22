@@ -1747,23 +1747,15 @@ internal sealed class RaftCore
         Message message)
     {
         ReadIndexCoordinator.ValidateRequest(message);
-        if (IsLocalSingleton())
-        {
-            RespondToReadIndex(
-                message,
-                Log.Committed);
-            return;
-        }
-
+        // Even a sole voter can have a stale commit index at election time.
         if (!HasCommittedEntryInCurrentTerm())
         {
             reads.Gate(message);
             return;
         }
 
-        if (reads.Option ==
-                ReadOnlyOption.LeaseBased
-            && IsLocalVoter())
+        if ((Tracker.IsSingleton || reads.Option == ReadOnlyOption.LeaseBased)
+            && Tracker.IsVoter(Id))
         {
             RespondToReadIndex(
                 message,
@@ -1856,17 +1848,6 @@ internal sealed class RaftCore
         {
             return false;
         }
-    }
-
-    private bool IsLocalSingleton()
-    {
-        return Tracker.IsSingleton
-            && Tracker.IsVoter(Id);
-    }
-
-    private bool IsLocalVoter()
-    {
-        return Tracker.IsVoter(Id);
     }
 
     internal void HandleUnreachable(
