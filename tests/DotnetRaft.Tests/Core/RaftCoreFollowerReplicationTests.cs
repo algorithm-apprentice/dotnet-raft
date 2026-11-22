@@ -83,8 +83,10 @@ public sealed class RaftCoreFollowerReplicationTests
         Assert.False(response.Reject);
     }
 
-    [Fact]
-    public void ConflictingSuffixIsReplacedAndCommitIsBoundedByLastNewEntry()
+    [Theory]
+    [InlineData(9UL)]
+    [InlineData(ulong.MaxValue)]
+    public void ConflictingSuffixIsReplacedAndCommitIsBoundedByLastNewEntry(ulong leaderCommit)
     {
         RaftCore core = Create(
             voters: [1, 2],
@@ -104,7 +106,7 @@ public sealed class RaftCoreFollowerReplicationTests
             core,
             previousIndex: 1,
             previousTerm: 1,
-            leaderCommit: 9,
+            leaderCommit,
             EntryAt(2, 3),
             EntryAt(3, 3)));
 

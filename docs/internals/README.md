@@ -25,25 +25,39 @@ step. It does not run the host's storage workers. Stable log **reads** via
 | Stable view | [`IStorage`](../../src/DotnetRaft/Storage/IStorage.cs), [`MemoryStorage`](../../src/DotnetRaft/Storage/MemoryStorage.cs), optional [`SqliteStorage`](../../src/DotnetRaft.Sqlite/SqliteStorage.cs) | The backend owns publication, read consistency, and durability. Neither storage implementation decides what the quorum committed. |
 | Application and transport | The consuming service; [KV host design](kv-host.md) | Only the service knows how to apply commands, bind peer identity, return client results, and recover application bytes. |
 
-## Follow a request
+<a name="follow-a-request"></a>
 
-1. A proposal reaches the leader. `RaftCore` admits it, assigns term and
-   index, and appends it to its unstable log. Followers check the preceding
-   tuple before accepting the suffix. See
-   [replication and the log](../learning/02-log-and-replication.md).
-2. A successful append acknowledgement is evidence of durable work at one
-   replica. A quorum can advance leader commit only through a current-term
-   entry. The leader's own append also needs acknowledgement; an in-memory
-   append is not replication evidence. See [election and commit safety](../learning/01-safety-and-elections.md).
-3. Ready exposes application work for the selected committed prefix. An
-   acknowledgement releases application accounting; proposal return, commit,
-   and physical application are different events. See
-   [Ready internals](node.md#delivery-and-acknowledgement)
-   and the [recovery walkthrough](../learning/03-ready-and-recovery.md).
-4. A linearizable read does not need a new log entry per call. The leader
-   establishes a safe commit index and authority for the request; the host
-   waits for physical application before reading. See
-   [the read path](../learning/04-membership-reads-and-liveness.md#derive-readindex-from-two-separate-conditions).
+## Follow a write
+
+Run the [Counter write trace](../../examples/DotnetRaft.Counter/README.md#trace-one-write).
+Follow index 5 from the `Propose` call through the application acknowledgement.
+For a first pass, skip election and bootstrap: the program has already
+elected node 1 in term 2 and applied entries through index 4.
+
+| Evidence in the trace | Code to follow |
+|---|---|
+| The leader appends an unstable entry and **queues** a self-response. | [`RawNode.Propose`](../../src/DotnetRaft/RawNode.cs#L121) builds a `MsgProp`; [`RaftCore.Step`](../../src/DotnetRaft/Core/RaftCore.cs#L196) routes it. [`HandleLeaderProposal`](../../src/DotnetRaft/Core/RaftCore.Replication.cs#L36) calls `AppendLeaderEntries` and `BroadcastAppend`. |
+| Each receiving follower checks the prefix and queues a reply; only the host can store the entry and deliver the reply. | [`HandleAppendEntries`](../../src/DotnetRaft/Core/RaftCore.Replication.cs#L276) calls `RaftLog.MaybeAppendEntries` to check the preceding tuple and replace a divergent suffix. [`RaftOutput.Enqueue`](../../src/DotnetRaft/Core/RaftOutput.cs#L16) places `MsgAppResp` in the after-append queue. In [`CounterCluster.ProcessReady`](../../examples/DotnetRaft.Counter/CounterCluster.cs#L68) the host stores the batch before delivering remote output or calling `Advance`. |
+| Node 1 processes the response from node 2 and advances `Commit` in this run. | [`HandleAppendResponse`](../../src/DotnetRaft/Core/RaftCore.Replication.cs#L341) updates that replica's `Match`; `MaybeCommit` combines the [voter quorum](../../src/DotnetRaft/Tracker/ProgressTracker.cs) and the current-term check. The leader only counts its own copy after its self-response, but a quorum does not have to include the leader. |
+| The counter changes, then Raft's acknowledgement cursor moves. | [`RawNode.CreateReady`](../../src/DotnetRaft/RawNode.cs#L497) marks the delivered slice as `Applying`. `CounterReplica.Apply` changes application state and updates its own index. [`RawNode.AdvanceCore`](../../src/DotnetRaft/RawNode.cs#L662) subsequently acknowledges the batch and advances Raft `Applied`. |
+
+The async trace has the same append and quorum decisions. `CreateReady`
+routes work through local `MsgStorageAppend` / `MsgStorageApply` requests
+instead, and completed workers return the generated responses. See
+[Ready internals](node.md#delivery-and-acknowledgement) for how the two
+protocols record delivery and completion.
+
+Read [`SingletonSelfAppendWaitsForAdvance`](../../tests/DotnetRaft.Tests/RawNode/RawNodeReadyTests.cs)
+to isolate the self-response barrier, then
+[`CurrentTermRuleBlocksOlderEntriesUntilNoOpIsAcknowledged`](../../tests/DotnetRaft.Tests/Core/RaftCoreReplicationTests.cs)
+to isolate the quorum and term rule. Continue with
+[a fresh KV write](kv-host.md#follow-a-fresh-kv-write) to replace the
+simulated host with real storage and a client result.
+
+A linearizable read does not need a new log entry per call. The leader
+establishes a safe commit index and authority for the request; the host
+waits for physical application before reading. See
+[the read path](../learning/04-membership-reads-and-liveness.md#derive-readindex-from-two-separate-conditions).
 
 ## Storage and application hosts
 

@@ -15,8 +15,11 @@ public sealed class RaftConfig
 
     public IStorage? Storage { get; init; }
 
+    /// <summary>The physically recovered application index; committed entries through it are not replayed.</summary>
     public ulong Applied { get; init; }
 
+    /// <summary>Use local append and apply messages instead of Advance to acknowledge Ready work.</summary>
+    /// <remarks>This does not change the synchronous <see cref="IStorage"/> read contract.</remarks>
     public bool AsyncStorageWrites { get; init; }
 
     public ulong MaxSizePerMessage { get; init; } = ulong.MaxValue;

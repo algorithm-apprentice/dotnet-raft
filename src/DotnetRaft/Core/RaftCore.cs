@@ -3,7 +3,6 @@ using System.Security.Cryptography;
 using DotnetRaft.ConfChange;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
-using DotnetRaft.Quorum;
 using DotnetRaft.Read;
 using DotnetRaft.Storage;
 using DotnetRaft.Tracker;
@@ -14,10 +13,8 @@ using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Core;
 
-internal sealed class RaftCore
+internal sealed partial class RaftCore
 {
-    private static readonly ByteString CampaignTransferContext =
-        ByteString.CopyFromUtf8("CampaignTransfer");
     private readonly RaftClock clock;
     private readonly RaftOutput output = new();
     private readonly ProposalAdmission proposals;
@@ -196,173 +193,6 @@ internal sealed class RaftCore
     internal int GatedReadCountForTesting =>
         reads.GatedCount;
 
-    internal void BecomeFollower(ulong term, ulong leaderId)
-    {
-        Reset(term);
-        roleState.BecomeFollower(leaderId);
-        if (!suppressTransitionTrace)
-        {
-            Trace(RaftTraceEventType.BecameFollower);
-        }
-
-        LogInformation(
-            $"{Id:x} became follower at term {Term}.");
-    }
-
-    internal void BecomeCandidate()
-    {
-        if (Role == RaftRole.Leader)
-        {
-            throw new RaftInvariantException(
-                "Invalid transition from leader to candidate.");
-        }
-
-        if (Term == ulong.MaxValue)
-        {
-            throw new RaftInvariantException(
-                "Raft term overflow while becoming candidate.");
-        }
-
-        Reset(Term + 1);
-        roleState.BecomeCandidate(Id);
-        Trace(RaftTraceEventType.BecameCandidate);
-        LogInformation(
-            $"{Id:x} became candidate at term {Term}.");
-    }
-
-    internal void BecomePreCandidate()
-    {
-        if (Role == RaftRole.Leader)
-        {
-            throw new RaftInvariantException(
-                "Invalid transition from leader to pre-candidate.");
-        }
-
-        Tracker.ResetVotes();
-        roleState.BecomePreCandidate();
-        Trace(RaftTraceEventType.BecamePreCandidate);
-        LogInformation(
-            $"{Id:x} became pre-candidate at term {Term}.");
-    }
-
-    internal void BecomeLeader()
-    {
-        if (Role == RaftRole.Follower)
-        {
-            throw new RaftInvariantException(
-                "Invalid transition from follower to leader.");
-        }
-
-        if (!Tracker.Progress.TryGetValue(
-                Id,
-                out Progress? localProgress))
-        {
-            throw new RaftInvariantException(
-                $"Cannot become leader without local progress for {Id:x}.");
-        }
-
-        ulong lastIndex = Log.LastIndex;
-        if (lastIndex >= ulong.MaxValue - 1)
-        {
-            throw new RaftInvariantException(
-                $"Cannot append a leader no-op after index {lastIndex} with a representable successor.");
-        }
-
-        Reset(Term);
-        roleState.BecomeLeader(Id);
-
-        localProgress.BecomeReplicate();
-        localProgress.RecentActive = true;
-        proposals.SetPendingConfigurationIndex(
-            lastIndex);
-        Trace(RaftTraceEventType.BecameLeader);
-        ProposalAdmissionPlan plan =
-            AppendLeaderEntries(
-                [new Entry()],
-                proposals.PendingConfigurationIndex);
-        if (!plan.Accepted)
-        {
-            throw new RaftInvariantException(
-                "The leader no-op cannot be rejected by the uncommitted-size quota.");
-        }
-
-        LogInformation(
-            $"{Id:x} became leader at term {Term}.");
-    }
-
-    internal bool TickElectionClock()
-    {
-        if (Role == RaftRole.Leader)
-        {
-            throw new RaftInvariantException(
-                "Leader state must use leader clocks.");
-        }
-
-        return clock.TickElection(Promotable);
-    }
-
-    internal LeaderClockTick TickLeaderClocks()
-    {
-        if (Role != RaftRole.Leader)
-        {
-            throw new RaftInvariantException(
-                "Only a leader can tick leader clocks.");
-        }
-
-        return clock.TickLeader();
-    }
-
-    internal void TickElection()
-    {
-        if (!TickElectionClock())
-        {
-            return;
-        }
-
-        Step(new Message
-        {
-            From = Id,
-            To = Id,
-            Type = MessageType.MsgHup,
-        });
-    }
-
-    internal void TickLeader()
-    {
-        LeaderClockTick tick = TickLeaderClocks();
-        if (tick.ElectionDue && CheckQuorum)
-        {
-            Step(new Message
-            {
-                From = Id,
-                To = Id,
-                Type = MessageType.MsgCheckQuorum,
-            });
-        }
-
-        if (tick.ElectionDue
-            && Role == RaftRole.Leader
-            && LeaderTransferee !=
-                RaftMessageTargets.None)
-        {
-            AbortLeaderTransfer();
-            MaybeAutoLeave();
-        }
-
-        if (Role != RaftRole.Leader
-            || !tick.HeartbeatDue)
-        {
-            return;
-        }
-
-        Step(new Message
-        {
-            From = Id,
-            To = Id,
-            Type = MessageType.MsgBeat,
-        });
-    }
-
     internal void Step(Message message)
     {
         ArgumentNullException.ThrowIfNull(message);
@@ -436,50 +266,6 @@ internal sealed class RaftCore
             ValidateNetworkSnapshot);
     }
 
-    private void ValidateNetworkSnapshot(
-        Snapshot? snapshot)
-    {
-        Snapshot normalized =
-            ProtocolDefaults.EnsureSnapshot(
-                snapshot?.Clone());
-        ulong snapshotIndex =
-            normalized.Metadata.Index;
-        ConfState state =
-            normalized.Metadata.ConfState;
-        if (snapshotIndex <= Log.Committed
-            || !ContainsLocalNode(state))
-        {
-            return;
-        }
-
-        var snapshotEntry = new EntryId(
-            Term: normalized.Metadata.Term,
-            Index: snapshotIndex);
-        if (Log.MatchTerm(snapshotEntry))
-        {
-            return;
-        }
-
-        if (snapshotIndex == ulong.MaxValue)
-        {
-            throw new ArgumentException(
-                $"Snapshot index {ulong.MaxValue} has no representable successor.",
-                nameof(snapshot));
-        }
-
-        try
-        {
-            _ = BuildSnapshotConfiguration(normalized.Metadata);
-        }
-        catch (ConfigurationChangeException exception)
-        {
-            throw new ArgumentException(
-                $"Snapshot configuration is invalid: {exception.Message}",
-                nameof(snapshot),
-                exception);
-        }
-    }
-
     private bool HandlesLeaderMessage(
         Message message)
     {
@@ -491,82 +277,6 @@ internal sealed class RaftCore
 
         return Role != RaftRole.Leader
             || message.Term > Term;
-    }
-
-    internal void Campaign()
-    {
-        Campaign(CampaignType.Election);
-    }
-
-    internal void Campaign(CampaignType campaignType)
-    {
-        MessageType voteType;
-        ulong campaignTerm;
-        ByteString context;
-        switch (campaignType)
-        {
-            case CampaignType.PreElection:
-                if (Term == ulong.MaxValue)
-                {
-                    throw new RaftInvariantException(
-                        "Raft term overflow while starting pre-election.");
-                }
-
-                BecomePreCandidate();
-                voteType = MessageType.MsgPreVote;
-                campaignTerm = Term + 1;
-                context = ByteString.Empty;
-                break;
-            case CampaignType.Election:
-                BecomeCandidate();
-                voteType = MessageType.MsgVote;
-                campaignTerm = Term;
-                context = ByteString.Empty;
-                break;
-            case CampaignType.Transfer:
-                BecomeCandidate();
-                voteType = MessageType.MsgVote;
-                campaignTerm = Term;
-                context = CampaignTransferContext;
-                break;
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown campaign type {campaignType}.");
-        }
-
-        EntryId lastEntry = default;
-        bool hasLastEntry = false;
-        foreach (ulong voterId in Tracker.VoterNodes())
-        {
-            if (voterId == Id)
-            {
-                Send(new Message
-                {
-                    To = voterId,
-                    Term = campaignTerm,
-                    Type =
-                        MessageClassifier.VoteResponseType(
-                            voteType),
-                });
-                continue;
-            }
-
-            if (!hasLastEntry)
-            {
-                lastEntry = Log.LastEntryId;
-                hasLastEntry = true;
-            }
-
-            Send(new Message
-            {
-                To = voterId,
-                Term = campaignTerm,
-                Type = voteType,
-                Index = lastEntry.Index,
-                LogTerm = lastEntry.Term,
-                Context = context,
-            });
-        }
     }
 
     internal void Send(Message message)
@@ -598,54 +308,6 @@ internal sealed class RaftCore
     internal Message[] PeekMessagesAfterAppend()
     {
         return output.PeekMessagesAfterAppend();
-    }
-
-    internal ReadState[] TakeReadStates()
-    {
-        return reads.TakeReadStates();
-    }
-
-    internal ReadState[] PeekReadStates()
-    {
-        return reads.PeekReadStates();
-    }
-
-    internal BasicStatus GetBasicStatus()
-    {
-        return new BasicStatus(
-            Id,
-            Term,
-            Vote,
-            Log.Committed,
-            LeaderId,
-            Role,
-            Log.Applied,
-            LeaderTransferee);
-    }
-
-    internal ConfigurationStatus GetConfigurationStatus()
-    {
-        ConfState state = Tracker.ToConfState();
-        return new ConfigurationStatus(
-            state.Voters,
-            state.VotersOutgoing,
-            state.Learners,
-            state.LearnersNext,
-            state.AutoLeave);
-    }
-
-    internal KeyValuePair<ulong, ProgressStatus>[]
-        GetProgressStatuses()
-    {
-        return
-        [
-            .. Tracker.Progress
-                .OrderBy(pair => pair.Key)
-                .Select(pair =>
-                    new KeyValuePair<ulong, ProgressStatus>(
-                        pair.Key,
-                        ToStatus(pair.Value))),
-        ];
     }
 
     internal void Bootstrap(
@@ -694,11 +356,6 @@ internal sealed class RaftCore
                     NodeId = peer.Id,
                 });
         }
-    }
-
-    internal void TraceReadyAccepted()
-    {
-        Trace(RaftTraceEventType.ReadyAccepted);
     }
 
     internal void SetRandomizedElectionTimeoutForTesting(
@@ -772,102 +429,6 @@ internal sealed class RaftCore
         proposals.Release(payloadSize);
     }
 
-    internal ConfState ApplyConfigurationChange(
-        ProtocolConfChange change)
-    {
-        ArgumentNullException.ThrowIfNull(change);
-        return ApplyConfigurationChange(change.AsV2());
-    }
-
-    internal ConfState ApplyConfigurationChange(
-        ConfChangeV2 change)
-    {
-        ArgumentNullException.ThrowIfNull(change);
-        ConfChangeV2 owned = change.Clone();
-        ProgressTracker? earlier = configurationForOutstandingApplication;
-        var changer = new ConfigurationChanger(
-            earlier ?? Tracker,
-            earlier is null ? Log.LastIndex : Log.Applying);
-        ConfigurationChangeResult result;
-        if (owned.IsLeaveJoint())
-        {
-            result = changer.LeaveJoint();
-        }
-        else if (owned.TryGetJointTransition(
-                     out bool autoLeave))
-        {
-            result = changer.EnterJoint(
-                autoLeave,
-                owned.Changes);
-        }
-        else
-        {
-            result = changer.Simple(owned.Changes);
-        }
-
-        if (earlier is not null)
-        {
-            // This entry was handed to the host before the newer snapshot.
-            // Return the configuration at its application position without
-            // changing the live consensus tracker installed by the snapshot.
-            earlier.Install(result.Config, result.Progress);
-            ConfState applied = earlier.ToConfState();
-            TraceConfigurationApplied(applied);
-            return applied;
-        }
-
-        return SwitchToConfiguration(
-            result.Config,
-            result.Progress);
-    }
-
-    private static ProgressStatus ToStatus(
-        Progress progress)
-    {
-        return new ProgressStatus(
-            progress.Match,
-            progress.Next,
-            progress.LastSentCommit,
-            progress.State switch
-            {
-                ProgressState.Probe =>
-                    ReplicationState.Probe,
-                ProgressState.Replicate =>
-                    ReplicationState.Replicate,
-                ProgressState.Snapshot =>
-                    ReplicationState.Snapshot,
-                _ => throw new RaftInvariantException(
-                    $"Unknown progress state {progress.State}."),
-            },
-            progress.PendingSnapshot,
-            progress.RecentActive,
-            progress.AppendFlowPaused,
-            progress.IsPaused,
-            progress.IsLearner,
-            progress.Inflights.Count,
-            progress.Inflights.Bytes,
-            progress.Inflights.Capacity,
-            progress.Inflights.MaxBytes);
-    }
-
-    internal void AcknowledgeSnapshot(ulong index)
-    {
-        if (Log.HasUnstableSnapshotAt(index))
-        {
-            // Only the matching owned snapshot can restore membership at
-            // completion. Do not rely on the detached Ready or reply.
-            SnapshotMetadata metadata = Log.GetSnapshot().Metadata;
-            if (!metadata.ConfState.IsEquivalentTo(Tracker.ToConfState()))
-            {
-                InstallSnapshotConfiguration(
-                    BuildSnapshotConfiguration(metadata));
-            }
-        }
-
-        Log.AcknowledgeSnapshot(index);
-        AfterApplicationAdvanced();
-    }
-
     internal void AppliedTo(
         ulong index,
         ulong encodedSize)
@@ -877,25 +438,6 @@ internal sealed class RaftCore
             Log.Applied);
         Log.AppliedTo(applied, encodedSize);
         AfterApplicationAdvanced();
-    }
-
-    private void AfterApplicationAdvanced()
-    {
-        if (Log.Applying == Log.Applied)
-        {
-            configurationForOutstandingApplication = null;
-        }
-
-        MaybeAutoLeave();
-    }
-
-    internal void TraceSyntheticMessageSent(
-        Message message)
-    {
-        ArgumentNullException.ThrowIfNull(message);
-        TraceMessage(
-            RaftTraceEventType.MessageSent,
-            message);
     }
 
     private static bool IsEmpty(HardState? state)
@@ -922,219 +464,120 @@ internal sealed class RaftCore
                 && !message.Reject);
     }
 
-    internal void HandleHup()
-    {
-        HandleHup(
-            PreVote
-                ? CampaignType.PreElection
-                : CampaignType.Election);
-    }
-
-    private void HandleHup(
-        CampaignType campaignType)
-    {
-        if (Role == RaftRole.Leader
-            || !Promotable
-            || HasUnappliedConfigurationChanges())
-        {
-            return;
-        }
-
-        Campaign(campaignType);
-    }
-
-    private bool HasUnappliedConfigurationChanges()
-    {
-        if (Log.Applied >= Log.Committed)
-        {
-            return false;
-        }
-
-        ulong next = Log.Applied + 1;
-        ulong high = Log.Committed + 1;
-        while (next < high)
-        {
-            IReadOnlyList<Entry> entries = Log.Slice(
-                next,
-                high,
-                MaxCommittedSizePerReady);
-            if (entries.Count == 0)
-            {
-                throw new RaftInvariantException(
-                    $"Configuration scan returned no entries for [{next}, {high}).");
-            }
-
-            foreach (Entry entry in entries)
-            {
-                if (entry.Type is
-                    EntryType.EntryConfChange or
-                    EntryType.EntryConfChangeV2)
-                {
-                    return true;
-                }
-            }
-
-            next += (ulong)entries.Count;
-        }
-
-        return false;
-    }
-
-    private void HandleVoteRequest(Message message)
-    {
-        bool canVote =
-            Vote == message.From
-            || (Vote == RaftMessageTargets.None
-                && LeaderId == RaftMessageTargets.None)
-            || (message.Type == MessageType.MsgPreVote
-                && message.Term > Term);
-        bool upToDate = Log.IsUpToDate(
-            new EntryId(message.LogTerm, message.Index));
-        MessageType responseType =
-            MessageClassifier.VoteResponseType(
-                message.Type);
-
-        if (canVote && upToDate)
-        {
-            Send(new Message
-            {
-                To = message.From,
-                Term = message.Term,
-                Type = responseType,
-            });
-            if (message.Type == MessageType.MsgVote)
-            {
-                clock.ResetElectionElapsed();
-                roleState.GrantVote(message.From);
-            }
-
-            return;
-        }
-
-        Send(new Message
-        {
-            To = message.From,
-            Term = Term,
-            Type = responseType,
-            Reject = true,
-        });
-    }
-
     private void HandleRoleMessage(Message message)
     {
-        RaftRoleStrategies.Resolve(Role)
-            .Handle(this, message);
-    }
-
-    internal void HandleFollowerProposal(
-        Message message)
-    {
-        ValidateProposal(message);
-        if (LeaderId == RaftMessageTargets.None)
+        // Step may have changed the role while processing the message term.
+        switch (Role)
         {
-            throw new ProposalDroppedException(
-                "The follower has no known leader.");
+            case RaftRole.Follower:
+                StepFollower(message);
+                return;
+            case RaftRole.PreCandidate:
+                StepCampaigning(message, preCandidate: true);
+                return;
+            case RaftRole.Candidate:
+                StepCampaigning(message, preCandidate: false);
+                return;
+            case RaftRole.Leader:
+                StepLeader(message);
+                return;
+            default:
+                throw new RaftInvariantException(
+                    $"Unknown Raft role {Role}.");
         }
+    }
 
-        if (DisableProposalForwarding)
+    private void StepFollower(Message message)
+    {
+        switch (message.Type)
         {
-            throw new ProposalDroppedException(
-                "Proposal forwarding is disabled.");
+            case MessageType.MsgHup:
+                HandleHup();
+                return;
+            case MessageType.MsgProp:
+                HandleFollowerProposal(message);
+                return;
+            case MessageType.MsgForgetLeader:
+                HandleFollowerForgetLeader();
+                return;
+            case MessageType.MsgTransferLeader:
+                HandleFollowerTransferLeader(message);
+                return;
+            case MessageType.MsgTimeoutNow:
+                HandleHup(CampaignType.Transfer);
+                return;
+            case MessageType.MsgReadIndex:
+                HandleFollowerReadIndex(message);
+                return;
+            case MessageType.MsgReadIndexResp:
+                HandleReadIndexResponse(message);
+                return;
+            case MessageType.MsgApp:
+            case MessageType.MsgHeartbeat:
+            case MessageType.MsgSnap:
+                clock.ResetElectionElapsed();
+                roleState.SetLeader(message.From);
+                HandleAcceptedLeaderMessage(message);
+                return;
         }
-
-        Message forwarded = message.Clone();
-        forwarded.To = LeaderId;
-        Send(forwarded);
     }
 
-    internal void HandleFollowerForgetLeader()
+    private void StepCampaigning(Message message, bool preCandidate)
     {
-        if (reads.Option ==
-            ReadOnlyOption.LeaseBased)
+        switch (message.Type)
         {
-            LogError(
-                "Ignoring MsgForgetLeader in lease-based read mode.");
-            return;
+            case MessageType.MsgHup:
+                HandleHup();
+                return;
+            case MessageType.MsgProp:
+                ValidateProposal(message);
+                throw new ProposalDroppedException(
+                    $"A {Role} cannot process proposals.");
+            case MessageType.MsgApp:
+            case MessageType.MsgHeartbeat:
+            case MessageType.MsgSnap:
+                BecomeFollower(Term, message.From);
+                HandleAcceptedLeaderMessage(message);
+                return;
+            case MessageType.MsgPreVoteResp when preCandidate:
+            case MessageType.MsgVoteResp when !preCandidate:
+                HandleVoteResponse(message, preCandidate);
+                return;
         }
-
-        roleState.ForgetLeader();
     }
 
-    internal void HandleFollowerTransferLeader(
-        Message message)
+    private void StepLeader(Message message)
     {
-        if (LeaderId == RaftMessageTargets.None)
+        switch (message.Type)
         {
-            return;
+            case MessageType.MsgProp:
+                HandleLeaderProposal(message);
+                return;
+            case MessageType.MsgBeat:
+                BroadcastHeartbeat();
+                return;
+            case MessageType.MsgCheckQuorum:
+                HandleCheckQuorum();
+                return;
+            case MessageType.MsgTransferLeader:
+                HandleLeaderTransfer(message.From);
+                return;
+            case MessageType.MsgAppResp:
+                HandleAppendResponse(message);
+                return;
+            case MessageType.MsgHeartbeatResp:
+                HandleHeartbeatResponse(message);
+                return;
+            case MessageType.MsgReadIndex:
+                HandleLeaderReadIndex(message);
+                return;
+            case MessageType.MsgUnreachable:
+                HandleUnreachable(message);
+                return;
+            case MessageType.MsgSnapStatus:
+                HandleSnapshotStatus(message);
+                return;
         }
-
-        Message forwarded = message.Clone();
-        forwarded.To = LeaderId;
-        Send(forwarded);
-    }
-
-    internal void HandleFollowerTimeoutNow()
-    {
-        HandleHup(CampaignType.Transfer);
-    }
-
-    internal void HandleFollowerReadIndex(
-        Message message)
-    {
-        if (LeaderId == RaftMessageTargets.None)
-        {
-            return;
-        }
-
-        Message forwarded = message.Clone();
-        forwarded.To = LeaderId;
-        Send(forwarded);
-    }
-
-    internal void HandleFollowerReadIndexResponse(
-        Message message)
-    {
-        HandleReadIndexResponse(message);
-    }
-
-    internal void HandleFollowerLeaderMessage(
-        Message message)
-    {
-        clock.ResetElectionElapsed();
-        roleState.SetLeader(message.From);
-        HandleAcceptedLeaderMessage(message);
-    }
-
-    internal void HandleCampaigningProposal(
-        Message message)
-    {
-        ValidateProposal(message);
-
-        throw new ProposalDroppedException(
-            $"A {Role} cannot process proposals.");
-    }
-
-    internal void HandleCampaigningLeaderMessage(
-        Message message)
-    {
-        BecomeFollower(Term, message.From);
-        HandleAcceptedLeaderMessage(message);
-    }
-
-    internal void HandlePreCandidateVoteResponse(
-        Message message)
-    {
-        HandleVoteResponse(
-            message,
-            preCandidate: true);
-    }
-
-    internal void HandleCandidateVoteResponse(
-        Message message)
-    {
-        HandleVoteResponse(
-            message,
-            preCandidate: false);
     }
 
     private void HandleAcceptedLeaderMessage(
@@ -1155,963 +598,6 @@ internal sealed class RaftCore
                 throw new RaftInvariantException(
                     $"Unexpected leader message {message.Type}.");
         }
-    }
-
-    private void HandleVoteResponse(
-        Message message,
-        bool preCandidate)
-    {
-        Tracker.RecordVote(message.From, !message.Reject);
-        (_, _, VoteResult result) = Tracker.TallyVotes();
-        switch (result)
-        {
-            case VoteResult.Won:
-                if (preCandidate)
-                {
-                    Campaign(CampaignType.Election);
-                }
-                else
-                {
-                    BecomeLeader();
-                    BroadcastAppend();
-                }
-
-                return;
-            case VoteResult.Lost:
-                BecomeFollower(Term, RaftMessageTargets.None);
-                return;
-            case VoteResult.Pending:
-                return;
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown vote result {result}.");
-        }
-    }
-
-    private static void ValidateProposal(
-        Message message)
-    {
-        if (message.Entries.Count == 0)
-        {
-            throw new RaftInvariantException(
-                "A proposal must contain at least one entry.");
-        }
-    }
-
-    internal void HandleLeaderProposal(
-        Message message)
-    {
-        ValidateProposal(message);
-        if (!Tracker.Progress.ContainsKey(Id))
-        {
-            throw new ProposalDroppedException(
-                "The leader has no local replication progress.");
-        }
-
-        if (LeaderTransferee !=
-            RaftMessageTargets.None)
-        {
-            throw new ProposalDroppedException(
-                "The leader is transferring leadership.");
-        }
-
-        (
-            Entry[] entries,
-            ulong pendingConfigurationIndex) =
-            PrepareProposalEntries(
-                message.Entries);
-        ProposalAdmissionPlan plan =
-            AppendLeaderEntries(
-                entries,
-                pendingConfigurationIndex,
-                traceConfigurationProposals: true);
-        if (!plan.Accepted)
-        {
-            throw new ProposalDroppedException(
-                "The proposal exceeds the uncommitted entry size limit.");
-        }
-
-        proposals.PublishPending(plan);
-        BroadcastAppend();
-    }
-
-    private ProposalAdmissionPlan AppendLeaderEntries(
-        IEnumerable<Entry> entries,
-        ulong pendingConfigurationIndex,
-        bool traceConfigurationProposals = false)
-    {
-        Entry[] appended = ProtocolCloning.CloneEntries(entries);
-        if (appended.Length == 0)
-        {
-            throw new RaftInvariantException(
-                "At least one leader entry is required.");
-        }
-
-        ulong lastIndex = Log.LastIndex;
-        if (lastIndex == ulong.MaxValue)
-        {
-            throw new RaftInvariantException(
-                "The log has no representable successor index.");
-        }
-
-        ulong availableIndexes =
-            ulong.MaxValue - lastIndex - 1;
-        if ((ulong)appended.Length > availableIndexes)
-        {
-            throw new RaftInvariantException(
-                $"Appending {appended.Length} entries after index {lastIndex} would leave no representable successor.");
-        }
-
-        ProposalAdmissionPlan plan =
-            proposals.Prepare(
-                appended,
-                pendingConfigurationIndex);
-        if (!plan.Accepted)
-        {
-            return plan;
-        }
-
-        for (var offset = 0; offset < appended.Length; offset++)
-        {
-            Entry entry = appended[offset];
-            entry.Term = Term;
-            entry.Index =
-                lastIndex + (ulong)offset + 1;
-        }
-
-        if (traceConfigurationProposals)
-        {
-            TraceConfigurationProposals(appended);
-        }
-
-        ulong newLastIndex = Log.Append(appended);
-        proposals.CommitQuota(plan);
-        TraceEntriesAppended(appended);
-        Send(new Message
-        {
-            To = Id,
-            Type = MessageType.MsgAppResp,
-            Index = newLastIndex,
-        });
-        return plan;
-    }
-
-    private (
-        Entry[] Entries,
-        ulong PendingConfigurationIndex)
-        PrepareProposalEntries(
-            IEnumerable<Entry> entries)
-    {
-        Entry[] owned = ProtocolCloning.CloneEntries(entries);
-        ulong candidatePending =
-            proposals.PendingConfigurationIndex;
-        ulong lastIndex = Log.LastIndex;
-
-        for (var offset = 0; offset < owned.Length; offset++)
-        {
-            Entry entry = owned[offset];
-            ConfChangeV2? change = entry.Type switch
-            {
-                EntryType.EntryConfChange =>
-                    ProtocolConfChange.Parser
-                        .ParseFrom(entry.Data)
-                        .AsV2(),
-                EntryType.EntryConfChangeV2 =>
-                    ConfChangeV2.Parser.ParseFrom(
-                        entry.Data),
-                _ => null,
-            };
-            if (change is null)
-            {
-                continue;
-            }
-
-            bool alreadyJoint =
-                Tracker.Config.Voters.Outgoing.Count > 0;
-            bool wantsLeaveJoint =
-                change.Changes.Count == 0;
-            if (!ProposalAdmission.CanAcceptConfiguration(
-                    candidatePending,
-                    Log.Applied,
-                    alreadyJoint,
-                    wantsLeaveJoint)
-                && !DisableConfChangeValidation)
-            {
-                owned[offset] = new Entry();
-                continue;
-            }
-
-            candidatePending =
-                ProposalAdmission
-                    .PrepareConfigurationIndex(
-                    lastIndex,
-                    offset);
-        }
-
-        return (owned, candidatePending);
-    }
-
-    private void BroadcastAppend()
-    {
-        Tracker.Visit((id, progress) =>
-        {
-            if (id != Id)
-            {
-                MaybeSendAppend(
-                    id,
-                    progress,
-                    sendIfEmpty: true);
-            }
-        });
-    }
-
-    private bool MaybeSendAppend(
-        ulong to,
-        Progress progress,
-        bool sendIfEmpty)
-    {
-        if (progress.IsPaused)
-        {
-            return false;
-        }
-
-        ulong previousIndex = progress.Next - 1;
-        ulong previousTerm = 0;
-        IReadOnlyList<Entry> entries = [];
-        try
-        {
-            previousTerm = Log.GetTerm(previousIndex);
-            entries =
-                progress.State == ProgressState.Replicate
-                && progress.Inflights.IsFull
-                    ? []
-                    : Log.GetEntries(
-                        progress.Next,
-                        MaxMessageSize);
-        }
-        catch (StorageException exception)
-            when (exception.Error == StorageError.Compacted)
-        {
-            return MaybeSendSnapshot(to, progress);
-        }
-
-        if (entries.Count == 0 && !sendIfEmpty)
-        {
-            return false;
-        }
-
-        ulong payloadSize = 0;
-        try
-        {
-            payloadSize = EntrySizing.PayloadSize(entries);
-        }
-        catch (OverflowException exception)
-        {
-            throw new RaftInvariantException(
-                $"Append payload size overflowed: {exception.Message}");
-        }
-
-        var message = new Message
-        {
-            To = to,
-            Type = MessageType.MsgApp,
-            Index = previousIndex,
-            LogTerm = previousTerm,
-            Commit = Log.Committed,
-        };
-        message.Entries.Add(entries);
-        Send(message);
-        progress.SentEntries(entries.Count, payloadSize);
-        progress.RecordSentCommit(Log.Committed);
-        return true;
-    }
-
-    private void HandleAppendEntries(Message message)
-    {
-        if (message.Index < Log.Committed)
-        {
-            Send(new Message
-            {
-                To = message.From,
-                Type = MessageType.MsgAppResp,
-                Index = Log.Committed,
-            });
-            return;
-        }
-
-        var slice = new LogSlice(
-            message.Term,
-            new EntryId(
-                Term: message.LogTerm,
-                Index: message.Index),
-            message.Entries);
-        ulong previousCommit = Log.Committed;
-        if (Log.MaybeAppendEntries(
-                slice,
-                out ulong lastNewIndex,
-                out ulong firstAppendedIndex,
-                out int appendedCount))
-        {
-            if (appendedCount > 0)
-            {
-                TraceEntriesAppended(
-                    appendedCount,
-                    firstAppendedIndex,
-                    lastNewIndex);
-            }
-
-            Log.CommitTo(
-                Math.Min(
-                    message.Commit,
-                    lastNewIndex));
-            TraceCommitAdvanced(previousCommit);
-            Send(new Message
-            {
-                To = message.From,
-                Type = MessageType.MsgAppResp,
-                Index = lastNewIndex,
-            });
-            return;
-        }
-
-        ulong hintIndex = Math.Min(
-            message.Index,
-            Log.LastIndex);
-        EntryId hint = Log.FindConflictByTerm(
-            hintIndex,
-            message.LogTerm);
-        Send(new Message
-        {
-            To = message.From,
-            Type = MessageType.MsgAppResp,
-            Index = message.Index,
-            Reject = true,
-            RejectHint = hint.Index,
-            LogTerm = hint.Term,
-        });
-    }
-
-    internal void HandleAppendResponse(
-        Message message)
-    {
-        if (!Tracker.Progress.TryGetValue(
-                message.From,
-                out Progress? progress))
-        {
-            return;
-        }
-
-        if (message.Reject)
-        {
-            progress.RecentActive = true;
-            if (message.Index == 0)
-            {
-                return;
-            }
-
-            ulong nextProbeIndex = message.RejectHint;
-            if (message.LogTerm > 0)
-            {
-                nextProbeIndex = Log.FindConflictByTerm(
-                    message.RejectHint,
-                    message.LogTerm).Index;
-            }
-
-            if (progress.MaybeDecrementTo(
-                    message.Index,
-                    nextProbeIndex))
-            {
-                if (progress.State ==
-                    ProgressState.Replicate)
-                {
-                    progress.BecomeProbe();
-                }
-
-                MaybeSendAppend(
-                    message.From,
-                    progress,
-                    sendIfEmpty: true);
-            }
-
-            return;
-        }
-
-        if (message.Index > Log.LastIndex)
-        {
-            throw new RaftInvariantException(
-                $"Append acknowledgement {message.Index} exceeds last index {Log.LastIndex}.");
-        }
-
-        progress.RecentActive = true;
-        bool updated = progress.MaybeUpdate(
-            message.Index);
-        if (!updated
-            && !(progress.State == ProgressState.Probe
-                 && progress.Match == message.Index))
-        {
-            return;
-        }
-
-        switch (progress.State)
-        {
-            case ProgressState.Probe:
-                progress.BecomeReplicate();
-                break;
-            case ProgressState.Replicate:
-                progress.Inflights.FreeThrough(
-                    message.Index);
-                break;
-            case ProgressState.Snapshot:
-                if (progress.Match >= Log.FirstIndex - 1)
-                {
-                    progress.BecomeProbe();
-                    progress.BecomeReplicate();
-                }
-
-                break;
-            default:
-                throw new RaftInvariantException(
-                    $"Unknown progress state {progress.State}.");
-        }
-
-        if (MaybeCommit())
-        {
-            BroadcastAppend();
-        }
-        else if (message.From != Id
-                 && progress.CanBumpCommit(
-                     Log.Committed))
-        {
-            MaybeSendAppend(
-                message.From,
-                progress,
-                sendIfEmpty: true);
-        }
-
-        if (message.From != Id)
-        {
-            while (MaybeSendAppend(
-                       message.From,
-                       progress,
-                       sendIfEmpty: false))
-            {
-            }
-        }
-
-        if (message.From == LeaderTransferee
-            && progress.Match == Log.LastIndex)
-        {
-            SendTimeoutNow(message.From);
-        }
-    }
-
-    private bool MaybeCommit()
-    {
-        ulong previousCommit = Log.Committed;
-        bool committed = Log.MaybeCommit(new EntryId(
-            Term: Term,
-            Index: Tracker.CommittedIndex));
-        if (committed)
-        {
-            TraceCommitAdvanced(previousCommit);
-            ReleasePendingReadIndexMessages();
-        }
-
-        return committed;
-    }
-
-    internal void BroadcastHeartbeat()
-    {
-        ByteString context =
-            reads.GetHeartbeatContext();
-        Tracker.Visit((id, progress) =>
-        {
-            if (id == Id)
-            {
-                return;
-            }
-
-            Send(new Message
-            {
-                To = id,
-                Type = MessageType.MsgHeartbeat,
-                Commit = Math.Min(progress.Match, Log.Committed),
-                Context = context,
-            });
-            progress.RecordSentCommit(
-                Math.Min(progress.Match, Log.Committed));
-        });
-    }
-
-    private void HandleHeartbeat(Message message)
-    {
-        ulong previousCommit = Log.Committed;
-        Log.CommitTo(message.Commit);
-        TraceCommitAdvanced(previousCommit);
-        Send(new Message
-        {
-            To = message.From,
-            Type = MessageType.MsgHeartbeatResp,
-            Context = message.Context,
-        });
-    }
-
-    internal void HandleHeartbeatResponse(
-        Message message)
-    {
-        if (!Tracker.Progress.TryGetValue(
-                message.From,
-                out Progress? progress))
-        {
-            return;
-        }
-
-        progress.RecentActive = true;
-        progress.AppendFlowPaused = false;
-        if (progress.Match < Log.LastIndex
-            || progress.State == ProgressState.Probe)
-        {
-            MaybeSendAppend(
-                message.From,
-                progress,
-                sendIfEmpty: true);
-        }
-
-        if (!message.Context.IsEmpty)
-        {
-            ReadIndexRequest[] completed =
-                reads.Acknowledge(
-                message.From,
-                message.Context,
-                Tracker.Config.Voters);
-            CompleteReadIndexRequests(completed);
-        }
-    }
-
-    internal void HandleLeaderTransfer(
-        ulong transferee)
-    {
-        if (!Tracker.Progress.TryGetValue(
-                transferee,
-                out Progress? progress)
-            || progress.IsLearner)
-        {
-            return;
-        }
-
-        if (LeaderTransferee !=
-            RaftMessageTargets.None)
-        {
-            if (LeaderTransferee == transferee)
-            {
-                return;
-            }
-
-            AbortLeaderTransfer();
-        }
-
-        if (transferee == Id)
-        {
-            return;
-        }
-
-        clock.ResetElectionElapsed();
-        roleState.StartTransfer(transferee);
-        if (progress.Match == Log.LastIndex)
-        {
-            SendTimeoutNow(transferee);
-            return;
-        }
-
-        MaybeSendAppend(
-            transferee,
-            progress,
-            sendIfEmpty: true);
-    }
-
-    private void SendTimeoutNow(ulong to)
-    {
-        Send(new Message
-        {
-            To = to,
-            Type = MessageType.MsgTimeoutNow,
-        });
-    }
-
-    private void AbortLeaderTransfer()
-    {
-        roleState.AbortTransfer();
-    }
-
-    internal void HandleLeaderReadIndex(
-        Message message)
-    {
-        ReadIndexCoordinator.ValidateRequest(message);
-        // Even a sole voter can have a stale commit index at election time.
-        if (!HasCommittedEntryInCurrentTerm())
-        {
-            reads.Gate(message);
-            return;
-        }
-
-        if ((Tracker.IsSingleton || reads.Option == ReadOnlyOption.LeaseBased)
-            && Tracker.IsVoter(Id))
-        {
-            RespondToReadIndex(
-                message,
-                Log.Committed);
-        }
-        else
-        {
-            TrackReadIndex(message);
-        }
-    }
-
-    private void HandleReadIndexResponse(Message message)
-    {
-        if (!reads.TryCompleteResponse(message))
-        {
-            LogError(
-                $"{Id:x} ignored {MessageType.MsgReadIndexResp} " +
-                $"with {message.Entries.Count} entries; expected exactly one entry.");
-            return;
-        }
-    }
-
-    private void TrackReadIndex(Message message)
-    {
-        ReadIndexAdvanceResult result =
-            reads.TrackSafeRead(
-                Log.Committed,
-                message,
-                Id,
-                Tracker.Config.Voters);
-        CompleteReadIndexRequests(
-            result.Completed);
-        if (result.HeartbeatRequired)
-        {
-            BroadcastHeartbeat();
-        }
-    }
-
-    private void CompleteReadIndexRequests(
-        ReadIndexRequest[] requests)
-    {
-        foreach (ReadIndexRequest request in
-                 requests)
-        {
-            RespondToReadIndex(
-                request.Request,
-                request.Index);
-        }
-    }
-
-    private void RespondToReadIndex(
-        Message request,
-        ulong index)
-    {
-        Message? response = reads.Complete(
-            request,
-            index,
-            Id);
-        if (response is not null)
-        {
-            Send(response);
-        }
-    }
-
-    private void ReleasePendingReadIndexMessages()
-    {
-        if (Role != RaftRole.Leader
-            || !HasCommittedEntryInCurrentTerm())
-        {
-            return;
-        }
-
-        while (reads.TryDequeueGated(
-                   out Message? request))
-        {
-            HandleLeaderReadIndex(request);
-        }
-    }
-
-    private bool HasCommittedEntryInCurrentTerm()
-    {
-        try
-        {
-            return Log.GetTerm(Log.Committed) == Term;
-        }
-        catch (StorageException exception)
-            when (exception.Error is
-                  StorageError.Compacted or
-                  StorageError.Unavailable)
-        {
-            return false;
-        }
-    }
-
-    internal void HandleUnreachable(
-        Message message)
-    {
-        if (!Tracker.Progress.TryGetValue(
-                message.From,
-                out Progress? progress))
-        {
-            return;
-        }
-
-        if (progress.State == ProgressState.Replicate)
-        {
-            progress.BecomeProbe();
-        }
-    }
-
-    private bool MaybeSendSnapshot(
-        ulong to,
-        Progress progress)
-    {
-        if (!progress.RecentActive)
-        {
-            return false;
-        }
-
-        Snapshot snapshot;
-        try
-        {
-            snapshot = Log.GetSnapshot();
-        }
-        catch (StorageException exception)
-            when (exception.Error ==
-                  StorageError.SnapshotTemporarilyUnavailable)
-        {
-            return false;
-        }
-
-        ulong snapshotIndex = snapshot.Metadata.Index;
-        if (snapshotIndex == 0)
-        {
-            throw new RaftInvariantException(
-                "Cannot send an empty snapshot.");
-        }
-
-        progress.BecomeSnapshot(snapshotIndex);
-        Send(new Message
-        {
-            To = to,
-            Type = MessageType.MsgSnap,
-            Snapshot = snapshot,
-        });
-        return true;
-    }
-
-    internal void HandleSnapshotStatus(
-        Message message)
-    {
-        if (!Tracker.Progress.TryGetValue(
-                message.From,
-                out Progress? progress)
-            || progress.State != ProgressState.Snapshot)
-        {
-            return;
-        }
-
-        progress.ReportSnapshot(!message.Reject);
-    }
-
-    private void HandleSnapshot(Message message)
-    {
-        Snapshot snapshot = ProtocolDefaults.EnsureSnapshot(
-            message.Snapshot?.Clone());
-        bool restored = RestoreSnapshot(snapshot);
-        Send(new Message
-        {
-            To = message.From,
-            Type = MessageType.MsgAppResp,
-            Index = restored
-                ? Log.LastIndex
-                : Log.Committed,
-        });
-    }
-
-    private bool RestoreSnapshot(Snapshot snapshot)
-    {
-        ulong snapshotIndex = snapshot.Metadata.Index;
-        if (snapshotIndex <= Log.Committed)
-        {
-            return false;
-        }
-
-        if (Role != RaftRole.Follower)
-        {
-            if (Term == ulong.MaxValue)
-            {
-                throw new RaftInvariantException(
-                    "Raft term overflow while rejecting a snapshot outside follower state.");
-            }
-
-            BecomeFollower(
-                Term + 1,
-                RaftMessageTargets.None);
-            return false;
-        }
-
-        ConfState state = snapshot.Metadata.ConfState;
-        if (!ContainsLocalNode(state))
-        {
-            return false;
-        }
-
-        var snapshotEntry = new EntryId(
-            Term: snapshot.Metadata.Term,
-            Index: snapshotIndex);
-        if (Log.MatchTerm(snapshotEntry))
-        {
-            ulong previousCommit = Log.Committed;
-            Log.CommitTo(snapshotIndex);
-            TraceCommitAdvanced(previousCommit);
-            return false;
-        }
-
-        ConfigurationChangeResult restored =
-            BuildSnapshotConfiguration(snapshot.Metadata);
-
-        ulong restoredFromCommit = Log.Committed;
-        Log.RestoreUncommitted(snapshot);
-        if (Log.Applying > Log.Applied
-            && configurationForOutstandingApplication is null)
-        {
-            // No new committed entries are emitted while the snapshot is
-            // unstable. Retain the old tracker state only to apply the
-            // already delivered prefix, including joint transitions.
-            var earlier = new ProgressTracker(
-                Tracker.MaxInflightMessages,
-                Tracker.MaxInflightBytes);
-            earlier.Install(Tracker.Config, Tracker.Progress);
-            configurationForOutstandingApplication = earlier;
-        }
-
-        InstallSnapshotConfiguration(restored);
-        Log.CommitTo(snapshotIndex);
-        TraceCommitAdvanced(restoredFromCommit);
-        return true;
-    }
-
-    private bool ContainsLocalNode(ConfState state)
-    {
-        return state.Voters.Contains(Id)
-            || state.Learners.Contains(Id)
-            || state.VotersOutgoing.Contains(Id);
-    }
-
-    private ConfState SwitchToConfiguration(
-        TrackerConfig config,
-        ProgressMap progress)
-    {
-        Tracker.Install(config, progress);
-
-        ConfState state = Tracker.ToConfState();
-        bool hasLocalProgress =
-            Tracker.Contains(Id);
-        TraceConfigurationApplied(state);
-
-        if ((!hasLocalProgress
-                || Tracker.IsLearner(Id))
-            && Role == RaftRole.Leader)
-        {
-            if (StepDownOnRemoval)
-            {
-                BecomeFollower(
-                    Term,
-                    RaftMessageTargets.None);
-            }
-            else
-            {
-                ReevaluateReadOnlyAfterConfigurationChange();
-            }
-
-            return state;
-        }
-
-        if (Role != RaftRole.Leader
-            || state.Voters.Count == 0)
-        {
-            return state;
-        }
-
-        ReevaluateReadOnlyAfterConfigurationChange();
-        if (MaybeCommit())
-        {
-            BroadcastAppend();
-        }
-        else
-        {
-            Tracker.Visit((id, peerProgress) =>
-            {
-                if (id != Id)
-                {
-                    MaybeSendAppend(
-                        id,
-                        peerProgress,
-                        sendIfEmpty: false);
-                }
-            });
-        }
-
-        if (LeaderTransferee !=
-                RaftMessageTargets.None
-            && !Tracker.Config.Voters.Ids()
-                .Contains(LeaderTransferee))
-        {
-            roleState.AbortTransfer();
-        }
-
-        return state;
-    }
-
-    private void ReevaluateReadOnlyAfterConfigurationChange()
-    {
-        ReadIndexAdvanceResult result =
-            reads.Reevaluate(
-                Tracker.Config.Voters);
-        CompleteReadIndexRequests(
-            result.Completed);
-        if (result.HeartbeatRequired)
-        {
-            BroadcastHeartbeat();
-        }
-    }
-
-    internal void HandleCheckQuorum()
-    {
-        if (!Tracker.QuorumActive())
-        {
-            LogWarning(
-                $"{Id:x} stepped down because quorum is not active.");
-            BecomeFollower(
-                Term,
-                RaftMessageTargets.None);
-        }
-
-        Tracker.Visit((id, progress) =>
-        {
-            if (id != Id)
-            {
-                progress.RecentActive = false;
-            }
-        });
-    }
-
-    private bool ShouldIgnoreElectionRequestWithinLease(
-        Message message)
-    {
-        return message.Type is
-                MessageType.MsgVote or
-                MessageType.MsgPreVote
-            && CheckQuorum
-            && LeaderId != RaftMessageTargets.None
-            && clock.ElectionElapsed <
-                clock.ElectionTick
-            && message.Context != CampaignTransferContext;
     }
 
     private void HandleLowerTermMessage(Message message)
@@ -2189,60 +675,6 @@ internal sealed class RaftCore
             EntrySizing.PayloadSize(entries));
     }
 
-    private ConfigurationChangeResult BuildSnapshotConfiguration(
-        SnapshotMetadata metadata)
-    {
-        var scratch = new ProgressTracker(
-            Tracker.MaxInflightMessages,
-            Tracker.MaxInflightBytes);
-        return ConfigurationRestore.Restore(
-            new ConfigurationChanger(scratch, metadata.Index),
-            metadata.ConfState);
-    }
-
-    private void InstallSnapshotConfiguration(ConfigurationChangeResult restored)
-    {
-        Tracker.Install(
-            restored.Config,
-            restored.Progress);
-        Tracker.ResetVotes();
-        TraceConfigurationApplied(
-            Tracker.ToConfState());
-    }
-
-    private void MaybeAutoLeave()
-    {
-        if (!Tracker.Config.AutoLeave
-            || !proposals.IsPendingApplied(
-                Log.Applied)
-            || Role != RaftRole.Leader)
-        {
-            return;
-        }
-
-        var proposal = new Message
-        {
-            From = Id,
-            To = Id,
-            Type = MessageType.MsgProp,
-        };
-        proposal.Entries.Add(new Entry
-        {
-            Type = EntryType.EntryConfChangeV2,
-            Data = new ConfChangeV2()
-                .ToByteString(),
-        });
-        try
-        {
-            Step(proposal);
-        }
-        catch (ProposalDroppedException exception)
-        {
-            LogDebug(
-                $"Automatic joint exit remains pending: {exception.Message}");
-        }
-    }
-
     private void Reset(ulong term)
     {
         if (term < Term)
@@ -2283,183 +715,5 @@ internal sealed class RaftCore
         roleState.Load(
             state.Term,
             state.Vote);
-    }
-
-    private void TraceConfigurationProposals(
-        IReadOnlyList<Entry> entries)
-    {
-        if (traceSink is null)
-        {
-            return;
-        }
-
-        foreach (Entry entry in entries)
-        {
-            string? detail = entry.Type switch
-            {
-                EntryType.EntryConfChange =>
-                    RaftDescriptions.DescribeConfChange(
-                        ProtocolConfChange.Parser.ParseFrom(
-                            entry.Data)),
-                EntryType.EntryConfChangeV2 =>
-                    RaftDescriptions.DescribeConfChange(
-                        ConfChangeV2.Parser.ParseFrom(
-                            entry.Data)),
-                _ => null,
-            };
-            if (detail is not null)
-            {
-                Trace(
-                    RaftTraceEventType.ConfigurationProposed,
-                    detail: detail);
-            }
-        }
-    }
-
-    private void TraceEntriesAppended(
-        Entry[] entries)
-    {
-        if (traceSink is null || entries.Length == 0)
-        {
-            return;
-        }
-
-        TraceEntriesAppended(
-            entries.Length,
-            entries[0].Index,
-            entries[^1].Index);
-    }
-
-    private void TraceEntriesAppended(
-        int count,
-        ulong firstIndex,
-        ulong lastIndex)
-    {
-        if (traceSink is null || count == 0)
-        {
-            return;
-        }
-
-        string detail = string.Create(
-            System.Globalization.CultureInfo.InvariantCulture,
-            $"count:{count} first:{firstIndex} last:{lastIndex}");
-        Trace(
-            RaftTraceEventType.EntriesAppended,
-            detail: detail);
-    }
-
-    private void TraceCommitAdvanced(
-        ulong previousCommit)
-    {
-        if (traceSink is null
-            || Log.Committed <= previousCommit)
-        {
-            return;
-        }
-
-        Trace(RaftTraceEventType.CommitAdvanced);
-    }
-
-    private void TraceConfigurationApplied(
-        ConfState state)
-    {
-        if (traceSink is null)
-        {
-            return;
-        }
-
-        Trace(
-            RaftTraceEventType.ConfigurationApplied,
-            detail:
-                RaftDescriptions.DescribeConfState(state));
-    }
-
-    private void TraceMessage(
-        RaftTraceEventType type,
-        Message message)
-    {
-        if (traceSink is null)
-        {
-            return;
-        }
-
-        ulong snapshotIndex =
-            message.Snapshot?.Metadata?.Index ?? 0;
-        Trace(
-            type,
-            new RaftTraceMessage(
-                message.Type,
-                message.From,
-                message.To,
-                message.Term,
-                message.LogTerm,
-                message.Index,
-                message.Commit,
-                message.Vote,
-                message.Reject,
-                message.RejectHint,
-                message.Entries.Count,
-                snapshotIndex));
-    }
-
-    private void Trace(
-        RaftTraceEventType type,
-        RaftTraceMessage? message = null,
-        string? detail = null)
-    {
-        if (traceSink is null)
-        {
-            return;
-        }
-
-        var traceEvent = new RaftTraceEvent(
-            type,
-            GetBasicStatus(),
-            Log.LastIndex,
-            GetConfigurationStatus(),
-            message,
-            detail);
-        try
-        {
-            traceSink.Trace(traceEvent);
-        }
-        catch (Exception exception)
-        {
-            throw new RaftTracingException(
-                $"Raft trace sink failed while emitting {type}.",
-                exception);
-        }
-    }
-
-    private void LogInformation(string message)
-    {
-        RaftLogging.Write(
-            Logger,
-            RaftLogLevel.Information,
-            message);
-    }
-
-    private void LogDebug(string message)
-    {
-        RaftLogging.Write(
-            Logger,
-            RaftLogLevel.Debug,
-            message);
-    }
-
-    private void LogError(string message)
-    {
-        RaftLogging.Write(
-            Logger,
-            RaftLogLevel.Error,
-            message);
-    }
-
-    private void LogWarning(string message)
-    {
-        RaftLogging.Write(
-            Logger,
-            RaftLogLevel.Warning,
-            message);
     }
 }

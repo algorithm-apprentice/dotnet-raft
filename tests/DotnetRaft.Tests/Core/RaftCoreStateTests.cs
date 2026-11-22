@@ -316,12 +316,18 @@ public sealed class RaftCoreStateTests
             voters: [2],
             learners: [1]).Promotable);
 
-        RaftCore snapshotCore = NewCore(voters: [1]);
-        snapshotCore.Log.Restore(
-            RaftCoreInitializationTests.SnapshotAt(
+        RaftCore snapshotCore = NewCore(voters: [1, 2]);
+        snapshotCore.Step(new Message
+        {
+            Type = MessageType.MsgSnap,
+            From = 2,
+            To = 1,
+            Term = 2,
+            Snapshot = RaftCoreInitializationTests.SnapshotAt(
                 5,
                 2,
-                voters: [1]));
+                voters: [1, 2]),
+        });
         Assert.True(snapshotCore.Log.HasNextUnstableSnapshot);
         Assert.True(snapshotCore.Log.HasUnstableSnapshot);
         Assert.False(snapshotCore.Promotable);
@@ -331,7 +337,7 @@ public sealed class RaftCoreStateTests
         Assert.True(snapshotCore.Log.HasUnstableSnapshot);
         Assert.False(snapshotCore.Promotable);
 
-        snapshotCore.Log.AcknowledgeSnapshot(5);
+        snapshotCore.AcknowledgeSnapshot(5);
         Assert.False(snapshotCore.Log.HasUnstableSnapshot);
         Assert.True(snapshotCore.Promotable);
     }

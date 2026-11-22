@@ -52,8 +52,10 @@ internal sealed class RaftLog
 
     internal ulong Committed { get; private set; }
 
+    // Work handed to the host, including any earlier acknowledged prefix.
     internal ulong Applying { get; private set; }
 
+    // Work acknowledged to Raft; not necessarily the application's physical cursor.
     internal ulong Applied { get; private set; }
 
     internal ulong ApplyingEntriesSize => _applyingEntriesSize;
@@ -111,39 +113,6 @@ internal sealed class RaftLog
     internal bool HasUnstableSnapshotAt(ulong index)
     {
         return Unstable.HasSnapshotAt(index);
-    }
-
-    internal bool MaybeAppend(
-        LogSlice slice,
-        ulong committed,
-        out ulong lastNewIndex)
-    {
-        return MaybeAppend(
-            slice,
-            committed,
-            out lastNewIndex,
-            out _,
-            out _);
-    }
-
-    internal bool MaybeAppend(
-        LogSlice slice,
-        ulong committed,
-        out ulong lastNewIndex,
-        out ulong firstAppendedIndex,
-        out int appendedCount)
-    {
-        if (!MaybeAppendEntries(
-                slice,
-                out lastNewIndex,
-                out firstAppendedIndex,
-                out appendedCount))
-        {
-            return false;
-        }
-
-        CommitTo(Math.Min(committed, lastNewIndex));
-        return true;
     }
 
     internal bool MaybeAppendEntries(
@@ -320,14 +289,7 @@ internal sealed class RaftLog
         Committed = index;
     }
 
-    internal void Restore(Snapshot snapshot)
-    {
-        Snapshot normalized =
-            RestoreUncommitted(snapshot);
-        CommitTo(normalized.Metadata.Index);
-    }
-
-    internal Snapshot RestoreUncommitted(
+    internal void RestoreUncommitted(
         Snapshot snapshot)
     {
         ArgumentNullException.ThrowIfNull(snapshot);
@@ -339,7 +301,6 @@ internal sealed class RaftLog
         }
 
         Unstable.Restore(normalized);
-        return normalized;
     }
 
     internal IReadOnlyList<Entry> GetNextUnstableEntries()

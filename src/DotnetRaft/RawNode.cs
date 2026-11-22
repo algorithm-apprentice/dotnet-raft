@@ -11,6 +11,7 @@ using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft;
 
+/// <summary>A Raft node driven by a single serialized host loop.</summary>
 public sealed partial class RawNode
 {
     private readonly RaftCore _core;
@@ -116,6 +117,7 @@ public sealed partial class RawNode
         });
     }
 
+    /// <summary>Submits a command; returning does not establish commit or application.</summary>
     public void Propose(ReadOnlySpan<byte> data)
     {
         byte[] owned = data.ToArray();
@@ -245,11 +247,13 @@ public sealed partial class RawNode
         return Execute(HasReadyCore);
     }
 
+    /// <summary>Accepts the next batch for the host. This is not a peek.</summary>
     public Ready Ready()
     {
         return Execute(CreateReady);
     }
 
+    /// <summary>Acknowledges the exact outstanding batch in Ready/Advance mode.</summary>
     public void Advance(Ready ready)
     {
         Execute(() => AdvanceCore(ready));
@@ -627,14 +631,14 @@ public sealed partial class RawNode
         _core.TakeMessagesAfterAppend();
         _core.TakeReadStates();
         _core.Log.AcceptUnstable();
-        ulong? appliedIndex =
+        ulong? deliveredThrough =
             committedEntries.Length == 0
                 ? null
                 : committedEntries[^1].Index;
-        if (appliedIndex.HasValue)
+        if (deliveredThrough.HasValue)
         {
             _core.Log.AcceptApplying(
-                appliedIndex.Value,
+                deliveredThrough.Value,
                 EntrySizing.EncodedSize(
                     committedEntries),
                 allowUnstable:

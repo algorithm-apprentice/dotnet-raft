@@ -9,12 +9,12 @@ namespace DotnetRaft.Examples.Counter;
 
 // A single host loop drives all three RawNodes. Only the host moves work
 // between replicas; no background threads or sockets are needed here.
-internal sealed class CounterCluster(bool asyncStorage)
+internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace)
 {
     private const int MaxRounds = 100;
     private readonly Queue<Message> _delivery = new();
 
-    internal IReadOnlyList<CounterReplica> Replicas { get; } = CreateReplicas(asyncStorage);
+    internal IReadOnlyList<CounterReplica> Replicas { get; } = CreateReplicas(asyncStorage, trace);
 
     internal void Drain(bool runApplyWorkers = true)
     {
@@ -38,6 +38,7 @@ internal sealed class CounterCluster(bool asyncStorage)
                 if (runApplyWorkers && replica.ApplyWork.TryDequeue(out Message? apply))
                 {
                     replica.Apply(apply.Entries);
+                    trace?.Applied(replica, apply.Entries);
                     EnqueueDelivery(apply.Responses);
                     didWork = true;
                 }
@@ -47,6 +48,11 @@ internal sealed class CounterCluster(bool asyncStorage)
             {
                 CounterReplica destination = Replicas.Single(replica => replica.Id == message.To);
                 destination.Node.Step(message);
+                if (message.Type == MessageType.MsgStorageApplyResp)
+                {
+                    trace?.AcknowledgedApplication(destination, message.Entries, nameof(MessageType.MsgStorageApplyResp));
+                }
+
                 didWork = true;
             }
 
@@ -74,6 +80,7 @@ internal sealed class CounterCluster(bool asyncStorage)
                         break;
                     case RaftLocalMessageTargets.ApplyThread:
                         replica.ApplyWork.Enqueue(message);
+                        trace?.ReceivedApplicationWork(replica.Id, message.Entries, nameof(MessageType.MsgStorageApply));
                         break;
                     default:
                         _delivery.Enqueue(message);
@@ -84,10 +91,14 @@ internal sealed class CounterCluster(bool asyncStorage)
             return;
         }
 
+        trace?.ReceivedApplicationWork(replica.Id, ready.CommittedEntries, "Ready.CommittedEntries");
         replica.Persist(ready.Snapshot, ready.Entries, ready.HardState);
+        trace?.Stored(replica.Id, ready.Entries, ready.HardState, nameof(Ready));
         EnqueueDelivery(ready.Messages);
         replica.Apply(ready.CommittedEntries);
+        trace?.Applied(replica, ready.CommittedEntries);
         replica.Node.Advance(ready);
+        trace?.AcknowledgedApplication(replica, ready.CommittedEntries, nameof(RawNode.Advance));
     }
 
     private void EnqueueDelivery(IEnumerable<Message> messages)
@@ -105,15 +116,16 @@ internal sealed class CounterCluster(bool asyncStorage)
             ? new HardState { Term = request.Term, Vote = request.Vote, Commit = request.Commit }
             : null;
         replica.Persist(request.Snapshot, request.Entries, hardState);
+        trace?.Stored(replica.Id, request.Entries, hardState, nameof(MessageType.MsgStorageAppend));
         // The same FIFO simulates local acknowledgements and remote replies.
         // The pump steps the node in each response's own To, not request.From.
         EnqueueDelivery(request.Responses);
     }
 
-    private static CounterReplica[] CreateReplicas(bool asyncStorage)
+    private static CounterReplica[] CreateReplicas(bool asyncStorage, CounterWriteTrace? trace)
     {
         Peer[] peers = [new(1), new(2), new(3)];
-        return [.. peers.Select(peer => new CounterReplica(peer.Id, peers, asyncStorage))];
+        return [.. peers.Select(peer => new CounterReplica(peer.Id, peers, asyncStorage, trace))];
     }
 }
 
@@ -123,7 +135,7 @@ internal sealed class CounterReplica
 
     private readonly MemoryStorage _storage = new();
 
-    internal CounterReplica(ulong id, Peer[] peers, bool asyncStorage)
+    internal CounterReplica(ulong id, Peer[] peers, bool asyncStorage, CounterWriteTrace? trace)
     {
         Id = id;
         Node = RawNode.Start(new RaftConfig
@@ -131,6 +143,7 @@ internal sealed class CounterReplica
             Id = id,
             Storage = _storage,
             AsyncStorageWrites = asyncStorage,
+            TraceSink = trace,
         }, peers);
     }
 

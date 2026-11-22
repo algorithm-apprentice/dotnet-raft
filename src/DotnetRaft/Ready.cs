@@ -4,6 +4,13 @@ using DotnetRaft.Protocol;
 
 namespace DotnetRaft;
 
+/// <summary>Work handed to the host, not effects that have already happened.</summary>
+/// <remarks>
+/// In Ready/Advance mode, the host meets the persistence and application requirements before acknowledging the batch.
+/// With asynchronous storage writes, drive writes and application from local requests in
+/// <see cref="Messages"/>, not the mirrored fields, and do not call Advance.
+/// Consume <see cref="ReadStates"/> in either mode.
+/// </remarks>
 public sealed class Ready
 {
     private readonly ReadOnlyCollection<ReadState> _readStates;

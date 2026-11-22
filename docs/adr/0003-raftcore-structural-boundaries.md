@@ -15,20 +15,22 @@ and snapshot ordering harder to see.
 Move state together with the behavior that owns it. Keep clocks, role state,
 outbound work, admission, read coordination, progress, and the log as
 separate owners. `ProgressTracker.Install` is the replacement boundary for
-configuration and progress. Select stateless message strategies from the
-current role after shared term handling; never let a cached strategy become
-a second source of role state.
+configuration and progress. Route messages by the current role after shared
+term handling; never select a route using the role from before the transition.
 
-`RaftCore` still sequences transitions involving multiple owners. Role
-strategies call explicit core handlers; other collaborators do not reach
-back into the core to mutate one another. The
+`RaftCore` sequences transitions involving multiple owners. The original
+stateless role strategy objects only routed back to core methods. Private
+role dispatch removes that extra jump without changing who owns the state.
+Partial files make election, replication, membership, and read flows easier
+to find; they are a reading aid, not separate owners. Collaborators do not
+reach back into the core to mutate one another. The
 [component map](../internals/consensus.md#coordinate-transitions-in-one-place)
 describes the resulting boundaries.
 
 ## Trade-offs and evidence
 
-The design adds internal method boundaries, but no new dispatcher queue or
-per-message strategy allocation. Behavior-preserving edits should use
+The design adds no dispatcher queue, role object, or per-message allocation.
+Behavior-preserving edits should use
 [dispatch characterization](../../tests/DotnetRaft.Tests/Core/RaftCoreDispatchCharacterizationTests.cs)
 to compare effects, not just return values. Use
 [the same benchmark workload](../maintaining/benchmarks.md) to check any

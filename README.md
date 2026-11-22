@@ -16,7 +16,9 @@ dotnet run --project examples/DotnetRaft.Counter
 One proposal increments all three replicas. The program prints when the
 proposal is submitted and when each replica has actually applied it. Try the
 [same counter with separate append and apply queues](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/examples/DotnetRaft.Counter/README.md#asynchronous-storage-writes)
-to see commitment move ahead of application.
+to see commitment move ahead of application, or
+[trace one write](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/examples/DotnetRaft.Counter/README.md#trace-one-write)
+to see which acknowledgement advances the commit index.
 
 ## Documentation
 

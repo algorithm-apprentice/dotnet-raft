@@ -8,27 +8,6 @@ namespace DotnetRaft.Tests.Core;
 public sealed class RaftLogMutationSafetyTests
 {
     [Fact]
-    public void MaybeAppendCapsCommitAtLastNewIndex()
-    {
-        var log = new RaftLog(
-            new MemoryStorage(),
-            NullRaftLogger.Instance);
-        log.Append(Entries((1, 1)));
-
-        bool matched = log.MaybeAppend(
-            new LogSlice(
-                2,
-                new EntryId(Term: 1, Index: 1),
-                Entries((2, 2))),
-            ulong.MaxValue,
-            out ulong lastNewIndex);
-
-        Assert.True(matched);
-        Assert.Equal(2UL, lastNewIndex);
-        Assert.Equal(2UL, log.Committed);
-    }
-
-    [Fact]
     public void AppendAtCommittedBoundaryIsRejectedAtomically()
     {
         var log = new RaftLog(

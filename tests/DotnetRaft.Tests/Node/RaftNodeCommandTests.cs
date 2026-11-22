@@ -811,7 +811,7 @@ public sealed class RaftNodeCommandTests
     }
 
     [Fact]
-    public async Task ReservedStorageSenderFailsUntilD25()
+    public async Task ReservedStorageSenderIsRejectedWithoutAsyncStorageWrites()
     {
         (RaftNode node, _) = RestartNode();
         try

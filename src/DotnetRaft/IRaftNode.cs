@@ -15,6 +15,7 @@ public interface IRaftNode : IAsyncDisposable
     ValueTask CampaignAsync(
         CancellationToken cancellationToken = default);
 
+    /// <summary>Waits for submission, not commitment or physical application.</summary>
     ValueTask ProposeAsync(
         ReadOnlyMemory<byte> data,
         CancellationToken cancellationToken = default);
@@ -51,9 +52,11 @@ public interface IRaftNode : IAsyncDisposable
         SnapshotStatus status,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Accepts the next batch for the host's single Ready consumer.</summary>
     ValueTask<Ready> WaitForReadyAsync(
         CancellationToken cancellationToken = default);
 
+    /// <summary>Acknowledges the outstanding batch in Ready/Advance mode.</summary>
     ValueTask AdvanceAsync(
         CancellationToken cancellationToken = default);
 

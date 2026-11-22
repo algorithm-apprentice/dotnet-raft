@@ -20,6 +20,23 @@ applies one entry at a time, checking it is the next index. The
 records the exact tables; the design depends on the cursor, configuration,
 and command result committing together, not on a specific SQL listing here.
 
+## Follow a fresh KV write
+
+Start with the [Counter write trace](../../examples/DotnetRaft.Counter/README.md#trace-one-write)
+in Ready/Advance mode. For a new request ID with no stored result, follow
+the same host phases in the KV example:
+
+| Phase | Counter | Durable KV host |
+|---|---|---|
+| Submit | `Program` calls `RawNode.Propose` directly. | [`Program` maps `PUT /kv/{key}`](../../examples/DotnetRaft.KvCluster/Program.cs#L85) to `PutAsync`. [`RaftClusterHost.MutateAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L503) registers and awaits a pending result; [`SubmitProposalAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L648) calls `RaftNode.ProposeAsync`. A follower can forward the proposal. |
+| Save and send | `CounterCluster.ProcessReady` writes to memory and enqueues peer messages. | [`ProcessReadyAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L374) calls `SqliteStorage.PersistReady` for `raft.db` before using the gRPC transport. Neither operation sets the KV value. |
+| Apply and finish the caller | `CounterReplica.Apply` updates the local counter. | [`ApplyEntryAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L430) calls [`SqliteKeyValueStateMachine.ApplyCommand`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.cs#L150), which commits the value, request result, and physical cursor to `application.db` together. Then `pendingProposals.Complete` releases the local waiter so the endpoint can return success. |
+| Acknowledge to Raft | `ProcessReady` calls `Advance` on that batch. | [`RunReadyLoopAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L353) calls `AdvanceAsync` after `ProcessReadyAsync`. This is not what releases the HTTP waiter. |
+
+[`ThreeNodeClusterReplicatesFollowerProposalAndRead`](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.cs)
+exercises this path without starting a gRPC server. The next section covers
+the different case where a durable request result already exists.
+
 ## Mutation application and deduplication
 
 The durable winner for a mutation ID is the first applied command using it.

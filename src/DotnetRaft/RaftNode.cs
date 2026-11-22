@@ -8,6 +8,8 @@ using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft;
 
+/// <summary>Serializes concurrent callers onto one <see cref="RawNode"/> owner loop.</summary>
+/// <remarks>Caller waits are asynchronous; stable storage reads still run synchronously on the owner.</remarks>
 public sealed class RaftNode : IRaftNode
 {
     private const int Running = 0;

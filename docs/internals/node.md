@@ -60,6 +60,15 @@ proposal as canceled after it had already been submitted. A blocked
 proposal does not occupy the owner; ticks and peer messages can still
 discover a leader and make it eligible.
 
+A caller awaiting a queued result does not need a thread while it waits,
+and the owner also awaits work when idle. Once dispatched, a core operation
+runs synchronously. A slow stable log read holds up the owner, including
+ticks and other queued commands. This remains true with asynchronous
+storage writes: that protocol moves write and application work out to the
+host, not stable reads out of the core. The
+[scheduling tests](../../tests/DotnetRaft.Tests/Node/RaftNodeSchedulingTests.cs)
+gate a stable `GetTerm` call to make this distinction observable.
+
 Callback reentry into the owner is rejected, and continuations run outside
 the owner to avoid synchronous self-deadlock. Use the
 [deterministic race tests](../maintaining/testing.md#exercise-the-boundary-that-changed)

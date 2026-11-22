@@ -3,19 +3,21 @@ using DotnetRaft.Examples.Counter;
 
 if (args is ["--help"])
 {
-    Console.WriteLine("Usage: dotnet run --project examples/DotnetRaft.Counter -- [--async-storage]");
+    Console.WriteLine("Usage: dotnet run --project examples/DotnetRaft.Counter -- [--async-storage] [--trace]");
     return 0;
 }
 
-if (args.Length != 0 && args is not ["--async-storage"])
+if (args.Any(arg => arg is not ("--async-storage" or "--trace"))
+    || args.Distinct(StringComparer.Ordinal).Count() != args.Length)
 {
-    Console.Error.WriteLine("Expected no arguments or --async-storage. Use --help for usage.");
+    Console.Error.WriteLine("Expected --async-storage and/or --trace. Use --help for usage.");
     return 2;
 }
 
-bool asyncStorage = args.Length != 0;
+bool asyncStorage = args.Contains("--async-storage", StringComparer.Ordinal);
+CounterWriteTrace? trace = args.Contains("--trace", StringComparer.Ordinal) ? new CounterWriteTrace() : null;
 Console.WriteLine(asyncStorage ? "Mode: asynchronous storage writes" : "Mode: Ready / Advance");
-var cluster = new CounterCluster(asyncStorage);
+var cluster = new CounterCluster(asyncStorage, trace);
 
 // Persist and apply bootstrap entries before manually starting an election.
 cluster.Drain();
@@ -33,6 +35,7 @@ if (elected.Role != RaftRole.Leader
 
 Console.WriteLine($"Elected node {leader.Id} in term {elected.Term}.");
 ulong commandIndex = elected.Commit + 1; // The cluster is idle with no uncommitted tail.
+trace?.Follow(commandIndex);
 leader.Node.Propose(CounterReplica.IncrementCommand.Span);
 if (leader.Node.GetBasicStatus().Commit != elected.Commit || leader.Count != 0)
 {

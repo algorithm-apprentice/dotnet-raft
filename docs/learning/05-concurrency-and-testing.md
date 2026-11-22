@@ -55,6 +55,14 @@ with `ClaimWinsOverLaterCancellation`. Both issue cancellation; only one
 does so before the linearization point of the local queue claim. This is a
 local API guarantee, not a proof of KV linearizability.
 
+Compare two kinds of waiting. In `BlockedProposalBacklogDoesNotDelayControlOrTicks`,
+the requests wait for a known leader but the owner can still handle ticks.
+In `StableLogReadKeepsQueuedStatusPending` in the
+[scheduling tests](../../tests/DotnetRaft.Tests/Node/RaftNodeSchedulingTests.cs),
+an incoming append is already executing when its synchronous `GetTerm`
+blocks. The caller can queue and await another operation, but the owner
+cannot run it until the read returns, in either storage write mode.
+
 ## What the lab checks
 
 | Question | Executable evidence |

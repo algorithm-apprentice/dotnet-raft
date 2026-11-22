@@ -64,6 +64,46 @@ Node 2: committed=5, applied=5, counter=1.
 Node 3: committed=5, applied=5, counter=1.
 ```
 
+## Trace one write
+
+Add `--trace` to either mode to follow just the `increment`, not the
+bootstrap and election:
+
+```bash
+dotnet run --project examples/DotnetRaft.Counter -- --trace
+dotnet run --project examples/DotnetRaft.Counter -- --async-storage --trace
+```
+
+Read `core` lines as state transitions or message observations, and `host`
+lines as work done by the example. These selected synchronous lines show
+what to look for (intermediate lines are omitted):
+
+```text
+  core node 1: queued MsgAppResp 1->1 for index 5
+  host node 1: stored entry 5 (Ready)
+  core node 1: received MsgAppResp 1->1 for index 5
+  host node 2: stored entry 5 (Ready)
+  core node 1: received MsgAppResp 2->1 for index 5
+  core node 1: Leader advanced Commit to 5
+  host node 1: received application work for index 5 (Ready.CommittedEntries)
+  host node 1: stored HardState.Commit=5 (Ready)
+  host node 1: applied entry 5: counter=1
+  host node 1: acknowledged application (Advance): Raft Applied=5
+```
+
+Predict which response will complete the quorum in this schedule, then check
+the first leader commit line. The leader's own response only counts when
+processed after the storage write. In async mode, look separately for the
+local `MsgStorageAppendResp` that marks entries stable, the `MsgAppResp`
+that counts toward replication, and the `MsgStorageApplyResp` that
+acknowledges application. Find the point where the apply workers are paused:
+the host may already have received apply work although none of the counters
+has changed. This is a deterministic schedule using memory, not a claim
+about disk durability or the order every cluster will exhibit.
+
+Continue with the [source walkthrough](../../docs/internals/README.md#follow-a-write)
+to find the methods that produced these lines.
+
 ## What to use beyond this demo
 
 The playback uses volatile memory, fixed membership, and no snapshots or

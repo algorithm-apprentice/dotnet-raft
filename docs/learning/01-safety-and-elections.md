@@ -173,7 +173,8 @@ Read these in order, instead of starting from an HTTP endpoint:
    elapsed counters and chooses a fresh timeout in
    `[ElectionTick, 2 * ElectionTick)` on reset. The host chooses how often to
    call `Tick`; the core counts logical ticks, not wall-clock time.
-2. `RaftCore.TickElection` triggers a local campaign for an eligible node.
+2. [`RaftCore.TickElection`](../../src/DotnetRaft/Core/RaftCore.Election.cs)
+   triggers a local campaign for an eligible node.
    A learner or a node with a pending unstable snapshot cannot campaign.
    `HandleHup` also protects the application of committed configuration
    entries during an ordinary campaign.
@@ -182,9 +183,9 @@ Read these in order, instead of starting from an HTTP endpoint:
    does not advance its election merely because it queued a self vote: that
    response belongs to the after-append queue in
    [`RaftOutput`](../../src/DotnetRaft/Core/RaftOutput.cs).
-4. An incoming message passes the term logic in `RaftCore.Step` before the
-   stateless [`RaftRoleStrategies`](../../src/DotnetRaft/Core/RaftRoleStrategies.cs)
-   route it. Higher-term traffic normally makes the node a follower. A
+4. An incoming message passes the term logic in
+   [`RaftCore.Step`](../../src/DotnetRaft/Core/RaftCore.cs) before dispatching
+   on the resulting role. Higher-term traffic normally makes the node a follower. A
    higher-term pre-vote request or granted pre-vote response is not a real
    term change. With `CheckQuorum`, an active leader lease can also suppress
    an ordinary higher-term vote or pre-vote request, but not a transfer

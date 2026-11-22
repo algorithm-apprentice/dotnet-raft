@@ -196,20 +196,18 @@ public sealed class RaftCoreElectionTests
             voters: [2, 3],
             term: 1).Core;
         RaftCore snapshot = Create(
-            voters: [1],
+            voters: [1, 2],
             term: 1).Core;
-        snapshot.Log.Restore(new Snapshot
+        snapshot.Step(new Message
         {
-            Metadata = new SnapshotMetadata
-            {
-                Index = 5,
-                Term = 1,
-                ConfState = new ConfState
-                {
-                    Voters = { 1 },
-                },
-            },
+            Type = MessageType.MsgSnap,
+            From = 2,
+            To = 1,
+            Term = 1,
+            Snapshot = RaftCoreInitializationTests.SnapshotAt(5, 1, voters: [1, 2]),
         });
+        Assert.True(snapshot.Log.HasUnstableSnapshot);
+        snapshot.TakeMessagesAfterAppend();
 
         AssertHupIgnored(leader);
         AssertHupIgnored(learner);

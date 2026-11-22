@@ -18,6 +18,9 @@ example host must not implement the same state transition independently.
    schema approvals unchanged unless a compatibility change is intentional.
 4. Update the owning documentation and run the relevant checks below.
 
+The [readability roadmap](readability-roadmap.md) records the scope and
+verification gates for organizing the core and tracing a write.
+
 ## Verify and package
 
 | Change | Check |

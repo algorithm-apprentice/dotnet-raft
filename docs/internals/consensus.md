@@ -16,13 +16,24 @@ votes, and failure schedules.
 | [`ProposalAdmission`](../../src/DotnetRaft/Core/ProposalAdmission.cs), [`ReadIndexCoordinator`](../../src/DotnetRaft/Core/ReadIndexCoordinator.cs) | Proposal payload and pending configuration index; gated reads, quorum confirmation, and read results. |
 
 [`RaftCore.Step`](../../src/DotnetRaft/Core/RaftCore.cs) handles term changes
-and shared messages before dispatching role-specific work through
-[`RaftRoleStrategies`](../../src/DotnetRaft/Core/RaftRoleStrategies.cs). It
-selects the strategy using the role *after* term handling. Otherwise a leader
-could process a higher-term message as a leader even after stepping down.
-Strategies have no mutable role state of their own. Commit then read release,
-reset, and snapshot installation stay in the core because their ordering
-crosses component boundaries. See [ADR 0003](../adr/0003-raftcore-structural-boundaries.md).
+and shared messages before calling `StepFollower`, `StepCampaigning`, or
+`StepLeader`. It routes by the role *after* term handling: a higher-term
+append can first turn a leader into a follower and must then be handled as a
+follower append. Candidate and pre-candidate share a route, but only count
+the response type for the election they are running.
+
+The files below are parts of the same class. Commit then read release,
+reset, and snapshot installation stay visible in the transition that orders
+them. See [ADR 0003](../adr/0003-raftcore-structural-boundaries.md).
+
+| To follow… | Start at |
+|---|---|
+| Term handling, role dispatch, reset, local worker responses | [`RaftCore.cs`](../../src/DotnetRaft/Core/RaftCore.cs), `Step` |
+| Logical ticks, voting, becoming leader, transfer | [`RaftCore.Election.cs`](../../src/DotnetRaft/Core/RaftCore.Election.cs), `TickElection` or `Campaign` |
+| Proposals, Append, follower progress, and commit | [`RaftCore.Replication.cs`](../../src/DotnetRaft/Core/RaftCore.Replication.cs), `HandleLeaderProposal` and `HandleAppendResponse` |
+| Configuration installation, incoming snapshots, application overlap | [`RaftCore.Membership.cs`](../../src/DotnetRaft/Core/RaftCore.Membership.cs), `ApplyConfigurationChange` or `RestoreSnapshot` |
+| The current-term read gate and quorum confirmation | [`RaftCore.ReadIndex.cs`](../../src/DotnetRaft/Core/RaftCore.ReadIndex.cs), `HandleLeaderReadIndex` |
+| Detached state and trace events | [`RaftCore.Diagnostics.cs`](../../src/DotnetRaft/Core/RaftCore.Diagnostics.cs), `GetBasicStatus` or `Trace` |
 
 ## Elect without losing a durable vote
 

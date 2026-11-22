@@ -10,7 +10,9 @@ to a real service.
 
 1. Run the [replicated counter](../../examples/DotnetRaft.Counter/README.md) in
    both modes. Observe that a proposal is not a commit, and a commit is not
-   application. Compare which code is Raft and which code belongs to the host.
+   application. Use the [single-write trace](../../examples/DotnetRaft.Counter/README.md#trace-one-write)
+   and [source walkthrough](../internals/README.md#follow-a-write) to compare
+   which code is Raft and which code belongs to the host.
 2. Work through the [implementation deep dives](#implementation-deep-dives)
    in order. Predict each example on paper before stepping through the code.
 3. Run the [manual KV laboratory](#manual-laboratory) and use the

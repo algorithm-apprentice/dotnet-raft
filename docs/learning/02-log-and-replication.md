@@ -34,7 +34,8 @@ acknowledge only after the required durable publication
 
 [`LogSlice`](../../src/DotnetRaft/Core/LogSlice.cs) expresses the batch and
 preceding tuple. `RaftLog.MaybeAppendEntries` and `FindConflict` do the log
-work. `RaftCore.HandleAppendEntries` traces accepted entries, advances commit
+work. [`RaftCore.HandleAppendEntries`](../../src/DotnetRaft/Core/RaftCore.Replication.cs)
+traces accepted entries, advances commit
 to `min(message.Commit, lastNewIndex)`, and queues a `MsgAppResp`. A conflict
 at or below the committed index is an invariant failure, not an instruction
 to rewrite committed state. If an append's preceding index is already below

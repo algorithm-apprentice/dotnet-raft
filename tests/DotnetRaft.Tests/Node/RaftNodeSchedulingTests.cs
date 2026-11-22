@@ -1,6 +1,7 @@
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
+using DotnetRaft.Tests.Core;
 
 using static DotnetRaft.Tests.Node.RaftNodeTestSupport;
 
@@ -8,6 +9,72 @@ namespace DotnetRaft.Tests.Node;
 
 public sealed class RaftNodeSchedulingTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StableLogReadKeepsQueuedStatusPending(bool asyncStorageWrites)
+    {
+        var storage = new CoreTestStorage
+        {
+            InitialState = new StorageState(
+                new HardState { Term = 1, Commit = 1 },
+                new ConfState { Voters = { 1, 2 } }),
+        };
+        storage.LogStorage.Append([new Entry { Index = 1, Term = 1 }]);
+        var readEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var releaseRead = new ManualResetEventSlim(false);
+        await using var node = RaftNode.Restart(new RaftConfig
+        {
+            Id = 1,
+            Storage = storage,
+            Applied = 1,
+            AsyncStorageWrites = asyncStorageWrites,
+        });
+
+        // The incoming append must match index 1 against the stable log.
+        // Signal from inside GetTerm, not from a trace callback before it.
+        storage.GetTermOverride = index =>
+        {
+            if (index == 1)
+            {
+                readEntered.TrySetResult();
+                releaseRead.Wait();
+            }
+
+            return storage.LogStorage.GetTerm(index);
+        };
+        var append = new Message
+        {
+            Type = MessageType.MsgApp,
+            From = 2,
+            To = 1,
+            Term = 1,
+            Index = 1,
+            LogTerm = 1,
+            Commit = 2,
+        };
+        append.Entries.Add(new Entry { Index = 2, Term = 1 });
+
+        try
+        {
+            Task step = node.StepAsync(append).AsTask();
+            await readEntered.Task.WaitAsync(DeadlockGuardTimeout);
+
+            Task<Status> queuedStatus = node.GetStatusAsync().AsTask();
+            Assert.False(step.IsCompleted);
+            Assert.False(queuedStatus.IsCompleted);
+
+            releaseRead.Set();
+            await step.WaitAsync(DeadlockGuardTimeout);
+            Status status = await queuedStatus.WaitAsync(DeadlockGuardTimeout);
+            Assert.Equal(2UL, status.Basic.Commit);
+        }
+        finally
+        {
+            releaseRead.Set();
+        }
+    }
+
     [Fact]
     public async Task EligibleLanesReceiveTurnsBeforeBacklogsDrain()
     {

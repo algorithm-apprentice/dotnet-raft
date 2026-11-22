@@ -139,51 +139,58 @@ public sealed class RaftLogTests
     }
 
     [Fact]
-    public void MaybeAppendMatchesAndCommitsSafely()
+    public void MaybeAppendEntriesMatchesWithoutAdvancingCommit()
     {
         var log = new RaftLog(new MemoryStorage(), NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 2), (3, 3)));
         log.CommitTo(1);
 
-        bool matched = log.MaybeAppend(
+        bool matched = log.MaybeAppendEntries(
             new LogSlice(
                 4,
                 new EntryId(Term: 3, Index: 3),
                 Entries((4, 4), (5, 4))),
-            5,
-            out ulong lastNewIndex);
+            out ulong lastNewIndex,
+            out ulong firstAppendedIndex,
+            out int appendedCount);
 
         Assert.True(matched);
         Assert.Equal(5UL, lastNewIndex);
-        Assert.Equal(5UL, log.Committed);
+        Assert.Equal(4UL, firstAppendedIndex);
+        Assert.Equal(2, appendedCount);
+        Assert.Equal(1UL, log.Committed);
         AssertEntries(
             Entries((1, 1), (2, 2), (3, 3), (4, 4), (5, 4)),
             log.GetEntries(1));
 
-        Assert.False(log.MaybeAppend(
+        Assert.False(log.MaybeAppendEntries(
             new LogSlice(
                 5,
                 new EntryId(Term: 2, Index: 3),
                 Entries((4, 5))),
-            5,
-            out lastNewIndex));
+            out lastNewIndex,
+            out _,
+            out _));
         Assert.Equal(0UL, lastNewIndex);
     }
 
     [Fact]
-    public void MaybeAppendRejectsConflictsWithCommittedEntries()
+    public void MaybeAppendEntriesRejectsConflictsWithCommittedEntries()
     {
         var log = new RaftLog(new MemoryStorage(), NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 2), (3, 3)));
         log.CommitTo(3);
 
-        Assert.Throws<RaftInvariantException>(() => log.MaybeAppend(
+        Assert.Throws<RaftInvariantException>(() => log.MaybeAppendEntries(
             new LogSlice(
                 4,
                 new EntryId(Term: 1, Index: 1),
                 Entries((2, 4))),
-            3,
+            out _,
+            out _,
             out _));
+        Assert.Equal(3UL, log.Committed);
+        AssertEntries(Entries((1, 1), (2, 2), (3, 3)), log.GetEntries(1));
     }
 
     [Fact]
@@ -219,7 +226,7 @@ public sealed class RaftLogTests
         Assert.Equal(5UL, log.GetTerm(104));
         AssertStorageError(StorageError.Unavailable, () => log.GetTerm(105));
 
-        log.Restore(SnapshotAt(110, 6));
+        log.RestoreUncommitted(SnapshotAt(110, 6));
 
         AssertStorageError(StorageError.Compacted, () => log.GetTerm(100));
         AssertStorageError(StorageError.Compacted, () => log.GetTerm(109));
@@ -228,7 +235,7 @@ public sealed class RaftLogTests
     }
 
     [Fact]
-    public void RestoreRequiresNewerSnapshotAndAcknowledgesAtomically()
+    public void NewerSnapshotBecomesAppliedOnlyAfterAcknowledgement()
     {
         MemoryStorage storage = StorageWithSnapshot(3, 1);
         var log = new RaftLog(storage, NullRaftLogger.Instance);
@@ -237,10 +244,12 @@ public sealed class RaftLogTests
         log.AcceptApplying(5, 0, allowUnstable: true);
         log.AppliedTo(5, 0);
 
-        Assert.Throws<RaftInvariantException>(() => log.Restore(SnapshotAt(5, 2)));
+        Assert.Throws<RaftInvariantException>(() => log.RestoreUncommitted(SnapshotAt(5, 2)));
         Assert.Equal(5UL, log.Committed);
 
-        log.Restore(SnapshotAt(8, 3));
+        log.RestoreUncommitted(SnapshotAt(8, 3));
+        Assert.Equal(5UL, log.Committed);
+        log.CommitTo(8);
 
         Assert.Equal(8UL, log.Committed);
         Assert.Equal(9UL, log.FirstIndex);
