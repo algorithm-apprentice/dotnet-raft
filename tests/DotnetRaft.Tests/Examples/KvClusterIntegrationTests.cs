@@ -22,29 +22,9 @@ public sealed class KvClusterIntegrationTests
             CreateNode(2, network),
             CreateNode(3, network),
         ];
-        foreach (NodeHarness node in nodes)
-        {
-            network.Register(node.Host);
-        }
-
         try
         {
-            foreach (NodeHarness node in nodes)
-            {
-                await node.Host.StartAsync(
-                    CancellationToken.None);
-            }
-
-            await WaitUntilAsync(
-                () => nodes.All(node =>
-                    node.State.PhysicalApplied >= 3));
-
-            await nodes[0].Host.CampaignAsync(
-                CancellationToken.None);
-            await WaitUntilAsync(async () =>
-                (await nodes[0].Host.GetStatusAsync(
-                    CancellationToken.None)).Role
-                == RaftRole.Leader);
+            await StartAndElectAsync(network, nodes);
 
             ProposalResponse proposal =
                 await nodes[1].Host.PutAsync(
@@ -259,28 +239,9 @@ public sealed class KvClusterIntegrationTests
             CreateNode(2, network),
             CreateNode(3, network),
         ];
-        foreach (NodeHarness node in nodes)
-        {
-            network.Register(node.Host);
-        }
-
         try
         {
-            foreach (NodeHarness node in nodes)
-            {
-                await node.Host.StartAsync(
-                    CancellationToken.None);
-            }
-
-            await WaitUntilAsync(
-                () => nodes.All(node =>
-                    node.State.PhysicalApplied >= 3));
-            await nodes[0].Host.CampaignAsync(
-                CancellationToken.None);
-            await WaitUntilAsync(async () =>
-                (await nodes[0].Host.GetStatusAsync(
-                    CancellationToken.None)).Role
-                == RaftRole.Leader);
+            await StartAndElectAsync(network, nodes);
 
             Guid requestId = Guid.Parse(
                 "11111111-2222-3333-4444-555555555555");
@@ -335,6 +296,66 @@ public sealed class KvClusterIntegrationTests
                     CancellationToken.None);
                 await DisposeNodeAsync(node);
             }
+        }
+    }
+
+    [Fact]
+    public async Task ConcurrentClientsProduceALinearizableSingleKeyHistory()
+    {
+        var network = new InMemoryNetwork();
+        NodeHarness[] nodes = [CreateNode(1, network), CreateNode(2, network), CreateNode(3, network)];
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var history = new List<RegisterOperation>();
+        var order = 0;
+        try
+        {
+            await StartAndElectAsync(network, nodes);
+            for (var round = 0; round < 4; round++)
+            {
+                var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                Task<RegisterOperation>[] attempts =
+                [
+                    MutateAsync(start.Task, nodes[1].Host, $"round-{round}"),
+                    ReadAsync(start.Task, nodes[0].Host),
+                    MutateAsync(start.Task, nodes[2].Host, null),
+                ];
+                start.SetResult();
+                history.AddRange(await Task.WhenAll(attempts));
+            }
+
+            history.Add(await ReadAsync(Task.CompletedTask, nodes[2].Host));
+            Assert.True(RegisterHistory.IsLinearizable(history), string.Join(Environment.NewLine, history));
+        }
+        finally
+        {
+            await StopAndDisposeNodesAsync(nodes, disposeDirectories: true);
+        }
+
+        async Task<RegisterOperation> MutateAsync(Task start, RaftClusterHost host, string? value)
+        {
+            await start;
+            int invoked = Interlocked.Increment(ref order);
+            if (value is null)
+            {
+                await host.DeleteAsync("register", Guid.NewGuid(), guard.Token);
+            }
+            else
+            {
+                await host.PutAsync("register", value, Guid.NewGuid(), guard.Token);
+            }
+
+            return new RegisterOperation(invoked, Interlocked.Increment(ref order), IsRead: false, value);
+        }
+
+        async Task<RegisterOperation> ReadAsync(Task start, RaftClusterHost host)
+        {
+            await start;
+            int invoked = Interlocked.Increment(ref order);
+            ReadResponse read = await host.ReadAsync("register", guard.Token);
+            int completed = Interlocked.Increment(ref order);
+            Assert.True(read.Linearizable);
+            Assert.Equal(read.Value is not null, read.Found);
+            return new RegisterOperation(invoked, completed, IsRead: true, read.Value);
         }
     }
 
@@ -555,6 +576,24 @@ public sealed class KvClusterIntegrationTests
             state.Dispose();
             storage.Dispose();
         }
+    }
+
+    private static async Task StartAndElectAsync(InMemoryNetwork network, NodeHarness[] nodes)
+    {
+        foreach (NodeHarness node in nodes)
+        {
+            network.Register(node.Host);
+        }
+
+        foreach (NodeHarness node in nodes)
+        {
+            await node.Host.StartAsync(CancellationToken.None);
+        }
+
+        await WaitUntilAsync(() => nodes.All(node => node.State.PhysicalApplied >= 3));
+        await nodes[0].Host.CampaignAsync(CancellationToken.None);
+        await WaitUntilAsync(async () =>
+            (await nodes[0].Host.GetStatusAsync(CancellationToken.None)).Role == RaftRole.Leader);
     }
 
     private static NodeHarness CreateNode(

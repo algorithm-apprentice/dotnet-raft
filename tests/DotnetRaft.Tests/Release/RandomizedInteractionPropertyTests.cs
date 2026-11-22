@@ -48,7 +48,9 @@ public sealed class RandomizedInteractionPropertyTests
         bool asyncStorageWrites,
         ulong seed)
     {
-        var environment = new InteractionEnvironment();
+        const ulong initialIndex = 10;
+        var oracle = new AppliedLogOracle(initialIndex);
+        var environment = new InteractionEnvironment { EntryApplied = oracle.Record };
         environment.Handle(
             "log-level none",
             string.Empty);
@@ -57,7 +59,7 @@ public sealed class RandomizedInteractionPropertyTests
             new InteractionNodeOptions
             {
                 Voters = [1, 2, 3],
-                SnapshotIndex = 10,
+                SnapshotIndex = initialIndex,
                 ElectionTick = 3,
                 HeartbeatTick = 1,
                 MaxInflightMessages = 4,
@@ -68,6 +70,7 @@ public sealed class RandomizedInteractionPropertyTests
                     asyncStorageWrites,
             });
         var random = new XorShift64Star(seed);
+        var leadersByTerm = new Dictionary<ulong, ulong>();
 
         for (var actionNumber = 0;
              actionNumber < 200;
@@ -84,7 +87,8 @@ public sealed class RandomizedInteractionPropertyTests
                     value);
                 AssertInvariants(
                     environment,
-                    asyncStorageWrites);
+                    asyncStorageWrites,
+                    leadersByTerm);
             }
             catch (Exception exception)
             {
@@ -191,6 +195,10 @@ public sealed class RandomizedInteractionPropertyTests
                 }
 
                 break;
+            case <= 247:
+                environment.CrashNode(nodeIndex);
+                environment.RestartNode(nodeIndex);
+                break;
             default:
                 if (((value >> 40) & 1) == 0)
                 {
@@ -216,27 +224,31 @@ public sealed class RandomizedInteractionPropertyTests
             return;
         }
 
-        ProtocolMessage selected =
-            queued[(int)((value >> 24)
-                         % (ulong)queued.Count)];
+        int index = (int)((value >> 24) % (ulong)queued.Count);
+        ProtocolMessage selected = queued[index];
         bool local =
             RaftLocalMessageTargets.IsLocal(
                 selected.From)
             || RaftLocalMessageTargets.IsLocal(
                 selected.To)
             || selected.From == selected.To;
-        bool drop = !local
-            && ((value >> 32) & 1) != 0;
-        environment.DeliverMessages(
-            selected.Type,
-            new InteractionRecipient(
-                selected.To,
-                drop));
+        if (local)
+        {
+            environment.DeliverMessages(selected.Type, new InteractionRecipient(selected.To));
+        }
+        else
+        {
+            environment.DeliverNetworkMessage(
+                index,
+                drop: ((value >> 32) & 3) == 1,
+                duplicate: ((value >> 32) & 3) == 2);
+        }
     }
 
     private static void AssertInvariants(
         InteractionEnvironment environment,
-        bool asyncStorageWrites)
+        bool asyncStorageWrites,
+        Dictionary<ulong, ulong> leadersByTerm)
     {
         foreach (InteractionNode node in
                  environment.Nodes)
@@ -271,19 +283,11 @@ public sealed class RandomizedInteractionPropertyTests
                 Assert.True(
                     progress.Next > progress.Match);
             }
-        }
-
-        foreach (IGrouping<ulong, InteractionNode> leaders
-                 in environment.Nodes
-                     .Where(node =>
-                         node.RawNode.GetBasicStatus()
-                             .Role
-                         == RaftRole.Leader)
-                     .GroupBy(node =>
-                         node.RawNode.GetBasicStatus()
-                             .Term))
-        {
-            Assert.Single(leaders);
+            BasicStatus status = node.RawNode.GetBasicStatus();
+            if (status.Role == RaftRole.Leader && !leadersByTerm.TryAdd(status.Term, status.Id))
+            {
+                Assert.Equal(leadersByTerm[status.Term], status.Id);
+            }
         }
     }
 
@@ -361,6 +365,7 @@ public sealed class RandomizedInteractionPropertyTests
             <= 207 => "unreachable",
             <= 223 => "append-worker",
             <= 239 => "apply-worker",
+            <= 247 => "crash-restart",
             _ => "stabilize",
         };
     }

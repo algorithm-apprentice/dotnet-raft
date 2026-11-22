@@ -50,6 +50,7 @@ internal sealed class InteractionNode
         DotnetRaft.RawNode rawNode,
         MemoryStorage storage,
         RaftConfig config,
+        InteractionNodeOptions options,
         Snapshot applicationSnapshot)
     {
         ArgumentNullException.ThrowIfNull(rawNode);
@@ -60,6 +61,7 @@ internal sealed class InteractionNode
         RawNode = rawNode;
         Storage = storage;
         Config = config;
+        Options = options;
         _applicationSnapshot =
             applicationSnapshot.Clone();
     }
@@ -69,6 +71,8 @@ internal sealed class InteractionNode
     internal MemoryStorage Storage { get; }
 
     internal RaftConfig Config { get; }
+
+    internal InteractionNodeOptions Options { get; }
 
     internal int AppendWorkCount => _appendWork.Count;
 

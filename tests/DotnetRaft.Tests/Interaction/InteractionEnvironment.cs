@@ -20,6 +20,7 @@ internal sealed class InteractionEnvironment
     private readonly int _stabilizationLimit;
     private readonly List<InteractionNode> _nodes = [];
     private readonly List<Message> _messages = [];
+    private readonly HashSet<ulong> _crashed = [];
     private readonly InteractionOutput _output = new();
 
     internal InteractionEnvironment(
@@ -49,6 +50,10 @@ internal sealed class InteractionEnvironment
 
     internal string CurrentOutput =>
         _output.ToString();
+
+    internal Predicate<Message>? NetworkLinkIsOpen { get; set; }
+
+    internal Action<ulong, Entry>? EntryApplied { get; init; }
 
     internal string Handle(
         string directive,
@@ -147,42 +152,84 @@ internal sealed class InteractionEnvironment
                     applicationSnapshot);
             }
 
-            var config = new RaftConfig
-            {
-                Id = id,
-                ElectionTick = options.ElectionTick,
-                HeartbeatTick = options.HeartbeatTick,
-                Storage = storage,
-                Applied = options.SnapshotIndex,
-                AsyncStorageWrites =
-                    options.AsyncStorageWrites,
-                MaxSizePerMessage = ulong.MaxValue,
-                MaxCommittedSizePerReady =
-                    options.MaxCommittedSizePerReady,
-                MaxUncommittedEntriesSize =
-                    ulong.MaxValue,
-                MaxInflightMessages =
-                    options.MaxInflightMessages,
-                CheckQuorum = options.CheckQuorum,
-                PreVote = options.PreVote,
-                ReadOnlyOption =
-                    options.ReadOnlyOption,
-                Logger = _output,
-                DisableConfChangeValidation =
-                    options.DisableConfChangeValidation,
-                StepDownOnRemoval =
-                    options.StepDownOnRemoval,
-            };
-            var rawNode = new DotnetRaft.RawNode(
-                config,
-                _ => 0);
-            _nodes.Add(
-                new InteractionNode(
-                    rawNode,
-                    storage,
-                    config,
-                    applicationSnapshot));
+            _nodes.Add(CreateNode(id, storage, options, applicationSnapshot));
         }
+    }
+
+    internal void CrashNode(int nodeIndex)
+    {
+        ulong id = GetNode(nodeIndex).Config.Id;
+        if (!_crashed.Add(id))
+        {
+            throw new InvalidOperationException($"Node {id} is already crashed.");
+        }
+
+        _messages.RemoveAll(message => message.From == id || message.To == id);
+    }
+
+    internal void RestartNode(int nodeIndex)
+    {
+        InteractionNode node = GetNode(nodeIndex);
+        ulong id = node.Config.Id;
+        if (!_crashed.Contains(id))
+        {
+            throw new InvalidOperationException($"Node {id} has not crashed.");
+        }
+
+        // Keep only what the mock storage and application published. A new
+        // instance has no in-flight storage work, responses, or unstable log.
+        Snapshot application = node.GetApplicationSnapshot();
+        HardState? persisted = node.Storage.GetInitialState().HardState;
+        ulong commit = persisted?.Commit ?? node.Storage.GetFirstIndex() - 1;
+        if (commit < application.Metadata.Index)
+        {
+            // Independent apply can publish a stable, committed entry
+            // before a commit-only append request runs. Repair only commit,
+            // and only from the retained physical application boundary.
+            if (persisted is null
+                || persisted.Term < application.Metadata.Term
+                || application.Metadata.Index > node.Storage.GetLastIndex()
+                || node.Storage.GetTerm(application.Metadata.Index) != application.Metadata.Term)
+            {
+                throw new InvalidOperationException("The recovered application is not covered by durable Raft state.");
+            }
+
+            persisted.Commit = application.Metadata.Index;
+            node.Storage.SetHardState(persisted);
+        }
+
+        _nodes[nodeIndex] = CreateNode(id, node.Storage, node.Options, application);
+        _messages.RemoveAll(message => message.From == id || message.To == id);
+        _crashed.Remove(id);
+    }
+
+    private InteractionNode CreateNode(
+        ulong id,
+        MemoryStorage storage,
+        InteractionNodeOptions options,
+        Snapshot applicationSnapshot)
+    {
+        var config = new RaftConfig
+        {
+            Id = id,
+            ElectionTick = options.ElectionTick,
+            HeartbeatTick = options.HeartbeatTick,
+            Storage = storage,
+            Applied = applicationSnapshot.Metadata.Index,
+            AsyncStorageWrites = options.AsyncStorageWrites,
+            MaxSizePerMessage = ulong.MaxValue,
+            MaxCommittedSizePerReady = options.MaxCommittedSizePerReady,
+            MaxUncommittedEntriesSize = ulong.MaxValue,
+            MaxInflightMessages = options.MaxInflightMessages,
+            CheckQuorum = options.CheckQuorum,
+            PreVote = options.PreVote,
+            ReadOnlyOption = options.ReadOnlyOption,
+            Logger = _output,
+            DisableConfChangeValidation = options.DisableConfChangeValidation,
+            StepDownOnRemoval = options.StepDownOnRemoval,
+        };
+        var rawNode = new DotnetRaft.RawNode(config, _ => 0);
+        return new InteractionNode(rawNode, storage, config, options, applicationSnapshot);
     }
 
     internal void Campaign(int nodeIndex)
@@ -419,6 +466,23 @@ internal sealed class InteractionEnvironment
             beforeHandle: null);
     }
 
+    internal void DeliverNetworkMessage(int index, bool drop = false, bool duplicate = false)
+    {
+        Message message = _messages[index];
+        if (IsLocalMessage(message))
+        {
+            throw new ArgumentException("Only network messages can be reordered, dropped, or duplicated.", nameof(index));
+        }
+
+        drop |= !CanDeliver(message);
+        if (!drop && duplicate)
+        {
+            _messages.Add(message.Clone());
+        }
+
+        FinishDelivery(index, drop);
+    }
+
     internal void Stabilize(params int[] nodeIndexes)
     {
         int[] selected = nodeIndexes.Length == 0
@@ -445,7 +509,7 @@ internal sealed class InteractionEnvironment
             {
                 InteractionNode node =
                     GetNode(nodeIndex);
-                if (!node.RawNode.HasReady())
+                if (_crashed.Contains(node.Config.Id) || !node.RawNode.HasReady())
                 {
                     continue;
                 }
@@ -485,7 +549,7 @@ internal sealed class InteractionEnvironment
             {
                 InteractionNode node =
                     GetNode(nodeIndex);
-                if (node.AppendWorkCount == 0)
+                if (_crashed.Contains(node.Config.Id) || node.AppendWorkCount == 0)
                 {
                     continue;
                 }
@@ -507,7 +571,7 @@ internal sealed class InteractionEnvironment
             {
                 InteractionNode node =
                     GetNode(nodeIndex);
-                if (node.ApplyWorkCount == 0)
+                if (_crashed.Contains(node.Config.Id) || node.ApplyWorkCount == 0)
                 {
                     continue;
                 }
@@ -1368,41 +1432,44 @@ internal sealed class InteractionEnvironment
                 }
 
                 beforeHandle?.Invoke();
-                if (recipient.Drop)
-                {
-                    _output.Write("dropped: ");
-                }
-
-                _output.WriteLine(
-                    RaftDescriptions.DescribeMessage(
-                        message));
-                if (recipient.Drop)
-                {
-                    _messages.RemoveAt(index);
-                    handled++;
-                    continue;
-                }
-
-                InteractionNode destination =
-                    GetNodeById(message.To);
-                if (IsSafelyRejectedUnknownResponse(
-                        destination,
-                        message))
-                {
-                    _output.WriteLine(
-                        $"Response sender {message.From} is not a known peer.");
-                    _messages.RemoveAt(index);
-                    handled++;
-                    continue;
-                }
-
-                destination.RawNode.Step(message);
-                _messages.RemoveAt(index);
+                FinishDelivery(index, recipient.Drop || !CanDeliver(message));
                 handled++;
             }
         }
 
         return handled;
+    }
+
+    private bool CanDeliver(Message message)
+    {
+        return !_crashed.Contains(message.From)
+            && !_crashed.Contains(message.To)
+            && (IsLocalMessage(message) || NetworkLinkIsOpen?.Invoke(message) != false);
+    }
+
+    private void FinishDelivery(int index, bool drop)
+    {
+        Message message = _messages[index];
+        if (drop)
+        {
+            _output.Write("dropped: ");
+        }
+
+        _output.WriteLine(RaftDescriptions.DescribeMessage(message));
+        if (!drop)
+        {
+            InteractionNode destination = GetNodeById(message.To);
+            if (IsSafelyRejectedUnknownResponse(destination, message))
+            {
+                _output.WriteLine($"Response sender {message.From} is not a known peer.");
+            }
+            else
+            {
+                destination.RawNode.Step(message);
+            }
+        }
+
+        _messages.RemoveAt(index);
     }
 
     private static bool IsSafelyRejectedUnknownResponse(
@@ -1431,7 +1498,7 @@ internal sealed class InteractionEnvironment
             || RaftMessageTargets.IsLocal(message.To);
     }
 
-    private static void ApplyEntry(
+    private void ApplyEntry(
         InteractionNode node,
         Entry entry)
     {
@@ -1481,6 +1548,7 @@ internal sealed class InteractionEnvironment
                 configuration,
                 ByteString.CopyFrom(data));
         node.SetApplicationSnapshot(snapshot);
+        EntryApplied?.Invoke(node.Config.Id, entry.Clone());
     }
 
     private static void Tick(
