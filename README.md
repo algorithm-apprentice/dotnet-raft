@@ -56,7 +56,7 @@ three nodes, start the [gRPC KV example](https://github.com/algorithm-apprentice
 
 ## Documentation
 
-- [Offline Raft learning guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/raft-learning-guide.md)
+- [Offline Raft learning guide and implementation deep dives](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/raft-learning-guide.md)
 - [Public API and host responsibilities](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
 - [Runnable gRPC key-value cluster example](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.KvCluster)
 - [Durable SQLite storage package](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/src/DotnetRaft.Sqlite)

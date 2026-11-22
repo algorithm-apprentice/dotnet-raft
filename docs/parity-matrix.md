@@ -72,3 +72,8 @@ These are documented design choices, not unknown parity gaps:
 
 The checked-in expected output uses the accepted C# descriptions and logger
 wording while preserving every upstream command and input.
+
+The [testing lab](learning/05-concurrency-and-testing.md) is supplemental
+to the pinned corpus. It describes the 6.824-style partition and restart
+scenarios, randomized delivery and applied-log checks, and bounded KV
+history checking. It is not a claim of MIT grader compatibility.

@@ -17,6 +17,20 @@ You do not need the Raft paper or an internet connection while following this
 guide. The paper remains useful background, but the explanations and all
 required links below are local to the repository.
 
+## Implementation deep dives
+
+Use these chapters when you want to derive the rules, step through their C#
+implementation, and check a worked scenario instead of just surveying the
+components. Each chapter pairs the reasoning with local code and tests.
+
+| Chapter | What to work through |
+|---|---|
+| [1. Safety and elections](learning/01-safety-and-elections.md) | Derive quorum intersection, vote persistence, leader completeness, and the current-term rule using a concrete counterexample. |
+| [2. Log and replication](learning/02-log-and-replication.md) | Repair a divergent suffix by hand, then follow progress windows, the stable/unstable seam, and snapshots. |
+| [3. Ready and recovery](learning/03-ready-and-recovery.md) | Trace durable effects, async ABA protection, and both crash orders across consensus and application storage. |
+| [4. Membership, reads, and liveness](learning/04-membership-reads-and-liveness.md) | Work out joint quorum arithmetic and follow a read from leadership confirmation to physical application. |
+| [5. Concurrency and testing](learning/05-concurrency-and-testing.md) | Compare the local and distributed interleavings, run the 6.824-style lab, and check a concurrent KV history. |
+
 ## 1. Learning goals
 
 After completing the guide, you should be able to:
