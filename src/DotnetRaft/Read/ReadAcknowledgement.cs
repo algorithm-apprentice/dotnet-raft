@@ -9,8 +9,8 @@ namespace DotnetRaft.Read;
 // A position in one leader's read stream, not a log index or client context.
 internal readonly struct ReadAcknowledgement
 {
-    // The all-zero default must never be confused with a real, positive
-    // position. Nullable ReadAcknowledgement represents an empty context.
+    // Default means no evidence inside dispatch. It has no readable position
+    // and must never be passed to the tracker as an acknowledgement.
     private readonly ulong position;
 
     private ReadAcknowledgement(ulong position)
@@ -21,6 +21,8 @@ internal readonly struct ReadAcknowledgement
     internal ulong Position => position != 0
         ? position
         : throw new RaftInvariantException("Read acknowledgement was not initialized.");
+
+    internal bool IsPresent => position != 0;
 
     internal static ReadAcknowledgement? Parse(
         ByteString context,

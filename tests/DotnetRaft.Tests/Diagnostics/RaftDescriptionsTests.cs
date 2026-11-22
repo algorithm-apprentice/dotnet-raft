@@ -303,7 +303,7 @@ public sealed class RaftDescriptionsTests
             Index = 4,
             Data = ByteString.CopyFromUtf8("x"),
         };
-        var ready = new Ready(
+        Ready ready = Ready.FromDetachedWork(
             new SoftState(1, RaftRole.Leader),
             new HardState
             {
@@ -353,7 +353,7 @@ public sealed class RaftDescriptionsTests
     [Fact]
     public void EmptyReadyAndEntryCollectionsAreExact()
     {
-        var ready = new Ready(
+        Ready ready = Ready.FromDetachedWork(
             null,
             null,
             [],

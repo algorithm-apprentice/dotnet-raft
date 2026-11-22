@@ -1,7 +1,7 @@
 # Parse Raft input once, at the boundary that owns it
 
-Status: membership lookup, ReadIndex acknowledgement, and Append parsing
-are implemented.
+Status: all seven slices are implemented. The evidence below separates
+hot-path allocations, durable transactions, and end-to-end behavior.
 [ADR 0008](../adr/0008-protocol-input-hardening.md)
 owns the existing rejection and fault semantics; the design must preserve
 them rather than move errors from one layer to another.
@@ -72,7 +72,7 @@ position; recording it does not regress progress or release a read again.
    A lower-term response, a response ignored by a follower, or a
    higher-term response that steps the node down must not parse an unused
    context. Unknown responses keep the existing facade-specific behavior.
-2. Pass `ReadAcknowledgement?` into dispatch: null means no read evidence,
+2. Pass `ReadAcknowledgement` into dispatch: its default means no read evidence,
    not a zero position to record. Downstream heartbeat handling accepts the
    parsed position, not the original context. The original protobuf stays
    available for dispatch and diagnostics; it is not the handler's source
@@ -142,14 +142,87 @@ after-persistence reply protocol in both storage modes. The
 and [log regressions](../../tests/DotnetRaft.Tests/Core/RaftLogTests.cs)
 must continue to pass without changing compatibility approvals.
 
-## Follow-up decisions, not part of these slices
+## Slice 4: use the parsed configuration proposal
 
-| Candidate | Design direction and gate |
-|---|---|
-| Configuration proposals | Retain the parsed configuration alongside the exact original entry bytes for admission and tracing in the same transition. Do not reserialize forwarded or accepted entries. Applying committed entries and replaying after restart are separate boundaries; future membership cannot be decided at proposal parsing time. |
-| Incoming snapshots | Prepare an install decision and the configuration to install only when the term/role path uses a new snapshot. Already-matching prefixes must not install or reject unused configuration. Check that preflight did not mutate the current tracker and that older delivered application work retains its configuration. |
-| SQLite `GetTerm` | A term lookup currently also validates the payload. A narrower query must not silently stop detecting corruption the current contract catches. Measure large entries, then review integrity at open, on entry reads, and at transaction publication before choosing any cache or query change. |
-| Ready copies and KV throughput | First measure allocations, owner queue time, per-peer send waits, and application transactions. Preserve detached outputs, batch identity, durability, and post-application success. Do not combine a performance change with this input-boundary refactor. |
+Keep the original protobuf entry for forwarding and append. Keep the parsed
+change for admission and diagnostics in the same transition. The legacy
+format contributes one operation even when its node ID is zero. An empty
+V2 list is an admission signal; this is not the same as deciding how to
+apply a committed transition. If policy replaces an entry with a no-op,
+do not trace that configuration as proposed. Do not emit a proposal trace
+after quota rejection. A local typed API should not have to decode what it
+just encoded; the automatic joint exit also starts with a typed value.
+
+**Gate:** a queued caller cannot mutate the retained configuration, malformed
+peer proposals still fail before dispatch, accepted and forwarded entries
+retain their exact bytes, and existing admission and trace ordering tests
+continue to pass. Application and replay are separate boundaries.
+
+## Slice 5: prepare the incoming snapshot decision once
+
+Only the term/role route that can process a snapshot prepares it. The
+decision is ignore, advance commit through a matching tuple, or install a
+new snapshot with a detached `ConfigurationChangeResult`. Building that
+result cannot mutate the live tracker. Do not decode or install unused
+configuration for a matching tuple or an obsolete snapshot. Wrap errors
+from a necessary configuration build as peer input errors before activation.
+
+Consume the decision in the same owner turn. Stepping down or setting a
+leader hint doesn't change the committed index or the logical log prefix;
+valid host compaction cannot delete an index above the current commit.
+Installation must still retain the old configuration for previously
+delivered application work. Snapshot completion is a different, later
+transition: retain its exact-index check and re-evaluate the live tracker.
+
+**Gate:** exercise stale, matching, rejected and installed snapshots; prove
+matching does not inspect unused membership or repeat the term lookup;
+retain configuration-before-commit trace order and the two-mode regressions
+for older delivered work and stale acknowledgements.
+
+## Slice 6: project SQLite entry identity without materializing command data
+
+`GetTerm` must still reject a row whose protobuf is malformed or whose term
+or index disagrees with its SQLite columns. Selecting only `entry_term`, or
+caching a previously checked term without re-reading the record, would
+weaken that contract. Keep all integrity checks at open, reads, and
+publication. Project the two scalar fields with the protobuf reader and skip
+opaque command data without constructing an `Entry` or `ByteString`. Unusual
+tags fall back to the generated parser rather than relying on its generic
+skip behavior for unrecognized wire types. The `WITHOUT ROWID` table still
+requires the driver to materialize the BLOB; `GetTerm` is not a metadata-only
+query. Keep full decoding for an entry read that returns the command.
+
+**Gate:** compare with the generated parser on absent and repeated fields,
+unknown fields, truncated and invalid encodings, and unsigned boundaries.
+Test corrupted interior entries and reopen/rollback on real SQLite files.
+Measure small and large records against the same baseline. Keep this
+optimization only if the narrower parse has equivalent integrity and a
+worthwhile allocation gain.
+
+## Slice 7: measure Ready and the KV host separately
+
+Measure allocations with the same deterministic Ready workload. Find a
+handoff where objects already detached from the core can move to `Ready`
+without an additional clone. Do not alias the hard-state baseline, the
+synchronous acknowledgement, mirrored async fields, or worker responses.
+Do not clear outputs before the existing publication point or change any
+trace failure semantics.
+
+Measure the node queue, per-peer sends, and SQLite application writes
+separately in the KV host. Do not change the host's single-consumer ordering,
+durability mode, or success-after-application contract to win a microbenchmark.
+The local three-process profile found millisecond application commits and
+microsecond proposal queue waits. Batch only consecutive ordinary entries
+already delivered in one Ready, capped at 64 entries per transaction; do
+not wait for more work. A configuration entry, snapshot, or end of Ready
+is a boundary. Preserve log order and the first durable request result;
+publish the last physical index with all effects and resolve waiters only
+after commit. A failed transaction exposes no results or cursor advance
+from its batch. Keep network delivery and Raft persistence unchanged.
+
+**Gate:** compare one and several concurrent clients with the same
+three-node workload, and verify duplicate/conflicting IDs within a batch,
+rollback and reopen, and the existing ReadIndex and restart behavior.
 
 ## Pre-implementation review
 
@@ -226,4 +299,63 @@ terms for the same uncommitted range. Entry-count checksums agree.
 | 256 | 21,401 → 19,217 | 96,086 → 89,502 |
 
 These are allocation observations for an in-memory workload; elapsed
-time varied across runs. The stable read-side and SQLite paths are unchanged.
+time varied across runs. This slice did not change SQLite or stable reads.
+
+### Configuration, snapshots, and Ready
+
+The peer configuration tests cover both encodings, exact forwarding,
+unknown fields, and traces for accepted entries only. The snapshot test
+counts one local term lookup in both the matching and installation paths;
+when matching, it supplies configuration that would be rejected on install.
+Ready tests mutate mirrored persistence and application entries and verify
+that neither worker requests, completions, nor Raft's own cursors change.
+
+Compared with `ea18c99`, allocation per operation in the Release refactor
+workloads fell from 6,050 to 5,410 bytes for a proposal cycle, from 2,528 to
+2,096 for follower heartbeats, and from 5,400 to 4,752 for safe reads.
+Checksums matched. Timing varied materially, including on repeated runs
+of the same binary; the comparison is evidence about allocation.
+
+### SQLite term projection
+
+On the same Mac and SDK, the warm `GetTerm` probe used five samples after
+256 warm-up calls. Checksums matched. This removes a managed payload
+copy, not the SQLite BLOB read, and is not a claim of lower latency for
+small entries.
+
+| Command size | Before (bytes/op) | After (bytes/op) |
+|---:|---:|---:|
+| 32 B | 1,776 | 1,544 |
+| 64 KiB | 132,784 | 67,048 |
+| 1 MiB | 2,101,320 | 1,050,136 |
+
+Interior corruption tests cover mismatched term/index, a truncated field,
+and invalid tags and groups. Reopen and transaction-publication checks
+still use the same identity rule. Alternate encodings are compared with
+the generated parser on actual stored rows.
+
+### Durable KV application batches
+
+In the local three-process loopback probe, requests were 32-byte values
+on fresh files, with one and eight concurrent writers and 320 measured
+commands per phase. The instrumented baseline had an application
+transaction per command. The instrumented candidate completed the
+eight-writer phase with 80 application transactions for 320 commands;
+both made 320 transactions at one writer. Leader proposal queue, per-peer
+send, Raft persistence, and application timings were sampled separately.
+In the baseline the median queue wait was tens of microseconds, whereas
+the median application transaction took about six to seven milliseconds.
+
+Two alternating **uninstrumented** comparisons yielded about 27–28 ops/s
+at one writer and 47 ops/s on the baseline versus 42–84 on the candidate
+at eight writers. The variation does not justify a general throughput
+claim. The reason to retain batching is the directly observed reduction
+in transactions without extra waiting or a change to durability. The
+integration tests prove that a malformed command rolls back its batch
+without releasing waiters, and that the size cap and configuration
+entries both end a transaction. No transport or scheduler change was made.
+
+The final verification passed 1,131 tests in each of Debug and Release,
+formatting, all four Counter runs, the real-process durable KV smoke, and
+both benchmark smokes. The dispatch transcript, public API, protobuf wire,
+and SQLite schema approvals were unchanged.

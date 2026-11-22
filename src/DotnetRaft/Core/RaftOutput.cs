@@ -85,6 +85,12 @@ internal sealed class RaftOutput
         return CloneMessages(messagesAfterAppend);
     }
 
+    internal void Clear()
+    {
+        messages.Clear();
+        messagesAfterAppend.Clear();
+    }
+
     private static bool RequiresDurableState(MessageType type)
     {
         return type is

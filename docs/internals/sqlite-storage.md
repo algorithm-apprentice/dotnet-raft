@@ -36,6 +36,14 @@ Reads then check the key, separate term, and protobuf against each other for
 the entries they decode. A size-limited page checks lengths before
 materializing the next payload, so it need not decode an unused suffix.
 
+For `GetTerm`, the backend still reads the row and compares the term and
+index with the protobuf. The common wire encodings let it skip the opaque
+command bytes without creating an `Entry` or copying them into a
+`ByteString`; unusual tags use the generated parser. Reopen still checks
+the retained endpoints, and transactions still check the resulting tail
+before publishing. The term-only path is not a query of the SQL term
+column in isolation.
+
 ## Atomic Ready publication
 
 `PersistReady` and `PersistStorageAppend` share one backend transaction rule.

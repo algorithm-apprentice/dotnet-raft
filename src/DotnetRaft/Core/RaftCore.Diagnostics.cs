@@ -2,8 +2,6 @@ using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Tracker;
 
-using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
-
 namespace DotnetRaft.Core;
 
 internal sealed partial class RaftCore
@@ -90,28 +88,18 @@ internal sealed partial class RaftCore
     }
 
     private void TraceConfigurationProposals(
-        IReadOnlyList<Entry> entries)
+        Entry[] entries,
+        ParsedProposal proposal)
     {
         if (traceSink is null)
         {
             return;
         }
 
-        foreach (Entry entry in entries)
+        for (int offset = 0; offset < entries.Length; offset++)
         {
-            string? detail = entry.Type switch
-            {
-                EntryType.EntryConfChange =>
-                    RaftDescriptions.DescribeConfChange(
-                        ProtocolConfChange.Parser.ParseFrom(
-                            entry.Data)),
-                EntryType.EntryConfChangeV2 =>
-                    RaftDescriptions.DescribeConfChange(
-                        ConfChangeV2.Parser.ParseFrom(
-                            entry.Data)),
-                _ => null,
-            };
-            if (detail is not null)
+            if (entries[offset].Type != EntryType.EntryNormal
+                && proposal.DescribeConfigurationAt(offset) is { } detail)
             {
                 Trace(
                     RaftTraceEventType.ConfigurationProposed,

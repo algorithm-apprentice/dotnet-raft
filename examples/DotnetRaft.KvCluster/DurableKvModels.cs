@@ -109,6 +109,14 @@ public static class DurableKvCommandCodec
         return Fingerprint(Encode(command));
     }
 
+    internal static (KvCommand Command, ByteString Fingerprint) ParseForApplication(ReadOnlySpan<byte> data)
+    {
+        KvCommand command = Decode(data);
+        // Persist the existing canonical identity, not the spelling of the
+        // input JSON. Decode already checked the command's invariants.
+        return (command, Fingerprint(JsonSerializer.SerializeToUtf8Bytes(command, Options)));
+    }
+
     internal static ByteString Fingerprint(ReadOnlySpan<byte> encodedCommand)
     {
         return ByteString.CopyFrom(SHA256.HashData(encodedCommand));

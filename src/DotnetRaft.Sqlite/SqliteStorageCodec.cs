@@ -80,7 +80,7 @@ internal static class SqliteStorageCodec
         ulong expectedTerm,
         string description)
     {
-        var entry = new Entry();
+        Entry entry;
         try
         {
             entry = Entry.Parser.ParseFrom(payload);
@@ -92,14 +92,62 @@ internal static class SqliteStorageCodec
                 exception);
         }
 
-        if (entry.Index != expectedIndex
-            || entry.Term != expectedTerm)
+        RequireEntryIdentity(entry.Index, entry.Term, expectedIndex, expectedTerm, description);
+        return entry;
+    }
+
+    internal static ulong ReadEntryTerm(byte[] payload, ulong expectedIndex, ulong expectedTerm, string description)
+    {
+        // Use the protobuf reader for framing, including unknown fields. Do not
+        // construct the command ByteString merely to check the entry identity.
+        using var input = new CodedInputStream(payload);
+        const uint termTag = Entry.TermFieldNumber << 3;
+        const uint indexTag = Entry.IndexFieldNumber << 3;
+        const uint typeTag = Entry.TypeFieldNumber << 3;
+        const uint dataTag = (Entry.DataFieldNumber << 3) | (uint)WireFormat.WireType.LengthDelimited;
+        ulong index = 0;
+        ulong term = 0;
+        try
         {
-            throw Unknown(
-                $"{description} payload identifies ({entry.Index}, {entry.Term}) instead of ({expectedIndex}, {expectedTerm}).");
+            for (uint tag = input.ReadTag(); tag != 0; tag = input.ReadTag())
+            {
+                switch (tag)
+                {
+                    case termTag:
+                        term = input.ReadUInt64();
+                        break;
+                    case indexTag:
+                        index = input.ReadUInt64();
+                        break;
+                    case typeTag:
+                        _ = input.ReadEnum();
+                        break;
+                    case dataTag:
+                        input.SkipLastField();
+                        break;
+                    default:
+                        // Keep the generated parser's behavior for unusual wire
+                        // forms (including groups and invalid wire types).
+                        return ParseEntry(payload, expectedIndex, expectedTerm, description).Term;
+                }
+            }
+        }
+        catch (InvalidProtocolBufferException exception)
+        {
+            throw Unknown($"{description} is not a valid entry.", exception);
         }
 
-        return entry;
+        RequireEntryIdentity(index, term, expectedIndex, expectedTerm, description);
+        return term;
+    }
+
+    private static void RequireEntryIdentity(ulong index, ulong term, ulong expectedIndex, ulong expectedTerm, string description)
+    {
+        if (index != expectedIndex || term != expectedTerm)
+        {
+            throw Unknown(
+                $"{description} payload identifies ({index}, {term}) instead of ({expectedIndex}, {expectedTerm}).");
+        }
     }
 
     internal static List<Entry> CloneAndValidateEntries(

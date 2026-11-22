@@ -229,7 +229,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                         $"Entry index {index} is unavailable.");
                 }
 
-                return ReadEntry(index).Term;
+                return ReadEntryTerm(index);
             });
     }
 
@@ -493,12 +493,11 @@ public sealed class SqliteStorage : IStorage, IDisposable
                         $"Snapshot index {index} exceeds last index {metadata.LastIndex}.");
                 }
 
-                StoredEntry entry =
-                    ReadEntry(index);
+                ulong term = ReadEntryTerm(index);
                 Snapshot next =
                     metadata.Snapshot.Clone();
                 next.Metadata.Index = index;
-                next.Metadata.Term = entry.Term;
+                next.Metadata.Term = term;
                 if (ownedConf is not null)
                 {
                     next.Metadata.ConfState =
@@ -539,7 +538,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                 }
 
                 ulong term =
-                    ReadEntry(compactIndex).Term;
+                    ReadEntryTerm(compactIndex);
                 using (SqliteCommand delete =
                        CreateCommand(
                            """
@@ -1083,11 +1082,12 @@ public sealed class SqliteStorage : IStorage, IDisposable
             }
         }
 
-        _ = ReadEntry(metadata.CompactedIndex);
+        ulong boundaryTerm = ReadEntryTerm(metadata.CompactedIndex);
+        ulong lastTerm = boundaryTerm;
         if (metadata.LastIndex
             != metadata.CompactedIndex)
         {
-            _ = ReadEntry(metadata.LastIndex);
+            lastTerm = ReadEntryTerm(metadata.LastIndex);
         }
 
         if (metadata.PendingSnapshotIndex
@@ -1103,7 +1103,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                     "SQLite Raft pending snapshot marker is invalid.");
             }
         }
-        ValidateResultingState(metadata);
+        ValidateResultingState(metadata, lastTerm);
     }
 
     private Metadata PersistBatch(
@@ -1276,7 +1276,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
         };
     }
 
-    private StoredEntry ReadEntry(ulong index)
+    private ulong ReadEntryTerm(ulong index)
     {
         using SqliteCommand command =
             CreateCommand(
@@ -1303,8 +1303,8 @@ public sealed class SqliteStorage : IStorage, IDisposable
             SqliteStorageCodec.DecodeUInt64(
                 reader.GetFieldValue<byte[]>(0),
                 $"Entry {index} term");
-        Entry entry =
-            SqliteStorageCodec.ParseEntry(
+        ulong parsedTerm =
+            SqliteStorageCodec.ReadEntryTerm(
                 reader.GetFieldValue<byte[]>(1),
                 index,
                 term,
@@ -1315,9 +1315,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                 $"Stored entry {index} is duplicated.");
         }
 
-        return new StoredEntry(
-            term,
-            entry);
+        return parsedTerm;
     }
 
     private void WriteEntry(
@@ -1470,7 +1468,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
 
                     Metadata updated =
                         mutation(current);
-                    ValidateResultingState(updated);
+                    ValidateResultingState(updated, ReadEntryTerm(updated.LastIndex));
                     WriteMetadata(
                         current,
                         updated);
@@ -1564,14 +1562,13 @@ public sealed class SqliteStorage : IStorage, IDisposable
         }
     }
 
-    private void ValidateResultingState(
-        Metadata metadata)
+    private static void ValidateResultingState(
+        Metadata metadata,
+        ulong lastTerm)
     {
-        StoredEntry last =
-            ReadEntry(metadata.LastIndex);
         ulong requiredTerm = Math.Max(
             metadata.Snapshot.Metadata.Term,
-            last.Term);
+            lastTerm);
         if (metadata.HardState is null)
         {
             if (requiredTerm != 0
@@ -1811,10 +1808,6 @@ public sealed class SqliteStorage : IStorage, IDisposable
     ulong CompactedIndex,
     ulong LastIndex,
     ulong? PendingSnapshotIndex);
-
-    private sealed record StoredEntry(
-        ulong Term,
-        Entry Entry);
 
     private sealed record SchemaObject(
         string Type,

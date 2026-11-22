@@ -124,6 +124,31 @@ public sealed class RawNodeAsyncStorageTests
     }
 
     [Fact]
+    public async Task DiagnosticEntriesAndWorkerCompletionsDoNotAlias()
+    {
+        (DotnetRawNode node, MemoryStorage storage) = CreateNode();
+        await BecomeLeaderAsync(node, storage);
+        node.Propose("command"u8);
+        Ready ready = node.Ready();
+        Message append = StorageMessage(ready, MessageType.MsgStorageAppend);
+        ulong index = Assert.Single(append.Entries).Index;
+
+        ready.Entries[0].Index = index + 10;
+        Assert.Equal(index, append.Entries[0].Index);
+        await ProcessReadyAsync(node, storage, ready);
+        Ready committed = node.Ready();
+        Message apply = StorageMessage(committed, MessageType.MsgStorageApply);
+        Message completion = Assert.Single(apply.Responses);
+        committed.CommittedEntries[0].Index = index + 11;
+        Assert.Equal(index, apply.Entries[0].Index);
+        apply.Entries[0].Index = index + 12;
+        Assert.Equal(index, completion.Entries[0].Index);
+
+        node.Step(completion);
+        Assert.Equal(index, node.GetBasicStatus().Applied);
+    }
+
+    [Fact]
     public async Task ReadyPipelinesNewUnstableEntries()
     {
         (DotnetRawNode node, MemoryStorage storage) = CreateNode();

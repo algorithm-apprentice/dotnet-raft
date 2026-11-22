@@ -15,7 +15,7 @@ do not share a transaction. The app can nevertheless advance its own cursor
 atomically with the effects and membership at that index.
 
 [`SqliteKeyValueStateMachine`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.cs)
-applies one entry at a time, checking it is the next index. The
+applies entries in order, checking each is the next index. The
 [schema approval](../../tests/DotnetRaft.Tests/Examples/TestData/DurableApplicationSchema.approved.sql)
 records the exact tables; the design depends on the cursor, configuration,
 and command result committing together, not on a specific SQL listing here.
@@ -28,10 +28,10 @@ the same host phases in the KV example:
 
 | Phase | Counter | Durable KV host |
 |---|---|---|
-| Submit | `Program` calls `RawNode.Propose` directly. | [`Program` maps `PUT /kv/{key}`](../../examples/DotnetRaft.KvCluster/Program.cs#L85) to `PutAsync`. [`RaftClusterHost.MutateAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L503) registers and awaits a pending result; [`SubmitProposalAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L648) calls `RaftNode.ProposeAsync`. A follower can forward the proposal. |
-| Save and send | `CounterCluster.ProcessReady` writes to memory and enqueues peer messages. | [`ProcessReadyAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L374) calls `SqliteStorage.PersistReady` for `raft.db` before using the gRPC transport. Neither operation sets the KV value. |
-| Apply and finish the caller | `CounterReplica.Apply` updates the local counter. | [`ApplyEntryAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L430) calls [`SqliteKeyValueStateMachine.ApplyCommand`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.cs#L150), which commits the value, request result, and physical cursor to `application.db` together. Then `pendingProposals.Complete` releases the local waiter so the endpoint can return success. |
-| Acknowledge to Raft | `ProcessReady` calls `Advance` on that batch. | [`RunReadyLoopAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L353) calls `AdvanceAsync` after `ProcessReadyAsync`. This is not what releases the HTTP waiter. |
+| Submit | `Program` calls `RawNode.Propose` directly. | [`Program` maps `PUT /kv/{key}`](../../examples/DotnetRaft.KvCluster/Program.cs#L85) to `PutAsync`. [`RaftClusterHost.MutateAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L511) registers and awaits a pending result; [`SubmitProposalAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L656) calls `RaftNode.ProposeAsync`. A follower can forward the proposal. |
+| Save and send | `CounterCluster.ProcessReady` writes to memory and enqueues peer messages. | [`ProcessReadyAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L375) calls `SqliteStorage.PersistReady` for `raft.db` before using the gRPC transport. Neither operation sets the KV value. |
+| Apply and finish the caller | `CounterReplica.Apply` updates the local counter. | [`ApplyCommittedEntriesAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L425) calls [`ApplyNormalEntries`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.cs#L172), which commits the effects, request results, and physical cursor to `application.db` together. Then `pendingProposals.Complete` releases the local waiters so the endpoint can return success. |
+| Acknowledge to Raft | `ProcessReady` calls `Advance` on that batch. | [`RunReadyLoopAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L354) calls `AdvanceAsync` after `ProcessReadyAsync`. This is not what releases the HTTP waiter. |
 
 [`ThreeNodeClusterReplicatesFollowerProposalAndRead`](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.cs)
 exercises this path without starting a gRPC server. The next section covers
@@ -88,6 +88,15 @@ It persists the batch before sending messages, restores an incoming snapshot
 if present, and applies committed entries before `AdvanceAsync`. The same
 consumer runs restoration and application in order; it does not use early
 admission.
+
+The consumer batches up to 64 consecutive ordinary entries already in
+one Ready. It does not delay a write to fill a batch or cross a configuration
+entry. A transaction commits the write results and final cursor together;
+failure in the batch rolls back even the earlier statements in that batch.
+A result's `AppliedIndex` is still the index of the original command;
+`PhysicalApplied` can report the end of the same durable batch. See the
+[gated application test](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.cs)
+for rollback, waiter completion, and reopen.
 
 ### Pending application snapshot
 

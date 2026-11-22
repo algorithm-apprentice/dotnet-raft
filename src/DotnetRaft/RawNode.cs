@@ -142,19 +142,13 @@ public sealed partial class RawNode
         Execute(() =>
         {
             ArgumentNullException.ThrowIfNull(change);
+            ProtocolConfChange owned = change.Clone();
             ConfigurationChangeValidation
                 .ValidateProposal(
-                    change,
+                    owned,
                     nameof(change));
             Activate();
-            var proposal = LocalMessage(
-                MessageType.MsgProp);
-            proposal.Entries.Add(new Entry
-            {
-                Type = EntryType.EntryConfChange,
-                Data = change.ToByteString(),
-            });
-            _core.Step(proposal);
+            _core.ProposeConfiguration(owned);
         });
     }
 
@@ -164,19 +158,13 @@ public sealed partial class RawNode
         Execute(() =>
         {
             ArgumentNullException.ThrowIfNull(change);
+            ConfChangeV2 owned = change.Clone();
             ConfigurationChangeValidation
                 .ValidateProposal(
-                    change,
+                    owned,
                     nameof(change));
             Activate();
-            var proposal = LocalMessage(
-                MessageType.MsgProp);
-            proposal.Entries.Add(new Entry
-            {
-                Type = EntryType.EntryConfChangeV2,
-                Data = change.ToByteString(),
-            });
-            _core.Step(proposal);
+            _core.ProposeConfiguration(owned);
         });
     }
 
@@ -600,14 +588,15 @@ public sealed partial class RawNode
             currentHardState,
             _previousHardState,
             unstableEntries.Length);
-        var ready = new Ready(
+        ulong appliedEncodedSize = EntrySizing.EncodedSize(committedEntries);
+        Ready ready = DotnetRaft.Ready.FromDetachedWork(
             emittedSoftState,
             emittedHardState,
             readStates,
             unstableEntries,
             snapshot,
             committedEntries,
-            exposedMessages,
+            [.. exposedMessages],
             mustSync);
         ReadyAcknowledgement? acknowledgement =
             asyncStorageWrites
@@ -616,7 +605,8 @@ public sealed partial class RawNode
                     selfMessages,
                     unstableEntries,
                     snapshot,
-                    committedEntries);
+                    committedEntries,
+                    appliedEncodedSize);
 
         if (emittedSoftState is not null)
         {
@@ -629,9 +619,7 @@ public sealed partial class RawNode
                 currentHardState.Clone();
         }
 
-        _core.TakeMessages();
-        _core.TakeMessagesAfterAppend();
-        _core.TakeReadStates();
+        _core.ClearReadyOutputs();
         _core.Log.AcceptUnstable();
         ulong? deliveredThrough =
             committedEntries.Length == 0
@@ -641,8 +629,7 @@ public sealed partial class RawNode
         {
             _core.Log.AcceptApplying(
                 deliveredThrough.Value,
-                EntrySizing.EncodedSize(
-                    committedEntries),
+                appliedEncodedSize,
                 allowUnstable:
                     !asyncStorageWrites);
         }
@@ -1175,7 +1162,8 @@ public sealed partial class RawNode
             Message[] selfMessages,
             Entry[] unstableEntries,
             Snapshot? snapshot,
-            Entry[] committedEntries)
+            Entry[] committedEntries,
+            ulong encodedSize)
     {
         EntryId? stableEntry =
             unstableEntries.Length == 0
@@ -1187,8 +1175,6 @@ public sealed partial class RawNode
             committedEntries.Length == 0
                 ? null
                 : committedEntries[^1].Index;
-        ulong encodedSize =
-            EntrySizing.EncodedSize(committedEntries);
         ulong payloadSize =
             EntrySizing.PayloadSize(committedEntries);
 

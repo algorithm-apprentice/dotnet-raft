@@ -1,5 +1,6 @@
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
+using DotnetRaft.Tests.Core;
 using DotnetRaft.Tests.Interaction;
 
 using Google.Protobuf;
@@ -580,6 +581,52 @@ public sealed class RawNodeNetworkValidationTests
                 node.Core.Tracker.ToConfState()));
         Assert.True(
             node.HasReady());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void SnapshotPreparationReadsTheLocalTermOnlyOnce(bool matches)
+    {
+        var state = new ConfState { Voters = { 1, 2 } };
+        var storage = new CoreTestStorage
+        {
+            InitialState = new StorageState(new HardState { Term = 2 }, state),
+        };
+        storage.LogStorage.Append([EntryAt(1, matches ? 1UL : 2UL)]);
+        var node = CreateNode(storage);
+        int reads = 0;
+        storage.GetTermOverride = index =>
+        {
+            Assert.Equal(1UL, index);
+            reads++;
+            return storage.LogStorage.GetTerm(index);
+        };
+        Message incoming = SnapshotAt(1);
+        incoming.Term = 3;
+        incoming.Snapshot.Metadata.ConfState.Voters.Add(3);
+        if (matches)
+        {
+            // No configuration is consumed when the local prefix already matches.
+            incoming.Snapshot.Metadata.ConfState.Voters.Add(RaftLocalMessageTargets.AppendThread);
+        }
+
+        node.Step(incoming);
+        incoming.Snapshot.Metadata.ConfState.Voters.Clear();
+
+        Assert.Equal(1, reads);
+        Assert.Equal(3UL, node.GetBasicStatus().Term);
+        Assert.Equal(1UL, node.GetBasicStatus().Commit);
+        Assert.Equal(matches ? [1UL, 2UL] : [1UL, 2UL, 3UL], node.GetStatus().Configuration.Voters);
+        Ready ready = node.Ready();
+        if (matches)
+        {
+            Assert.Null(ready.Snapshot);
+        }
+        else
+        {
+            Assert.Equal([1UL, 2UL, 3UL], ready.Snapshot!.Metadata.ConfState.Voters);
+        }
     }
 
     private static Message AppendWithGap()

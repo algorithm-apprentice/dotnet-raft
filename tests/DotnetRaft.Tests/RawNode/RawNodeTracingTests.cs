@@ -3,6 +3,8 @@ using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
+using Google.Protobuf;
+
 using static DotnetRaft.Tests.RawNode.RawNodeTestSupport;
 
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
@@ -276,6 +278,74 @@ public sealed class RawNodeTracingTests
                 traceEvent.Type
                 == RaftTraceEventType.EntriesAppended);
         Assert.True(node.HasReady());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void PeerConfigurationProposalPreservesPayloadAndTracesOnlyTheAcceptedChange(bool useV2)
+    {
+        var sink = new RecordingTraceSink();
+        MemoryStorage storage = CreateStorage(voters: [1, 2]);
+        var node = CreateNode(storage, traceSink: sink);
+        BecomeTwoVoterLeader(node, storage);
+        sink.Events.Clear();
+
+        var legacy = new ProtocolConfChange { Type = ConfChangeType.ConfChangeAddLearnerNode, NodeId = 3 };
+        var v2 = new ConfChangeV2 { Changes = { new ConfChangeSingle { Type = legacy.Type, NodeId = legacy.NodeId } } };
+        ByteString bytes = ByteString.CopyFrom((useV2 ? v2.ToByteArray() : legacy.ToByteArray()).Concat(new byte[] { 0x78, 0x01 }).ToArray());
+        EntryType type = useV2 ? EntryType.EntryConfChangeV2 : EntryType.EntryConfChange;
+        var proposal = new Message { Type = MessageType.MsgProp, From = 2, To = 1 };
+        proposal.Entries.Add(new Entry { Type = type, Data = bytes });
+        proposal.Entries.Add(new Entry { Type = type, Data = bytes });
+
+        node.Step(proposal);
+        proposal.Entries[0].Data = ByteString.Empty;
+
+        Assert.Equal(RaftDescriptions.DescribeConfChange(v2), Assert.Single(sink.Events,
+            trace => trace.Type == RaftTraceEventType.ConfigurationProposed).Detail);
+        Assert.Collection(node.Ready().Entries,
+            accepted =>
+            {
+                Assert.Equal(type, accepted.Type);
+                Assert.Equal(bytes, accepted.Data);
+            },
+            replaced =>
+            {
+                Assert.Equal(EntryType.EntryNormal, replaced.Type);
+                Assert.True(replaced.Data.IsEmpty);
+            });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FollowerForwardsTheOriginalConfigurationProposal(bool useV2)
+    {
+        var sink = new RecordingTraceSink();
+        MemoryStorage storage = CreateStorage(voters: [1, 2, 3]);
+        var node = CreateNode(storage, traceSink: sink);
+        node.Step(new Message { Type = MessageType.MsgHeartbeat, From = 2, To = 1, Term = 1 });
+        PersistAndAdvance(node, storage, node.Ready());
+        sink.Events.Clear();
+
+        // Unknown fields and an explicitly present default are part of the
+        // received bytes, not something to reconstruct from the parsed view.
+        ByteString bytes = ByteString.CopyFrom(0x08, 0x00, 0x78, 0x01);
+        var proposal = new Message { Type = MessageType.MsgProp, From = 3, To = 1 };
+        proposal.Entries.Add(new Entry
+        {
+            Type = useV2 ? EntryType.EntryConfChangeV2 : EntryType.EntryConfChange,
+            Data = bytes,
+        });
+        Message expected = proposal.Clone();
+        expected.To = 2;
+
+        node.Step(proposal);
+        proposal.Entries.Clear();
+
+        Assert.Equal(expected, Assert.Single(node.Ready().Messages));
+        Assert.DoesNotContain(sink.Events, trace => trace.Type == RaftTraceEventType.ConfigurationProposed);
     }
 
     [Fact]

@@ -1,27 +1,16 @@
-using DotnetRaft.ConfChange;
 using DotnetRaft.Protocol;
-
-using Google.Protobuf;
-
-using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Core;
 
 internal static class NetworkMessageValidation
 {
-    internal static LogSlice? Prepare(
+    // RawNode has already checked that the owned message has a known type.
+    internal static void ValidatePeerFields(
         Message message,
         ulong lastIndex,
         bool handlesLeaderMessages,
-        bool handlesLeaderResponses,
-        Action<Snapshot?> validateSnapshot)
+        bool handlesLeaderResponses)
     {
-        ArgumentNullException.ThrowIfNull(message);
-        ArgumentNullException.ThrowIfNull(
-            validateSnapshot);
-
-        ValidateType(message);
-
         if (MessageClassifier.IsVoteMessage(message.Type)
             && message.Term == 0)
         {
@@ -40,11 +29,6 @@ internal static class NetworkMessageValidation
 
         switch (message.Type)
         {
-            case MessageType.MsgProp:
-                ValidateProposal(message);
-                break;
-            case MessageType.MsgApp:
-                return LogSlice.ParseOwnedPeerAppend(message);
             case MessageType.MsgAppResp:
                 if (handlesLeaderResponses
                     && !message.Reject
@@ -72,17 +56,7 @@ internal static class NetworkMessageValidation
                 }
 
                 break;
-            case MessageType.MsgSnap:
-                if (handlesLeaderMessages)
-                {
-                    validateSnapshot(
-                        message.Snapshot);
-                }
-
-                break;
         }
-
-        return null;
     }
 
     internal static void ValidateType(
@@ -93,59 +67,6 @@ internal static class NetworkMessageValidation
         {
             throw Invalid(
                 "Raft message type must be present and known.");
-        }
-    }
-
-    private static void ValidateProposal(
-        Message message)
-    {
-        if (message.Entries.Count == 0)
-        {
-            throw Invalid(
-                "A proposal must contain at least one entry.");
-        }
-
-        foreach (Entry entry in message.Entries)
-        {
-            ValidateEntry(entry);
-        }
-    }
-
-    internal static void ValidateEntry(
-        Entry entry)
-    {
-        if (!Enum.IsDefined(entry.Type))
-        {
-            throw Invalid(
-                $"Entry type {(int)entry.Type} is unknown.");
-        }
-
-        try
-        {
-            switch (entry.Type)
-            {
-                case EntryType.EntryConfChange:
-                    ConfigurationChangeValidation
-                        .ValidateProposal(
-                            ProtocolConfChange.Parser
-                                .ParseFrom(entry.Data),
-                            nameof(entry));
-                    break;
-                case EntryType.EntryConfChangeV2:
-                    ConfigurationChangeValidation
-                        .ValidateProposal(
-                            ConfChangeV2.Parser
-                                .ParseFrom(entry.Data),
-                            nameof(entry));
-                    break;
-            }
-        }
-        catch (InvalidProtocolBufferException exception)
-        {
-            throw new ArgumentException(
-                $"Configuration entry payload is malformed: {exception.Message}",
-                nameof(entry),
-                exception);
         }
     }
 

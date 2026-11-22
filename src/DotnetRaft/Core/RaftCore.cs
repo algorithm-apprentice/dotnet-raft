@@ -204,13 +204,11 @@ internal sealed partial class RaftCore
                 $"{message.Type} must carry a nonzero term.");
         }
 
-        Dispatch(message, new PreparedInput(
-            Append: null,
-            PrepareReadAcknowledgement(message, fromPeer: false)));
+        Dispatch(message, new PreparedInput(ReadAcknowledgement: PrepareReadAcknowledgement(message, fromPeer: false)));
     }
 
     // Kept private so a caller cannot pair a message with unrelated parsed data.
-    private void Dispatch(Message message, PreparedInput input)
+    private void Dispatch(Message message, in PreparedInput input)
     {
         TraceMessage(
             RaftTraceEventType.MessageReceived,
@@ -253,37 +251,44 @@ internal sealed partial class RaftCore
                 HandleStorageApplyResponse(message);
                 return;
             default:
-                HandleRoleMessage(message, input);
+                HandleRoleMessage(message, in input);
                 return;
         }
     }
 
     internal void StepPeerMessage(Message message, Action accept)
     {
-        LogSlice? append = NetworkMessageValidation.Prepare(
+        bool handlesLeaderMessages = HandlesLeaderMessage(message);
+        NetworkMessageValidation.ValidatePeerFields(
             message,
             Log.LastIndex,
-            HandlesLeaderMessage(message),
-            HandlesLeaderResponse(message),
-            ValidateNetworkSnapshot);
-        ReadAcknowledgement? readAcknowledgement = PrepareReadAcknowledgement(message, fromPeer: true);
+            handlesLeaderMessages,
+            HandlesLeaderResponse(message));
+        PreparedInput input = message.Type switch
+        {
+            MessageType.MsgApp => new(Append: LogSlice.ParseOwnedPeerAppend(message)),
+            MessageType.MsgProp => new(Proposal: ParsedProposal.Parse(message.Entries, fromPeer: true)),
+            MessageType.MsgSnap when handlesLeaderMessages => new(Snapshot: PrepareSnapshot(message.Snapshot, fromPeer: true)),
+            MessageType.MsgHeartbeatResp => new(ReadAcknowledgement: PrepareReadAcknowledgement(message, fromPeer: true)),
+            _ => default,
+        };
 
         // Activate the facade only after peer input is known to be usable.
         accept();
-        Dispatch(message, new PreparedInput(append, readAcknowledgement));
+        Dispatch(message, in input);
     }
 
     private bool HandlesLeaderResponse(Message message) =>
         Role == RaftRole.Leader && (message.Term == 0 || message.Term == Term);
 
-    private ReadAcknowledgement? PrepareReadAcknowledgement(Message message, bool fromPeer)
+    private ReadAcknowledgement PrepareReadAcknowledgement(Message message, bool fromPeer)
     {
         return message.Type == MessageType.MsgHeartbeatResp
             && !message.Context.IsEmpty
             && HandlesLeaderResponse(message)
             && Tracker.Contains(message.From)
-                ? reads.ParseAcknowledgement(message.Context, fromPeer)
-                : null;
+                ? reads.ParseAcknowledgement(message.Context, fromPeer).GetValueOrDefault()
+                : default;
     }
 
     private bool HandlesLeaderMessage(
@@ -328,6 +333,12 @@ internal sealed partial class RaftCore
     internal Message[] PeekMessagesAfterAppend()
     {
         return output.PeekMessagesAfterAppend();
+    }
+
+    internal void ClearReadyOutputs()
+    {
+        output.Clear();
+        reads.ClearReadStates();
     }
 
     internal void Bootstrap(
@@ -484,22 +495,22 @@ internal sealed partial class RaftCore
                 && !message.Reject);
     }
 
-    private void HandleRoleMessage(Message message, PreparedInput input)
+    private void HandleRoleMessage(Message message, in PreparedInput input)
     {
         // Step may have changed the role while processing the message term.
         switch (Role)
         {
             case RaftRole.Follower:
-                StepFollower(message, input.Append);
+                StepFollower(message, in input);
                 return;
             case RaftRole.PreCandidate:
-                StepCampaigning(message, input.Append, preCandidate: true);
+                StepCampaigning(message, in input, preCandidate: true);
                 return;
             case RaftRole.Candidate:
-                StepCampaigning(message, input.Append, preCandidate: false);
+                StepCampaigning(message, in input, preCandidate: false);
                 return;
             case RaftRole.Leader:
-                StepLeader(message, input.ReadAcknowledgement);
+                StepLeader(message, in input);
                 return;
             default:
                 throw new RaftInvariantException(
@@ -507,7 +518,7 @@ internal sealed partial class RaftCore
         }
     }
 
-    private void StepFollower(Message message, LogSlice? append)
+    private void StepFollower(Message message, in PreparedInput input)
     {
         switch (message.Type)
         {
@@ -515,7 +526,7 @@ internal sealed partial class RaftCore
                 HandleHup();
                 return;
             case MessageType.MsgProp:
-                HandleFollowerProposal(message);
+                HandleFollowerProposal(message, input.Proposal);
                 return;
             case MessageType.MsgForgetLeader:
                 HandleFollowerForgetLeader();
@@ -537,12 +548,12 @@ internal sealed partial class RaftCore
             case MessageType.MsgSnap:
                 clock.ResetElectionElapsed();
                 roleState.SetLeader(message.From);
-                HandleAcceptedLeaderMessage(message, append);
+                HandleAcceptedLeaderMessage(message, in input);
                 return;
         }
     }
 
-    private void StepCampaigning(Message message, LogSlice? append, bool preCandidate)
+    private void StepCampaigning(Message message, in PreparedInput input, bool preCandidate)
     {
         switch (message.Type)
         {
@@ -550,14 +561,18 @@ internal sealed partial class RaftCore
                 HandleHup();
                 return;
             case MessageType.MsgProp:
-                ValidateProposal(message);
+                if (input.Proposal is null)
+                {
+                    ParsedProposal.RequireEntriesForSyntheticProposal(message);
+                }
+
                 throw new ProposalDroppedException(
                     $"A {Role} cannot process proposals.");
             case MessageType.MsgApp:
             case MessageType.MsgHeartbeat:
             case MessageType.MsgSnap:
                 BecomeFollower(Term, message.From);
-                HandleAcceptedLeaderMessage(message, append);
+                HandleAcceptedLeaderMessage(message, in input);
                 return;
             case MessageType.MsgPreVoteResp when preCandidate:
             case MessageType.MsgVoteResp when !preCandidate:
@@ -566,12 +581,12 @@ internal sealed partial class RaftCore
         }
     }
 
-    private void StepLeader(Message message, ReadAcknowledgement? readAcknowledgement)
+    private void StepLeader(Message message, in PreparedInput input)
     {
         switch (message.Type)
         {
             case MessageType.MsgProp:
-                HandleLeaderProposal(message);
+                HandleLeaderProposal(message, input.Proposal);
                 return;
             case MessageType.MsgBeat:
                 BroadcastHeartbeat();
@@ -586,7 +601,7 @@ internal sealed partial class RaftCore
                 HandleAppendResponse(message);
                 return;
             case MessageType.MsgHeartbeatResp:
-                HandleHeartbeatResponse(message.From, readAcknowledgement);
+                HandleHeartbeatResponse(message.From, input.ReadAcknowledgement);
                 return;
             case MessageType.MsgReadIndex:
                 HandleLeaderReadIndex(message);
@@ -602,18 +617,18 @@ internal sealed partial class RaftCore
 
     private void HandleAcceptedLeaderMessage(
         Message message,
-        LogSlice? append)
+        in PreparedInput input)
     {
         switch (message.Type)
         {
             case MessageType.MsgApp:
-                HandleAppendEntries(message, append);
+                HandleAppendEntries(message, input.Append);
                 return;
             case MessageType.MsgHeartbeat:
                 HandleHeartbeat(message);
                 return;
             case MessageType.MsgSnap:
-                HandleSnapshot(message);
+                HandleSnapshot(message, input.Snapshot);
                 return;
             default:
                 throw new RaftInvariantException(
@@ -738,5 +753,9 @@ internal sealed partial class RaftCore
             state.Vote);
     }
 
-    private readonly record struct PreparedInput(LogSlice? Append, ReadAcknowledgement? ReadAcknowledgement);
+    private readonly record struct PreparedInput(
+        ReadAcknowledgement ReadAcknowledgement = default,
+        LogSlice? Append = null,
+        ParsedProposal? Proposal = null,
+        IncomingSnapshot? Snapshot = null);
 }

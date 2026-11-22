@@ -174,6 +174,8 @@ internal sealed class ReadIndexCoordinator
         return taken;
     }
 
+    internal void ClearReadStates() => readStates.Clear();
+
     internal ReadState[] PeekReadStates()
     {
         return

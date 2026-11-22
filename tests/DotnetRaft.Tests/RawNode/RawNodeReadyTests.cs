@@ -102,6 +102,7 @@ public sealed class RawNodeReadyTests
         storage.SetHardState(persistedState);
         node.Advance(election);
         Ready ready = node.Ready();
+        Assert.Null(ready.HardState);
         Entry persistedEntry = ready.Entries[0].Clone();
 
         ready.Entries[0].Index = 99;
@@ -159,6 +160,25 @@ public sealed class RawNodeReadyTests
                 Assert.Equal(
                     MessageType.MsgAppResp,
                     message.Type));
+    }
+
+    [Fact]
+    public void StorageAndApplicationEntriesAreDetachedEvenWhenTheyContainTheSamePrefix()
+    {
+        var node = CreateNode(CreateStorage(voters: [1, 2]));
+        var append = new Message { From = 2, To = 1, Type = MessageType.MsgApp, Term = 1, Commit = 1 };
+        append.Entries.Add(EntryAt(1, 1, "command"));
+        node.Step(append);
+
+        Ready ready = node.Ready();
+        Entry pending = Assert.Single(ready.Entries);
+        Entry committed = Assert.Single(ready.CommittedEntries);
+        pending.Term = 99;
+        committed.Index = 99;
+
+        Assert.Equal(1UL, committed.Term);
+        Assert.Equal(1UL, pending.Index);
+        Assert.Equal(1UL, node.Core.Log.GetTerm(1));
     }
 
     [Fact]

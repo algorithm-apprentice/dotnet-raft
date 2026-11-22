@@ -18,46 +18,37 @@ public sealed class Ready
     private readonly ReadOnlyCollection<Entry> _committedEntries;
     private readonly ReadOnlyCollection<Message> _messages;
 
-    internal Ready(
+    internal static Ready FromDetachedWork(
         SoftState? softState,
         HardState? hardState,
-        IEnumerable<ReadState> readStates,
-        IEnumerable<Entry> entries,
+        ReadState[] readStates,
+        Entry[] entries,
         Snapshot? snapshot,
-        IEnumerable<Entry> committedEntries,
-        IEnumerable<Message> messages,
+        Entry[] committedEntries,
+        Message[] messages,
+        bool mustSync) => new(softState, hardState, readStates, entries, snapshot, committedEntries, messages, mustSync);
+
+    private Ready(
+        SoftState? softState,
+        HardState? hardState,
+        ReadState[] readStates,
+        Entry[] entries,
+        Snapshot? snapshot,
+        Entry[] committedEntries,
+        Message[] messages,
         bool mustSync)
     {
-        ArgumentNullException.ThrowIfNull(readStates);
-        ArgumentNullException.ThrowIfNull(entries);
-        ArgumentNullException.ThrowIfNull(committedEntries);
-        ArgumentNullException.ThrowIfNull(messages);
-
-        SoftState = softState is null
-            ? null
-            : new SoftState(
-                softState.LeaderId,
-                softState.Role);
-        HardState = hardState?.Clone();
-        Snapshot = snapshot?.Clone();
+        // The producer transfers detached values, including independent
+        // mutable protobufs for each work/completion stream.
+        SoftState = softState;
+        HardState = hardState;
+        Snapshot = snapshot;
         MustSync = mustSync;
 
-        _readStates = Array.AsReadOnly(
-            readStates
-                .Select(Clone)
-                .ToArray());
-        _entries = Array.AsReadOnly(
-            entries
-                .Select(entry => entry.Clone())
-                .ToArray());
-        _committedEntries = Array.AsReadOnly(
-            committedEntries
-                .Select(entry => entry.Clone())
-                .ToArray());
-        _messages = Array.AsReadOnly(
-            messages
-                .Select(message => message.Clone())
-                .ToArray());
+        _readStates = Array.AsReadOnly(readStates);
+        _entries = Array.AsReadOnly(entries);
+        _committedEntries = Array.AsReadOnly(committedEntries);
+        _messages = Array.AsReadOnly(messages);
     }
 
     public SoftState? SoftState { get; }
@@ -77,12 +68,4 @@ public sealed class Ready
     public IReadOnlyList<Message> Messages => _messages;
 
     public bool MustSync { get; }
-
-    private static ReadState Clone(ReadState state)
-    {
-        ArgumentNullException.ThrowIfNull(state);
-        return new ReadState(
-            state.Index,
-            state.RequestContext);
-    }
 }

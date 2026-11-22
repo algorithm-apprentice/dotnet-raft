@@ -16,7 +16,10 @@ Validate owned message structure at `RawNode.Step` before core mutation.
 Check state-dependent content only along a term/role path that will use it.
 When such a check decodes a value, pass the parsed result into the
 transition instead of discarding it. For a leader's heartbeat acknowledgement
-that is a read position; for an Append it is a contiguous log slice. See the
+that is a read position; for an Append it is a contiguous log slice.
+Proposal admission and tracing share the parsed changes, and a usable
+snapshot carries its prepared decision and any installation configuration.
+See the
 [input boundary design](../maintaining/input-boundary-design.md) for the
 preparation and dispatch lifetime.
 Use the same structural configuration checks for local proposals and peer

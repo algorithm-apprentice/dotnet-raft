@@ -1,4 +1,3 @@
-using DotnetRaft.ConfChange;
 using DotnetRaft.Protocol;
 using DotnetRaft.Read;
 using DotnetRaft.Storage;
@@ -6,16 +5,19 @@ using DotnetRaft.Tracker;
 
 using Google.Protobuf;
 
-using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
-
 namespace DotnetRaft.Core;
 
 internal sealed partial class RaftCore
 {
     private void HandleFollowerProposal(
-        Message message)
+        Message message,
+        ParsedProposal? proposal)
     {
-        ValidateProposal(message);
+        if (proposal is null)
+        {
+            ParsedProposal.RequireEntriesForSyntheticProposal(message);
+        }
+
         if (LeaderId == RaftMessageTargets.None)
         {
             throw new ProposalDroppedException(
@@ -34,9 +36,14 @@ internal sealed partial class RaftCore
     }
 
     private void HandleLeaderProposal(
-        Message message)
+        Message message,
+        ParsedProposal? proposal)
     {
-        ValidateProposal(message);
+        if (proposal is null)
+        {
+            ParsedProposal.RequireEntriesForSyntheticProposal(message);
+        }
+
         if (!Tracker.Progress.ContainsKey(Id))
         {
             throw new ProposalDroppedException(
@@ -50,16 +57,17 @@ internal sealed partial class RaftCore
                 "The leader is transferring leadership.");
         }
 
+        proposal ??= ParsedProposal.Parse(message.Entries, fromPeer: false);
         (
             Entry[] entries,
             ulong pendingConfigurationIndex) =
             PrepareProposalEntries(
-                message.Entries);
+                proposal);
         ProposalAdmissionPlan plan =
             AppendLeaderEntries(
                 entries,
                 pendingConfigurationIndex,
-                traceConfigurationProposals: true);
+                proposal);
         if (!plan.Accepted)
         {
             throw new ProposalDroppedException(
@@ -71,11 +79,10 @@ internal sealed partial class RaftCore
     }
 
     private ProposalAdmissionPlan AppendLeaderEntries(
-        IEnumerable<Entry> entries,
+        Entry[] appended,
         ulong pendingConfigurationIndex,
-        bool traceConfigurationProposals = false)
+        ParsedProposal? proposal = null)
     {
-        Entry[] appended = ProtocolCloning.CloneEntries(entries);
         if (appended.Length == 0)
         {
             throw new RaftInvariantException(
@@ -114,9 +121,9 @@ internal sealed partial class RaftCore
                 lastIndex + (ulong)offset + 1;
         }
 
-        if (traceConfigurationProposals)
+        if (proposal is not null)
         {
-            TraceConfigurationProposals(appended);
+            TraceConfigurationProposals(appended, proposal);
         }
 
         ulong newLastIndex = Log.Append(appended);
@@ -133,50 +140,31 @@ internal sealed partial class RaftCore
         return plan;
     }
 
-    private static void ValidateProposal(
-        Message message)
-    {
-        if (message.Entries.Count == 0)
-        {
-            throw new RaftInvariantException(
-                "A proposal must contain at least one entry.");
-        }
-    }
-
     private (
         Entry[] Entries,
         ulong PendingConfigurationIndex)
         PrepareProposalEntries(
-            IEnumerable<Entry> entries)
+            ParsedProposal proposal)
     {
-        Entry[] owned = ProtocolCloning.CloneEntries(entries);
+        Entry[] owned = proposal.CopyEntries();
         ulong candidatePending =
             proposals.PendingConfigurationIndex;
+        if (!proposal.HasConfigurations)
+        {
+            return (owned, candidatePending);
+        }
+
         ulong lastIndex = Log.LastIndex;
 
         for (var offset = 0; offset < owned.Length; offset++)
         {
-            Entry entry = owned[offset];
-            ConfChangeV2? change = entry.Type switch
-            {
-                EntryType.EntryConfChange =>
-                    ProtocolConfChange.Parser
-                        .ParseFrom(entry.Data)
-                        .AsV2(),
-                EntryType.EntryConfChangeV2 =>
-                    ConfChangeV2.Parser.ParseFrom(
-                        entry.Data),
-                _ => null,
-            };
-            if (change is null)
+            if (proposal.WantsLeaveJointAt(offset) is not bool wantsLeaveJoint)
             {
                 continue;
             }
 
             bool alreadyJoint =
                 Tracker.Config.Voters.Outgoing.Count > 0;
-            bool wantsLeaveJoint =
-                change.Changes.Count == 0;
             if (!ProposalAdmission.CanAcceptConfiguration(
                     candidatePending,
                     Log.Applied,
@@ -501,7 +489,7 @@ internal sealed partial class RaftCore
 
     private void HandleHeartbeatResponse(
         ulong from,
-        ReadAcknowledgement? readAcknowledgement)
+        ReadAcknowledgement readAcknowledgement)
     {
         if (!Tracker.Progress.TryGetValue(
                 from,
@@ -521,12 +509,12 @@ internal sealed partial class RaftCore
                 sendIfEmpty: true);
         }
 
-        if (readAcknowledgement is { } acknowledgement)
+        if (readAcknowledgement.IsPresent)
         {
             ReadIndexRequest[] completed =
                 reads.Acknowledge(
                     from,
-                    acknowledgement,
+                    readAcknowledgement,
                     Tracker.Config.Voters);
             CompleteReadIndexRequests(completed);
         }

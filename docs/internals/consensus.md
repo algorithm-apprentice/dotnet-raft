@@ -31,7 +31,7 @@ them. See [ADR 0003](../adr/0003-raftcore-structural-boundaries.md).
 | Term handling, role dispatch, reset, local worker responses | [`RaftCore.cs`](../../src/DotnetRaft/Core/RaftCore.cs), `Step` |
 | Logical ticks, voting, becoming leader, transfer | [`RaftCore.Election.cs`](../../src/DotnetRaft/Core/RaftCore.Election.cs), `TickElection` or `Campaign` |
 | Proposals, Append, follower progress, and commit | [`RaftCore.Replication.cs`](../../src/DotnetRaft/Core/RaftCore.Replication.cs), `HandleLeaderProposal` and `HandleAppendResponse` |
-| Configuration installation, incoming snapshots, application overlap | [`RaftCore.Membership.cs`](../../src/DotnetRaft/Core/RaftCore.Membership.cs), `ApplyConfigurationChange` or `RestoreSnapshot` |
+| Configuration installation, incoming snapshots, application overlap | [`RaftCore.Membership.cs`](../../src/DotnetRaft/Core/RaftCore.Membership.cs), `ApplyConfigurationChange` or `PrepareSnapshot` |
 | The current-term read gate and quorum confirmation | [`RaftCore.ReadIndex.cs`](../../src/DotnetRaft/Core/RaftCore.ReadIndex.cs), `HandleLeaderReadIndex` |
 | Detached state and trace events | [`RaftCore.Diagnostics.cs`](../../src/DotnetRaft/Core/RaftCore.Diagnostics.cs), `GetBasicStatus` or `Trace` |
 
@@ -93,17 +93,20 @@ and [flow-control tests](../../tests/DotnetRaft.Tests/Core/RaftCoreFlowControlTe
 ## Install a membership or snapshot as a coherent transition
 
 A live membership change enters the log; it takes effect when applied in
-order, not when proposed or appended. The changer computes on copies, then
+order, not when proposed or appended. Admission and diagnostics share a
+parsed proposal, but accepted or forwarded entries preserve their wire
+bytes. The changer computes on copies, then
 `SwitchToConfiguration` installs the valid result and reevaluates affected
 quorums, replication, and leadership transfer. A voter demoted in a joint
 change stays an outgoing voter until the outgoing set is removed; it cannot
 already be an active learner. `ConfigurationRestore` rebuilds a valid
 tracker from `ConfState` using the same change invariants.
 
-`RestoreSnapshot` does not replace a log that already matches the snapshot's
-boundary tuple; it can advance commit through that prefix instead. When it
-really installs a snapshot, it changes the live consensus membership but
-can retain the configuration needed by earlier delivered application work.
+`PrepareSnapshot` decides whether an incoming snapshot is obsolete, matches
+the local log, or needs installation. A matching tuple can advance commit
+without consuming the supplied configuration. Installation uses the
+configuration prepared on a scratch tracker and can retain the old one
+for earlier delivered application work.
 `AcknowledgeSnapshot` checks the owned unstable snapshot's exact index
 before reasserting configuration. Without that check, an obsolete
 completion could install membership from the wrong prefix. See the

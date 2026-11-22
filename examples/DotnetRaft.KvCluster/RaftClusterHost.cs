@@ -16,6 +16,7 @@ public sealed partial class RaftClusterHost
 {
     private const int TransportEnvelopeReserve =
         64 * 1024;
+    private const int MaxApplicationBatchEntries = 64;
     private readonly IHostApplicationLifetime applicationLifetime;
     private readonly FixedMembershipConfiguration
         fixedMembership;
@@ -410,13 +411,7 @@ public sealed partial class RaftClusterHost
             CompletePendingProposalsFromDurableState();
         }
 
-        foreach (Entry entry in ready.CommittedEntries)
-        {
-            await ApplyEntryAsync(
-                    entry,
-                    cancellationToken)
-                .ConfigureAwait(false);
-        }
+        await ApplyCommittedEntriesAsync(ready.CommittedEntries, cancellationToken).ConfigureAwait(false);
 
         foreach (ReadState readState in ready.ReadStates)
         {
@@ -427,9 +422,40 @@ public sealed partial class RaftClusterHost
             stateMachine.PhysicalApplied);
     }
 
-    private async Task ApplyEntryAsync(
-        Entry entry,
+    private async Task ApplyCommittedEntriesAsync(
+        IReadOnlyList<Entry> entries,
         CancellationToken cancellationToken)
+    {
+        int next = 0;
+        while (next < entries.Count)
+        {
+            if (!IsOrdinaryApplicationEntry(entries[next]))
+            {
+                await ApplyConfigurationEntryAsync(entries[next], cancellationToken).ConfigureAwait(false);
+                next++;
+                continue;
+            }
+
+            int start = next++;
+            while (next < entries.Count && next - start < MaxApplicationBatchEntries
+                && IsOrdinaryApplicationEntry(entries[next]))
+            {
+                next++;
+            }
+
+            // No result escapes until the application transaction publishes
+            // the whole prefix. Never group across an unapplied config entry.
+            foreach (KvApplyResult result in stateMachine.ApplyNormalEntries(entries, start, next))
+            {
+                pendingProposals.Complete(result);
+            }
+        }
+    }
+
+    private bool IsOrdinaryApplicationEntry(Entry entry) =>
+        entry.Type == EntryType.EntryNormal && !fixedMembership.IsBootstrapIndex(entry.Index);
+
+    private async Task ApplyConfigurationEntryAsync(Entry entry, CancellationToken cancellationToken)
     {
         if (fixedMembership.IsBootstrapIndex(
                 entry.Index))
@@ -451,25 +477,7 @@ public sealed partial class RaftClusterHost
 
         switch (entry.Type)
         {
-            case EntryType.EntryNormal:
-                if (entry.Data.IsEmpty)
-                {
-                    stateMachine.AdvanceNoOp(
-                        entry.Index);
-                    return;
-                }
-
-                KvApplyResult result =
-                    stateMachine.ApplyCommand(
-                        entry.Index,
-                        entry.Data);
-                pendingProposals.Complete(
-                    result);
-                return;
             case EntryType.EntryConfChange:
-                stateMachine.AdvanceNoOp(
-                    entry.Index);
-                return;
             case EntryType.EntryConfChangeV2:
                 stateMachine.AdvanceNoOp(
                     entry.Index);

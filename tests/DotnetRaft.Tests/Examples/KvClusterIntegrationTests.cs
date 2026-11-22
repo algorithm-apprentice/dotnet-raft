@@ -600,7 +600,7 @@ public sealed class KvClusterIntegrationTests
         donor.AdvanceNoOp(4);
         var command = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
         donor.ApplyCommand(snapshotIndex, ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)));
-        var transport = new GatedSnapshotTransport();
+        var transport = new GatedTransport();
         var proposals = new PendingProposalRegistry();
         NodeHarness target = CreateNode(1, new InMemoryNetwork(), directory: directory,
             transportOverride: transport, proposalRegistry: proposals);
@@ -661,6 +661,169 @@ public sealed class KvClusterIntegrationTests
         {
             transport.Release();
             await StopAndDisposeNodesAsync([target], disposeDirectories: false);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CommittedBatchReleasesWaitersOnlyAfterTheApplicationTransaction(bool malformed)
+    {
+        using var directory = new TemporaryNodeDirectory();
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var transport = new GatedTransport();
+        var proposals = new PendingProposalRegistry();
+        NodeHarness target = CreateNode(1, new InMemoryNetwork(), directory: directory,
+            transportOverride: transport, proposalRegistry: proposals);
+        var command = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
+        var last = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "green");
+        using var pending = proposals.Register(command);
+        using var lastPending = proposals.Register(last);
+        try
+        {
+            await target.Host.StartAsync(guard.Token);
+            await target.Host.GetStatusAsync(guard.Token);
+            var append = new Message
+            {
+                Type = MessageType.MsgApp,
+                From = 2,
+                To = 1,
+                Term = 2,
+                Index = 3,
+                LogTerm = 1,
+                Commit = 5,
+            };
+            append.Entries.Add(new Entry
+            {
+                Index = 4,
+                Term = 2,
+                Data = ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)),
+            });
+            append.Entries.Add(new Entry
+            {
+                Index = 5,
+                Term = 2,
+                Data = malformed ? ByteString.CopyFromUtf8("not JSON") : ByteString.CopyFrom(DurableKvCommandCodec.Encode(last)),
+            });
+            if (!malformed)
+            {
+                // Later spellings of the same request ID cannot replace its
+                // winner, including when they are in the same transaction.
+                string encoded = System.Text.Encoding.UTF8.GetString(DurableKvCommandCodec.Encode(command));
+                append.Entries.Add(new Entry { Index = 6, Term = 2, Data = ByteString.CopyFromUtf8($" {encoded} ") });
+                append.Entries.Add(new Entry { Index = 7, Term = 2 });
+                append.Entries.Add(new Entry
+                {
+                    Index = 8,
+                    Term = 2,
+                    Data = ByteString.CopyFrom(DurableKvCommandCodec.Encode(command with { Value = "red" })),
+                });
+                append.Commit = 8;
+            }
+
+            await target.Host.ReceiveAsync(append, guard.Token);
+
+            Message response = await transport.Entered.WaitAsync(guard.Token);
+            Assert.Equal(MessageType.MsgAppResp, response.Type);
+            Assert.Equal(append.Commit, target.Storage.GetHardState()?.Commit);
+            Assert.Equal(3UL, target.State.PhysicalApplied);
+            Assert.False(pending.Task.IsCompleted);
+            Assert.False(lastPending.Task.IsCompleted);
+
+            transport.Release();
+            if (malformed)
+            {
+                await Assert.ThrowsAsync<InvalidDataException>(() => target.Host.ExecuteTask!.WaitAsync(guard.Token));
+                Assert.False(pending.Task.IsCompleted);
+                Assert.False(lastPending.Task.IsCompleted);
+                Assert.Null(target.State.ResolveRequest(command));
+                Assert.Equal(3UL, target.State.PhysicalApplied);
+            }
+            else
+            {
+                KvApplyResult first = await pending.Task.WaitAsync(guard.Token);
+                KvApplyResult second = await lastPending.Task.WaitAsync(guard.Token);
+                Assert.Equal(4UL, first.ResultIndex);
+                Assert.Equal(5UL, second.ResultIndex);
+                Assert.Equal(8UL, first.PhysicalApplied);
+                Assert.Equal(8UL, second.PhysicalApplied);
+                Assert.False(first.Duplicate);
+                Assert.False(first.Conflict);
+                Assert.Equal("green", target.State.ReadAtLeast("color", 8).Value);
+            }
+        }
+        finally
+        {
+            transport.Release();
+            await StopAndDisposeNodesAsync([target], disposeDirectories: false);
+        }
+
+        using var reopened = new SqliteKeyValueStateMachine(directory.ApplicationPath, nodeId: 1);
+        Assert.Equal(malformed ? 3UL : 8UL, reopened.PhysicalApplied);
+        Assert.Equal(malformed ? null : "green", reopened.ReadLocal("color").Value);
+        Assert.Equal(malformed ? null : new KvRequestResolution(4, false), reopened.ResolveRequest(command));
+        if (!malformed)
+        {
+            Assert.Equal(new KvRequestResolution(4, true), reopened.ResolveRequest(command with { Value = "red" }));
+        }
+    }
+
+    [Fact]
+    public async Task CommittedBatchesStopAtTheSizeLimitAndConfigurationEntries()
+    {
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var proposals = new PendingProposalRegistry();
+        var target = CreateNode(1, new InMemoryNetwork(), proposalRegistry: proposals);
+        var first = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "cap", "one");
+        var beforeConfiguration = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "config", "before");
+        var afterConfiguration = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "config", "after");
+        using var firstWaiter = proposals.Register(first);
+        using var beforeWaiter = proposals.Register(beforeConfiguration);
+        using var afterWaiter = proposals.Register(afterConfiguration);
+
+        try
+        {
+            await target.Host.StartAsync(guard.Token);
+            await target.Host.GetStatusAsync(guard.Token);
+            var append = new Message
+            {
+                Type = MessageType.MsgApp,
+                From = 2,
+                To = 1,
+                Term = 2,
+                Index = 3,
+                LogTerm = 1,
+                Commit = 71,
+            };
+            for (ulong index = 4; index <= append.Commit; index++)
+            {
+                KvCommand? command = index switch
+                {
+                    4 => first,
+                    68 => beforeConfiguration,
+                    70 => afterConfiguration,
+                    _ => null,
+                };
+                append.Entries.Add(new Entry
+                {
+                    Index = index,
+                    Term = 2,
+                    Type = index == 69 ? EntryType.EntryConfChangeV2 : EntryType.EntryNormal,
+                    Data = command is null ? ByteString.Empty : ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)),
+                });
+            }
+
+            await target.Host.ReceiveAsync(append, guard.Token);
+
+            Assert.Equal(67UL, (await firstWaiter.Task.WaitAsync(guard.Token)).PhysicalApplied);
+            Assert.Equal(68UL, (await beforeWaiter.Task.WaitAsync(guard.Token)).PhysicalApplied);
+            Assert.Equal(71UL, (await afterWaiter.Task.WaitAsync(guard.Token)).PhysicalApplied);
+            Assert.Equal("after", target.State.ReadAtLeast("config", 71).Value);
+            Assert.Equal([1UL, 2UL, 3UL], target.State.ConfState.Voters);
+        }
+        finally
+        {
+            await StopAndDisposeNodesAsync([target], disposeDirectories: true);
         }
     }
 
@@ -931,7 +1094,7 @@ public sealed class KvClusterIntegrationTests
         }
     }
 
-    private sealed class GatedSnapshotTransport : IRaftMessageTransport
+    private sealed class GatedTransport : IRaftMessageTransport
     {
         private readonly TaskCompletionSource<Message> entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);

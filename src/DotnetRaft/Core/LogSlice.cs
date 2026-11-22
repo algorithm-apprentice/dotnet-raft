@@ -60,7 +60,7 @@ internal sealed class LogSlice
         {
             if (fromPeer)
             {
-                NetworkMessageValidation.ValidateEntry(entry);
+                ParsedProposal.CheckReplicatedEntry(entry);
             }
 
             var current = new EntryId(entry.Term, entry.Index);

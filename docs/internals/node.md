@@ -14,6 +14,12 @@ last entry delivered, not through the full commit, because the batch can be
 paginated. Acknowledging work that the host never received would skip work
 both in the live application and on recovery if that cursor were persisted.
 
+Once the work is detached, `Ready` takes ownership rather than copying it
+again. The facade keeps the hard-state baseline and completion metadata
+separately; mirrored async fields, worker requests, and worker completions
+do not share mutable entries. Output queues are cleared at acceptance, not
+when a synthetic message trace is emitted.
+
 In synchronous mode, one exact batch is outstanding. `RawNode` retains
 separate completion metadata, so a later caller mutation or new work cannot
 change what `Advance` confirms. The order in `AdvanceCore` matters: first
@@ -79,15 +85,16 @@ timing.
 
 The host owns peer identity and routing. `RawNode.Step` separates local
 storage responses from peer traffic and checks owned message shapes before
-core mutation. [`NetworkMessageValidation`](../../src/DotnetRaft/Core/NetworkMessageValidation.cs)
-prepares a [`LogSlice`](../../src/DotnetRaft/Core/LogSlice.cs) from an owned
-peer Append. `RaftCore.StepPeerMessage` prepares a
+core mutation. `RaftCore.StepPeerMessage` prepares an owned Append as a
+[`LogSlice`](../../src/DotnetRaft/Core/LogSlice.cs) and retains the parsed
+changes in a [`ParsedProposal`](../../src/DotnetRaft/Core/ParsedProposal.cs).
+A heartbeat reply becomes a
 [`ReadAcknowledgement`](../../src/DotnetRaft/Read/ReadAcknowledgement.cs)
-only when the current leader can consume it. Preparation and dispatch run
-in the same serialized operation. The heartbeat handler receives the read
-position, not bytes it needs to decode. An ignored message need not interpret
-an unused commit or context; an already matched snapshot tuple does not
-reinstall its configuration.
+only when the current leader can consume it. A usable snapshot produces
+an ignore, matching-prefix, or installation decision before dispatch.
+Preparation and dispatch run in the same serialized operation. An ignored
+message need not interpret an unused commit or context; an already matched
+snapshot tuple does not reinstall its configuration.
 
 Structural configuration checks are shared between network and public
 proposal paths. They do not predict whether a future membership change is

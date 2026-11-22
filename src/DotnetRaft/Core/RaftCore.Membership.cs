@@ -134,21 +134,9 @@ internal sealed partial class RaftCore
             return;
         }
 
-        var proposal = new Message
-        {
-            From = Id,
-            To = Id,
-            Type = MessageType.MsgProp,
-        };
-        proposal.Entries.Add(new Entry
-        {
-            Type = EntryType.EntryConfChangeV2,
-            Data = new ConfChangeV2()
-                .ToByteString(),
-        });
         try
         {
-            Step(proposal);
+            ProposeConfiguration(new ConfChangeV2());
         }
         catch (ProposalDroppedException exception)
         {
@@ -157,42 +145,48 @@ internal sealed partial class RaftCore
         }
     }
 
-    private void ValidateNetworkSnapshot(
-        Snapshot? snapshot)
+    internal void ProposeConfiguration(ProtocolConfChange owned) =>
+        ProposeConfiguration(new Entry { Type = EntryType.EntryConfChange, Data = owned.ToByteString() }, owned.AsV2());
+
+    internal void ProposeConfiguration(ConfChangeV2 owned) =>
+        ProposeConfiguration(new Entry { Type = EntryType.EntryConfChangeV2, Data = owned.ToByteString() }, owned);
+
+    private void ProposeConfiguration(Entry entry, ConfChangeV2 change)
     {
-        Snapshot normalized =
-            ProtocolDefaults.EnsureSnapshot(
-                snapshot?.Clone());
-        ulong snapshotIndex =
-            normalized.Metadata.Index;
-        ConfState state =
-            normalized.Metadata.ConfState;
-        if (snapshotIndex <= Log.Committed
+        var proposal = new Message { From = Id, To = Id, Type = MessageType.MsgProp };
+        proposal.Entries.Add(entry);
+        Dispatch(proposal, new PreparedInput(Proposal: ParsedProposal.FromLocalConfiguration(entry, change)));
+    }
+
+    private IncomingSnapshot PrepareSnapshot(Snapshot? snapshot, bool fromPeer)
+    {
+        if (snapshot?.Metadata is not { } metadata
+            || metadata.Index <= Log.Committed
+            || metadata.ConfState is not { } state
             || !ContainsLocalNode(state))
         {
-            return;
+            return IncomingSnapshot.Ignored;
         }
 
-        var snapshotEntry = new EntryId(
-            Term: normalized.Metadata.Term,
-            Index: snapshotIndex);
-        if (Log.MatchTerm(snapshotEntry))
+        ulong index = metadata.Index;
+        if (Log.MatchTerm(new EntryId(metadata.Term, index)))
         {
-            return;
+            return IncomingSnapshot.Matching(index);
         }
 
-        if (snapshotIndex == ulong.MaxValue)
+        if (index == ulong.MaxValue)
         {
-            throw new ArgumentException(
-                $"Snapshot index {ulong.MaxValue} has no representable successor.",
-                nameof(snapshot));
+            string message = $"Snapshot index {index} has no representable successor.";
+            throw fromPeer
+                ? new ArgumentException(message, nameof(snapshot))
+                : new RaftInvariantException(message);
         }
 
         try
         {
-            _ = BuildSnapshotConfiguration(normalized.Metadata);
+            return IncomingSnapshot.Install(new SnapshotInstallation(snapshot, BuildSnapshotConfiguration(metadata)));
         }
-        catch (ConfigurationChangeException exception)
+        catch (ConfigurationChangeException exception) when (fromPeer)
         {
             throw new ArgumentException(
                 $"Snapshot configuration is invalid: {exception.Message}",
@@ -201,64 +195,30 @@ internal sealed partial class RaftCore
         }
     }
 
-    private void HandleSnapshot(Message message)
+    private void HandleSnapshot(Message message, IncomingSnapshot? prepared)
     {
-        Snapshot snapshot = ProtocolDefaults.EnsureSnapshot(
-            message.Snapshot?.Clone());
-        bool restored = RestoreSnapshot(snapshot);
+        IncomingSnapshot snapshot = prepared ?? PrepareSnapshot(message.Snapshot, fromPeer: false);
+        ulong before = Log.Committed;
+        if (snapshot.Installation is { } installation)
+        {
+            InstallIncomingSnapshot(installation.Snapshot, installation.Configuration);
+        }
+        else if (snapshot.CommitThrough is ulong commitThrough)
+        {
+            Log.CommitTo(commitThrough);
+        }
+
+        TraceCommitAdvanced(before);
         Send(new Message
         {
             To = message.From,
             Type = MessageType.MsgAppResp,
-            Index = restored
-                ? Log.LastIndex
-                : Log.Committed,
+            Index = Log.Committed,
         });
     }
 
-    private bool RestoreSnapshot(Snapshot snapshot)
+    private void InstallIncomingSnapshot(Snapshot snapshot, ConfigurationChangeResult restored)
     {
-        ulong snapshotIndex = snapshot.Metadata.Index;
-        if (snapshotIndex <= Log.Committed)
-        {
-            return false;
-        }
-
-        if (Role != RaftRole.Follower)
-        {
-            if (Term == ulong.MaxValue)
-            {
-                throw new RaftInvariantException(
-                    "Raft term overflow while rejecting a snapshot outside follower state.");
-            }
-
-            BecomeFollower(
-                Term + 1,
-                RaftMessageTargets.None);
-            return false;
-        }
-
-        ConfState state = snapshot.Metadata.ConfState;
-        if (!ContainsLocalNode(state))
-        {
-            return false;
-        }
-
-        var snapshotEntry = new EntryId(
-            Term: snapshot.Metadata.Term,
-            Index: snapshotIndex);
-        if (Log.MatchTerm(snapshotEntry))
-        {
-            ulong previousCommit = Log.Committed;
-            Log.CommitTo(snapshotIndex);
-            TraceCommitAdvanced(previousCommit);
-            return false;
-        }
-
-        ConfigurationChangeResult restored =
-            BuildSnapshotConfiguration(snapshot.Metadata);
-
-        ulong restoredFromCommit = Log.Committed;
         Log.RestoreUncommitted(snapshot);
         if (Log.Applying > Log.Applied
             && configurationForOutstandingApplication is null)
@@ -274,9 +234,7 @@ internal sealed partial class RaftCore
         }
 
         InstallSnapshotConfiguration(restored);
-        Log.CommitTo(snapshotIndex);
-        TraceCommitAdvanced(restoredFromCommit);
-        return true;
+        Log.CommitTo(snapshot.Metadata.Index);
     }
 
     private bool ContainsLocalNode(ConfState state)
@@ -333,5 +291,25 @@ internal sealed partial class RaftCore
         }
 
         MaybeAutoLeave();
+    }
+
+    private sealed record SnapshotInstallation(Snapshot Snapshot, ConfigurationChangeResult Configuration);
+
+    private sealed class IncomingSnapshot
+    {
+        internal static IncomingSnapshot Ignored { get; } = new(null, null);
+
+        private IncomingSnapshot(ulong? commitThrough, SnapshotInstallation? installation)
+        {
+            CommitThrough = commitThrough;
+            Installation = installation;
+        }
+
+        // Neither value is set for an ignored snapshot.
+        internal ulong? CommitThrough { get; }
+        internal SnapshotInstallation? Installation { get; }
+
+        internal static IncomingSnapshot Matching(ulong index) => new(index, null);
+        internal static IncomingSnapshot Install(SnapshotInstallation installation) => new(null, installation);
     }
 }

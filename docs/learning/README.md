@@ -110,7 +110,7 @@ To identify the actual quorum and ordering for one write, also capture the
 matching `MsgAppResp` messages (including the leader's self-acknowledgement),
 the leader's commit advance, and the host's persistence and application
 completion. Breakpoints or local instrumentation around `HandleAppendResponse`,
-`PersistReady`, and `ApplyEntryAsync` make those events visible. A
+`PersistReady`, and `ApplyCommittedEntriesAsync` make those events visible. A
 `MessageSent` trace is a core output event, not a transport delivery or a
 disk completion. Do not infer those events from `/status` alone.
 

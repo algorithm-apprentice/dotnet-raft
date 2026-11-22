@@ -648,6 +648,65 @@ public sealed class SqliteStorageDurabilityTests
             () => reopened.GetEntries(2, 4, budget));
     }
 
+    [Theory]
+    [InlineData("100118022203FF")]
+    [InlineData("1001180200")]
+    [InlineData("100118022600")]
+    [InlineData("1001180283018C01")]
+    [InlineData("10021802")]
+    [InlineData("10011803")]
+    public void TermLookupRejectsMalformedOrMismatchedInteriorEntry(string payload)
+    {
+        using TemporaryStorageDirectory directory = CreateDirectory();
+        using (SqliteStorage storage = CreateStorage(directory))
+        {
+            storage.SetHardState(new HardState { Term = 1 });
+            storage.Append(Entries((1, 1), (2, 1), (3, 1)));
+        }
+
+        ReplacePayload(directory, 2, Convert.FromHexString(payload));
+        using SqliteStorage reopened = CreateStorage(directory);
+
+        StorageException failure = Assert.Throws<StorageException>(() => reopened.GetTerm(2));
+        Assert.Equal(StorageError.Unknown, failure.Error);
+        Assert.Same(failure, Assert.Throws<StorageException>(() => reopened.GetLastIndex()));
+    }
+
+    [Theory]
+    [InlineData("1802", 0UL)]
+    [InlineData("1003180310011802087F2202FF00220101", 1UL)]
+    [InlineData("100118027801830108018401", 1UL)]
+    [InlineData("1001180212017F", 1UL)]
+    [InlineData("10FFFFFFFFFFFFFFFFFF011802", ulong.MaxValue)]
+    public void TermLookupMatchesGeneratedEntryParser(string payload, ulong term)
+    {
+        byte[] bytes = Convert.FromHexString(payload);
+        Entry decoded = Entry.Parser.ParseFrom(bytes);
+        Assert.Equal(2UL, decoded.Index);
+        Assert.Equal(term, decoded.Term);
+        using TemporaryStorageDirectory directory = CreateDirectory();
+        using (SqliteStorage storage = CreateStorage(directory))
+        {
+            storage.SetHardState(new HardState { Term = term });
+            storage.Append(Entries((1, term), (2, term), (3, term)));
+        }
+
+        ReplacePayload(directory, 2, bytes);
+        using SqliteStorage reopened = CreateStorage(directory);
+        Assert.Equal(decoded.Term, reopened.GetTerm(2));
+        Assert.Equal(decoded, Assert.Single(reopened.GetEntries(2, 3, ulong.MaxValue)));
+    }
+
+    private static void ReplacePayload(TemporaryStorageDirectory directory, ulong index, byte[] payload)
+    {
+        using SqliteConnection connection = OpenRaw(directory.DatabasePath);
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = "UPDATE raft_entries SET payload = $payload WHERE entry_index = $index;";
+        command.Parameters.AddWithValue("$payload", payload);
+        command.Parameters.AddWithValue("$index", EncodeIndex(index));
+        Assert.Equal(1, command.ExecuteNonQuery());
+    }
+
     [Fact]
     public void FailedBatchRollsBackEveryCategory()
     {

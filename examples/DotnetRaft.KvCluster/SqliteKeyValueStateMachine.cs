@@ -152,50 +152,87 @@ public sealed class SqliteKeyValueStateMachine
         ByteString data)
     {
         ArgumentNullException.ThrowIfNull(data);
-        KvCommand command =
-            DurableKvCommandCodec.Decode(
-                data.Span);
-        ByteString fingerprint =
-            DurableKvCommandCodec.Fingerprint(
-                command);
+        (KvCommand command, ByteString fingerprint) = DurableKvCommandCodec.ParseForApplication(data.Span);
 
         lock (gate)
         {
             ThrowIfDisposed();
-            EnsureNext(index);
+            EnsureNext(physicalApplied, index);
             using SqliteTransaction transaction =
                 connection.BeginTransaction(
                     deferred: false);
-            RequestRecord? existing =
-                ReadRequest(
-                    command.RequestId,
-                    transaction);
-            if (existing is null)
+            KvApplyResult result = ApplyCommandCore(index, index, command, fingerprint, transaction);
+            CommitAppliedPrefix(index, transaction);
+            return result;
+        }
+    }
+
+    // The Ready consumer passes a nonempty run of ordinary entries. The
+    // entire run becomes visible at commit, including its request results.
+    internal IReadOnlyList<KvApplyResult> ApplyNormalEntries(IReadOnlyList<Entry> entries, int start, int end)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(start);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(end, start);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(end, entries.Count);
+        var results = new List<KvApplyResult>();
+        lock (gate)
+        {
+            ThrowIfDisposed();
+            using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
+            ulong previous = physicalApplied;
+            ulong appliedThrough = entries[end - 1].Index;
+            for (int offset = start; offset < end; offset++)
             {
-                ApplyMutation(
-                    command,
-                    transaction);
-                InsertRequest(
-                    command.RequestId,
-                    fingerprint,
-                    index,
-                    transaction);
+                Entry entry = entries[offset];
+                EnsureNext(previous, entry.Index);
+                if (entry.Type != EntryType.EntryNormal)
+                {
+                    throw new InvalidDataException($"Entry {entry.Index} is not an ordinary application entry.");
+                }
+
+                if (!entry.Data.IsEmpty)
+                {
+                    (KvCommand command, ByteString fingerprint) = DurableKvCommandCodec.ParseForApplication(entry.Data.Span);
+                    results.Add(ApplyCommandCore(entry.Index, appliedThrough, command, fingerprint, transaction));
+                }
+
+                previous = entry.Index;
             }
 
-            UpdateMetadata(
-                index,
-                confState,
-                transaction);
-            transaction.Commit();
-            physicalApplied = index;
-            return new KvApplyResult(
-                command.RequestId,
-                existing?.Fingerprint ?? fingerprint,
-                existing?.ResultIndex ?? index,
-                index,
-                Duplicate: existing is not null,
-                Conflict: false).ForRequest(fingerprint);
+            CommitAppliedPrefix(appliedThrough, transaction);
         }
+
+        return results;
+    }
+
+    private KvApplyResult ApplyCommandCore(
+        ulong index,
+        ulong appliedThrough,
+        KvCommand command,
+        ByteString fingerprint,
+        SqliteTransaction transaction)
+    {
+        RequestRecord? existing = ReadRequest(command.RequestId, transaction);
+        if (existing is null)
+        {
+            ApplyMutation(command, transaction);
+            InsertRequest(command.RequestId, fingerprint, index, transaction);
+        }
+
+        return new KvApplyResult(
+            command.RequestId,
+            existing?.Fingerprint ?? fingerprint,
+            existing?.ResultIndex ?? index,
+            appliedThrough,
+            Duplicate: existing is not null,
+            Conflict: false).ForRequest(fingerprint);
+    }
+
+    private void CommitAppliedPrefix(ulong index, SqliteTransaction transaction)
+    {
+        UpdateMetadata(index, confState, transaction);
+        transaction.Commit();
+        physicalApplied = index;
     }
 
     public void AdvanceNoOp(ulong index)
@@ -203,16 +240,11 @@ public sealed class SqliteKeyValueStateMachine
         lock (gate)
         {
             ThrowIfDisposed();
-            EnsureNext(index);
+            EnsureNext(physicalApplied, index);
             using SqliteTransaction transaction =
                 connection.BeginTransaction(
                     deferred: false);
-            UpdateMetadata(
-                index,
-                confState,
-                transaction);
-            transaction.Commit();
-            physicalApplied = index;
+            CommitAppliedPrefix(index, transaction);
         }
     }
 
@@ -227,7 +259,7 @@ public sealed class SqliteKeyValueStateMachine
         lock (gate)
         {
             ThrowIfDisposed();
-            EnsureNext(index);
+            EnsureNext(physicalApplied, index);
             using SqliteTransaction transaction =
                 connection.BeginTransaction(
                     deferred: false);
@@ -1010,13 +1042,12 @@ public sealed class SqliteKeyValueStateMachine
                 physicalApplied);
     }
 
-    private void EnsureNext(ulong index)
+    private static void EnsureNext(ulong previous, ulong index)
     {
-        if (physicalApplied == ulong.MaxValue
-            || index != physicalApplied + 1)
+        if (previous == ulong.MaxValue || index != previous + 1)
         {
             throw new InvalidOperationException(
-                $"Committed entry index {index} does not follow physical application index {physicalApplied}.");
+                $"Committed entry index {index} does not follow physical application index {previous}.");
         }
     }
 
