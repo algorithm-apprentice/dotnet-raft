@@ -26,7 +26,7 @@ public sealed partial class ReleaseMetadataTests
             "algorithm-apprentice",
             Value(document, "Authors"));
         Assert.Equal(
-            "An educational, behavior-oriented C# implementation of the etcd Raft consensus state machine for .NET.",
+            "A deterministic Raft consensus library for building replicated state machines in .NET.",
             Value(document, "Description"));
         Assert.Equal(
             "LICENSE",
@@ -135,9 +135,13 @@ public sealed partial class ReleaseMetadataTests
             "LICENSE",
             "README.md",
             "THIRD-PARTY-NOTICES.md",
-            "docs/public-api.md",
-            "docs/parity-matrix.md",
-            "docs/performance.md",
+            "docs/README.md",
+            "docs/integration/README.md",
+            "docs/integration/recovery.md",
+            "docs/internals/README.md",
+            "docs/learning/README.md",
+            "docs/maintaining/README.md",
+            "docs/maintaining/benchmarks.md",
             "eng/pack-release.sh",
             "eng/verify-package.sh",
             "eng/verify-sqlite-package.sh",
@@ -196,14 +200,8 @@ public sealed partial class ReleaseMetadataTests
     public void RepositoryDocumentationLinksResolve()
     {
         string root = ReleaseTestPaths.RepositoryRoot;
-        IEnumerable<string> documents = Directory.EnumerateFiles(
-                Path.Combine(root, "docs"),
-                "*.md",
-                SearchOption.AllDirectories)
-            .Concat(Directory.EnumerateFiles(
-                Path.Combine(root, "examples"),
-                "README.md",
-                SearchOption.AllDirectories));
+        IEnumerable<string> documents = DocumentationPaths(root)
+            .Append(Path.Combine(root, "AGENTS.md"));
         foreach (string document in documents)
         {
             string text = File.ReadAllText(document);
@@ -212,56 +210,74 @@ public sealed partial class ReleaseMetadataTests
             {
                 string target =
                     link.Groups["target"].Value;
-                if (target.StartsWith(
-                        "https://",
-                        StringComparison.Ordinal)
-                    || target.StartsWith(
-                        "http://",
-                        StringComparison.Ordinal)
-                    || target.StartsWith(
-                        '#'))
+                string? resolved = ResolveDocumentationPath(
+                    root,
+                    document,
+                    target);
+                if (resolved is null)
                 {
                     continue;
                 }
 
-                string path = target.Split('#')[0];
-                if (path.Length == 0)
-                {
-                    continue;
-                }
-
-                string resolved = Path.GetFullPath(
-                    Path.Combine(
-                        Path.GetDirectoryName(document)!,
-                        Uri.UnescapeDataString(path)));
                 Assert.True(
-                    File.Exists(resolved)
-                    || Directory.Exists(resolved),
+                    PathExistsWithExactCase(root, resolved),
                     $"{Path.GetRelativePath(root, document)} links to missing {target}.");
             }
         }
     }
 
     [Fact]
-    public void ReferenceCommitIsConsistent()
+    public void AllDocumentationIsReachableFromTheRepositoryReadme()
     {
-        string[] documents =
-        [
-            "README.md",
-            "THIRD-PARTY-NOTICES.md",
-            "docs/parity-matrix.md",
-            "docs/reference-architecture.md",
-        ];
-        foreach (string document in documents)
+        string root = ReleaseTestPaths.RepositoryRoot;
+        var unseen = DocumentationPaths(root).ToHashSet(StringComparer.Ordinal);
+        var queue = new Queue<string>();
+        queue.Enqueue(Path.Combine(root, "README.md"));
+        while (queue.TryDequeue(out string? document))
         {
-            string path = Path.Combine(
-                ReleaseTestPaths.RepositoryRoot,
-                document);
-            Assert.Contains(
-                ReferenceCommit,
-                File.ReadAllText(path),
-                StringComparison.Ordinal);
+            if (!unseen.Remove(document))
+            {
+                continue;
+            }
+
+            foreach (Match link in
+                     MarkdownLinkRegex().Matches(File.ReadAllText(document)))
+            {
+                string? target = ResolveDocumentationPath(
+                    root,
+                    document,
+                    link.Groups["target"].Value);
+                if (target is null)
+                {
+                    continue;
+                }
+
+                if (Directory.Exists(target))
+                {
+                    target = Path.Combine(target, "README.md");
+                }
+
+                if (unseen.Contains(target))
+                {
+                    queue.Enqueue(target);
+                }
+            }
         }
+
+        string missing = string.Join(
+            ", ",
+            unseen.Select(path => Path.GetRelativePath(root, path))
+                .Order(StringComparer.Ordinal));
+        Assert.True(unseen.Count == 0, $"Unreachable documentation: {missing}");
+    }
+
+    [Fact]
+    public void ThirdPartyNoticesIdentifyTheFixtureSource()
+    {
+        string notices = File.ReadAllText(Path.Combine(
+            ReleaseTestPaths.RepositoryRoot,
+            "THIRD-PARTY-NOTICES.md"));
+        Assert.Contains(ReferenceCommit, notices, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -271,7 +287,8 @@ public sealed partial class ReleaseMetadataTests
             Path.Combine(
                 ReleaseTestPaths.RepositoryRoot,
                 "docs",
-                "performance.md"));
+            "maintaining",
+            "benchmarks.md"));
         Match match = Regex.Match(
             performance,
             @"^commit: (?<commit>[0-9a-f]{40})$",
@@ -317,6 +334,76 @@ public sealed partial class ReleaseMetadataTests
                 StringComparison.Ordinal));
     }
 
+    private static IEnumerable<string> DocumentationPaths(string root)
+    {
+        return Directory.EnumerateFiles(
+                Path.Combine(root, "docs"),
+                "*.md",
+                SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(root, "examples"),
+                "README.md",
+                SearchOption.AllDirectories))
+            .Concat([
+                Path.Combine(root, "README.md"),
+                Path.Combine(root, "src", "DotnetRaft.Sqlite", "README.md"),
+                Path.Combine(root, "THIRD-PARTY-NOTICES.md"),
+            ]);
+    }
+
+    private static string? ResolveDocumentationPath(
+        string root,
+        string document,
+        string target)
+    {
+        string path = target.Split('#')[0];
+        if (path.Length == 0)
+        {
+            return document;
+        }
+
+        Match repositoryLink = RepositoryMainLinkRegex().Match(path);
+        if (repositoryLink.Success)
+        {
+            return Path.GetFullPath(
+                Uri.UnescapeDataString(repositoryLink.Groups["path"].Value),
+                root);
+        }
+
+        if (Uri.TryCreate(path, UriKind.Absolute, out _))
+        {
+            return null;
+        }
+
+        return Path.GetFullPath(
+            Uri.UnescapeDataString(path),
+            Path.GetDirectoryName(document)!);
+    }
+
+    private static bool PathExistsWithExactCase(string root, string fullPath)
+    {
+        string directory = root;
+        foreach (string part in Path.GetRelativePath(root, fullPath)
+                     .Split(Path.DirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part == ".")
+            {
+                continue;
+            }
+
+            if (!Directory.Exists(directory)
+                || !Directory.EnumerateFileSystemEntries(directory)
+                    .Any(entry => Path.GetFileName(entry) == part))
+            {
+                return false;
+            }
+
+            directory = Path.Combine(directory, part);
+        }
+
+        return true;
+    }
+
     private static string Value(
         XDocument document,
         string name)
@@ -331,4 +418,9 @@ public sealed partial class ReleaseMetadataTests
         @"\[[^\]]+\]\((?<target>[^)\s]+)(?:\s+""[^""]*"")?\)",
         RegexOptions.CultureInvariant)]
     private static partial Regex MarkdownLinkRegex();
+
+    [GeneratedRegex(
+        @"^https://github\.com/algorithm-apprentice/dotnet-raft/(?:blob|tree)/main/(?<path>.+)$",
+        RegexOptions.CultureInvariant)]
+    private static partial Regex RepositoryMainLinkRegex();
 }

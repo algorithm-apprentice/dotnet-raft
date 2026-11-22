@@ -2,9 +2,10 @@
 
 If [chapter 2](02-log-and-replication.md) explains what the algorithm chooses,
 this chapter explains when the outside world is allowed to see the choice.
-The [host contract](../public-api.md) specifies the integration ordering and
-[application progress](../public-api.md#application-progress); the executions
-below explain why those boundaries exist and how to recognize mistakes.
+The [Ready contract](../integration/ready.md) specifies integration ordering.
+The examples below explain why those boundaries exist, including why the
+host's [physical application cursor](../integration/application.md#application-progress)
+must be tracked separately.
 
 ## Separate a decision from its effects
 
@@ -93,7 +94,7 @@ relax durability on individual calls.
 Synchronous processing has one acknowledgement, `Advance`. The node exposes
 the complete Ready, the host handles it, and `Advance` uses the saved
 metadata to confirm it. Read `RawNode.AdvanceCore` with the
-[synchronous contract](../public-api.md#synchronous-ready-loop). `RaftNode`
+[synchronous contract](../integration/ready.md#synchronous-ready-loop). `RaftNode`
 delegates that work to `RawNode`; its background command loop is not a
 substitute for the host's Ready consumer.
 
@@ -119,7 +120,7 @@ restored from a newer prefix. The apply worker can receive only committed
 entries already acknowledged stable. In async mode there is no `Advance`;
 processing the diagnostic entry/snapshot fields as well as the local worker
 messages would process the work twice. Use the complete
-[append-worker routing example](../public-api.md#append-worker) for actual
+[append-worker routing example](../integration/ready.md#append-worker) for actual
 host code. In particular network replies in `request.Responses` do **not** go
 back to the local node just because the outer request was local.
 
@@ -149,21 +150,24 @@ the unstable tail because earlier append requests run in FIFO order.
 Snapshot completion is different: it can acknowledge a committed snapshot
 across a term change, but must not remove or reinstall a newer unstable
 snapshot's configuration. See the
-[ABA test](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs)
-and the [pinned scenario](../../tests/DotnetRaft.Tests/Interaction/PinnedTestData/async_storage_writes_append_aba_race.txt).
+[ABA response tests](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs)
+to step through the stale-acknowledgement execution in C#.
 
 ## Evaluate crashes at boundaries, not at arbitrary source lines
 
 The runnable KV host has two durable stores. The Raft database owns the
 stable log, hard state, snapshot, and pending snapshot marker. The application
 database owns rows, deduplicated request results, physical applied index,
-and membership at that index. They do not form one SQLite transaction.
+and membership at that index. They do not form one SQLite transaction. The
+table also includes the commit-only gap a host can create with independent
+async workers or non-forced writes. The KV example instead persists commit
+with FULL synchronization before applying the batch.
 
 | Where the process stops | What the next host can know | Safe next action |
 |---|---|---|
 | An append is still queued; no complete generation was published | In-memory log changes might be lost | Start from the old durable prefix; allow the leader to retry. |
 | Entry and commit are durable, but application has not run | The node can recover entries and see that work remains | Start with the actual physical cursor and replay committed entries after it. |
-| A committed, stable entry was applied before a commit-only write became durable | Trusted application state shows an applied prefix ahead of the recovered commit | Verify that the retained Raft prefix covers it; repair commit or roll the application back. Do not invent term or vote. |
+| A different host applied a committed, stable entry before a commit-only write became durable | Trusted application state shows an applied prefix ahead of the recovered commit | Verify that the retained Raft prefix covers it; repair commit or roll the application back. Do not invent term or vote. |
 | An incoming Raft snapshot is durable, but app restore has not finished | The pending marker identifies the exact incomplete cross-store operation | Restore application bytes, index, and membership together and acknowledge the marker. |
 | App restore finished, but snapshot acknowledgement did not | A pending marker still exists, even though its effects may already be durable | Restore idempotently and then clear the marker. |
 | One store is restored from an unrelated backup | The indexes and configuration may look plausible but the generations need not match | Do not assume crash recovery proves they are a valid pair; restore a coordinated set. |
@@ -176,7 +180,7 @@ The example's process-kill tests check transaction/restart behavior; they do
 not emulate a storage device losing power or prove that independent live
 copies of two databases are compatible. On restart, handing Raft a newer
 `Applied` does not update the membership supplied by storage. Work through
-the [restart contract](../public-api.md#restart) if the application has
+the [restart contract](../integration/recovery.md#restart) if the application has
 already applied a configuration entry newer than the retained snapshot.
 
 ### A newer snapshot does not make an older Ready retroactively disappear

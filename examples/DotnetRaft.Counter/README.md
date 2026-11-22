@@ -68,8 +68,10 @@ Node 3: committed=5, applied=5, counter=1.
 
 The playback uses volatile memory, fixed membership, and no snapshots or
 restarts. The write ordering illustrates the protocol, not crash-safe
-publication. To integrate real storage, read the [host contract](../../docs/public-api.md)
+publication. To integrate real storage, read the [Ready contract](../../docs/integration/ready.md)
 and [SQLite package guide](../../src/DotnetRaft.Sqlite/README.md); do not copy
 the separate in-memory writes as a durable transaction. The
 [durable KV cluster](../DotnetRaft.KvCluster/README.md) is the next example
 for a real transport, `RaftNode`, linearizable reads, and recovery.
+The [learning path](../../docs/learning/README.md) explains why the commit and
+application observations in this run are different.

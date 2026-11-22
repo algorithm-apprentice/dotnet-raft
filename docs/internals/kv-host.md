@@ -1,10 +1,10 @@
 # Durable gRPC KV Host Design
 
-This is the design of the fixed three-node example, not a second Raft host
-contract. See the [runbook](../../examples/DotnetRaft.KvCluster/README.md) for
-commands and HTTP behavior, the [host contract](../public-api.md) for shared
-ordering rules, and [ADR 0007](../adr/0007-durable-fixed-membership-kv-host.md)
-for the scope decision.
+Part of the [implementation map](README.md). This page explains application
+choices in the fixed three-node example. The
+[runbook](../../examples/DotnetRaft.KvCluster/README.md) owns commands and
+HTTP behavior. The [host contract](../integration/README.md) owns rules
+that any service must follow.
 
 ## Two stores, one application prefix
 
@@ -39,7 +39,7 @@ not against the bytes of a later conflicting entry.
 
 Mutation success follows local durable application or an existing durable
 result. It does not follow merely from `ProposeAsync` returning. Reads use
-the [physical ReadIndex barrier](../public-api.md#read-index); the local-read
+the [physical ReadIndex barrier](../integration/application.md#read-index); the local-read
 endpoint makes no linearizability promise.
 
 ## Configuration and no-op entries
@@ -66,7 +66,7 @@ at the same index, but refuses to move the application backward.
 
 ## Ready processing
 
-The host uses `RaftNode` with [synchronous storage](../public-api.md#synchronous-ready-loop).
+The host uses `RaftNode` with [synchronous storage](../integration/ready.md#synchronous-ready-loop).
 It persists the batch before sending messages, restores an incoming snapshot
 if present, and applies committed entries before `AdvanceAsync`. The same
 consumer runs restoration and application in order; it does not use early
@@ -93,7 +93,7 @@ generation. Treat both databases as one [recovery set](../../examples/DotnetRaft
 the existing application is still behind it. Recovery verifies the physical
 cursor, fixed membership, and durable log bounds before constructing the
 node. If the trusted application cursor is ahead of the recovered commit,
-it repairs only commit as described in the [restart contract](../public-api.md#restart).
+it repairs only commit as described in the [restart contract](../integration/recovery.md#restart).
 Replay starts after the recovered physical cursor, not after the last
 volatile `Advance`.
 

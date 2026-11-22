@@ -13,7 +13,7 @@ It persists:
 
 ## Install
 
-Follow the [repository installation instructions](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/README.md#install)
+Follow the [local package installation guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/install.md)
 to build both local packages and install `DotnetRaft.Sqlite`. The package
 targets `net10.0` and uses `Microsoft.Data.Sqlite`.
 
@@ -60,16 +60,16 @@ Acknowledgement requires the exact pending index and durable commit covering
 it. The snippet resolves only an incoming snapshot already marked pending;
 do not use it to synthesize lost Raft state. A null marker does not prove the
 application database is current. Continue
-with the [host restart contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#restart).
+with the [host restart contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/recovery.md#restart).
 In particular, `SqliteStorage.GetInitialState()` takes `ConfState` from the
 retained snapshot; setting `RaftConfig.Applied` does not update it.
 
 ## Persisting Ready and local append work
 
 Call `storage.PersistReady(ready)` at the persistence step of the
-[synchronous Ready loop](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#synchronous-ready-loop).
+[synchronous Ready loop](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/ready.md#synchronous-ready-loop).
 Call `storage.PersistStorageAppend(request)` in the
-[asynchronous append worker](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#append-worker)
+[asynchronous append worker](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/ready.md#append-worker)
 instead when using asynchronous storage writes. Both methods publish snapshot,
 entries, and hard state in one `synchronous=FULL` transaction. Neither sends
 messages nor applies application state.
@@ -94,10 +94,10 @@ of the requested range.
 - dispose the storage during orderly shutdown.
 
 The package does not expose a live backup API. An external SQLite `.backup`
-against the live, exclusively owned Raft database is not supported. The
-supported procedure is to stop the node, dispose storage, and preserve the
-complete recovery set together. Never copy only the main file of a live WAL
-database.
+against the live, exclusively owned Raft database is not supported. Stop
+the host, including its storage and application workers, dispose storage,
+and preserve the complete recovery set together. Never copy only the main
+file of a live WAL database.
 
 The package stores Raft consensus state only. It does not implement an
 application state machine, MVCC, lease/watch/auth, or cross-database
@@ -107,4 +107,4 @@ crashes, not mismatched backups. Preserve the entire stopped node's data
 directory rather than backing up or restoring one database independently.
 
 For the layout and transaction rationale, see the
-[SQLite storage design](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/design/sqlite-durable-storage.md).
+[SQLite storage internals](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/internals/sqlite-storage.md).

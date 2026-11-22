@@ -1,8 +1,8 @@
 # 1. Why Raft elections are safe
 
 This chapter derives the rules behind leader election and commitment. Keep
-the [learning guide](../raft-learning-guide.md) open as a map and the
-[host contract](../public-api.md) as the current integration specification.
+the [learning path](README.md) open as a map and the
+[host contract](../integration/README.md) for service requirements.
 Examples here are explanatory traces, not a second API contract.
 
 ## Start with the problem, not the roles
@@ -225,7 +225,7 @@ lease mechanisms.
 ## Experiments
 
 From the repository root, after the setup in the
-[learning guide](../raft-learning-guide.md#prepare-the-repository-for-offline-use):
+[learning guide](README.md#prepare-the-repository-for-offline-use):
 
 ```bash
 dotnet test tests/DotnetRaft.Tests -c Debug --no-restore \

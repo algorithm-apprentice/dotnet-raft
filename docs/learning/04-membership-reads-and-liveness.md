@@ -131,13 +131,15 @@ leader to repeat the write. A subsequent read does not need to return any
 particular intermediate value if writes overlap it; it needs a value that
 admits an order consistent with real time.
 
-### Trace a read through this port
+<a name="trace-a-read-through-this-port"></a>
+
+### Trace a read through dotnet-raft
 
 1. The caller supplies an opaque request context to
    [`RawNode.ReadIndex`](../../src/DotnetRaft/RawNode.cs) to correlate one
    request with its later `ReadState`; the KV example uses a GUID. Role
    routing can forward a follower's `MsgReadIndex` to its known leader.
-   See the [host contract](../public-api.md#read-index) for timeouts and retries.
+   See the [read contract](../integration/application.md#read-index) for timeouts and retries.
 2. In [`RaftCore.HandleLeaderReadIndex`](../../src/DotnetRaft/Core/RaftCore.cs),
    follow the current-term gate before the local singleton fast path. Neither
    that fast path nor a lease-based reply bypasses the application's physical
@@ -173,18 +175,21 @@ append `Match`, but it attests a read exchange, not more durable entries.
 `TickLeader` checks activity at election intervals when `CheckQuorum` is on.
 `HandleCheckQuorum` must use the current voter configuration; an active
 learner does not repair a lost voter majority. A role can still be stale
-before the relevant ticks or messages arrive. The lease option requires
-`CheckQuorum` and bounded clock behavior from the host; the library cannot
-infer that assumption from a `CancellationToken` or nominal tick setting.
-Prefer safe reads until those assumptions are explicit.
+before the relevant ticks or messages arrive. A lease read skips a fresh
+quorum round, so its safety depends on no competing quorum being able to
+elect while the old leader still treats its lease as usable. The option
+requires `CheckQuorum`, but quorum checking alone is not that timing
+guarantee. Factor in relative clock drift and scheduler pauses in the host's
+tick model. Prefer safe reads unless those assumptions can be justified.
 
 For transfer, follow `HandleLeaderTransfer`: identify an eligible target,
 catch it up, and send `MsgTimeoutNow` when its acknowledged match reaches
 the current last index. The transferee still starts a real election. The
 leader rejects new proposals during transfer so the log does not keep moving
 away from the target. A failed transfer must not disable writes forever;
-this port also rechecks a pending automatic joint exit when a transfer times
-out. That ordering is documented in
+the leader also rechecks a pending automatic joint exit when a transfer times
+out: a future apply could otherwise depend on the same joint quorum that
+cannot make progress. That ordering is documented in
 [ADR 0009](../adr/0009-auto-leave-retry-after-transfer-timeout.md).
 
 ## Experiments
@@ -198,7 +203,7 @@ dotnet test tests/DotnetRaft.Tests -c Debug --no-restore \
    [read-index tests](../../tests/DotnetRaft.Tests/Core/RaftCoreReadIndexQuorumTests.cs).
    Write down the acknowledgement set after each step; say which majority is
    still missing before inspecting the assertions.
-2. In the [manual cluster lab](../raft-learning-guide.md#manual-laboratory),
+2. In the [manual cluster lab](README.md#manual-laboratory),
    compare the stale local endpoint with the ReadIndex endpoint after losing
    a quorum. Explain why "cannot verify a fresh value" does not mean the
    local database must be empty or unavailable for inspection.

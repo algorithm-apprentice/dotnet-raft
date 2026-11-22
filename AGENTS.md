@@ -15,21 +15,20 @@
 
 ## Use the right specification
 
-- [Host integration contract](docs/public-api.md): Ready, persistence,
+- [Host integration contract](docs/integration/README.md): Ready, persistence,
   application, snapshots, and recovery.
 - [SQLite package guide](src/DotnetRaft.Sqlite/README.md): SQLite-specific
   persistence and operational requirements. The
-  [storage design](docs/design/sqlite-durable-storage.md) explains the schema
+  [storage design](docs/internals/sqlite-storage.md) explains the schema
   and transaction choices.
 - [KV example](examples/DotnetRaft.KvCluster/README.md) and
-  [example design](docs/design/durable-grpc-kv-host.md): running the host and
+  [example design](docs/internals/kv-host.md): running the host and
   its application protocol.
-- [Architecture](docs/reference-architecture.md),
-  [parity matrix](docs/parity-matrix.md), and
-  [design index](docs/design/README.md): ownership, reference coverage, and
-  decision history. The numbered milestone notes are not current contracts.
-  Follow the [documentation maintenance rules](docs/design/README.md#maintaining-these-docs)
-  when recording a behavior change or design decision.
+- [Implementation map](docs/internals/README.md) and
+  [decisions](docs/adr/README.md): current ownership and design rationale.
+  Follow the [documentation rules](docs/maintaining/README.md#maintaining-the-docs)
+  when recording a change. Explain the invariant, its owner, and what verifies
+  it; another implementation is not a substitute for a reason.
 
 ## Verify the boundary that changed
 

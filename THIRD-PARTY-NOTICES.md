@@ -12,9 +12,8 @@ Copyright 2015-2026 The etcd Authors.
 The upstream work is licensed under the Apache License, Version 2.0. A copy of
 that license is included in this repository as `LICENSE`.
 
-The derived work changes the implementation language to C#, reorganizes the
-code around an explicit implementation dependency DAG, and adapts APIs and
-tests to .NET conventions.
+The derived work changes the implementation language to C#, uses its own
+component boundaries, and adapts APIs and tests to .NET conventions.
 
 ## Microsoft.Data.Sqlite
 

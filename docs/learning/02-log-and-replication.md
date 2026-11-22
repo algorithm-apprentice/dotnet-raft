@@ -99,6 +99,8 @@ entry just because the next source also promises one. SQLite checks the
 stored payload length before reading or decoding BLOBs beyond its page.
 `StorageError.Compacted` can mean a snapshot is needed, whereas unexpected
 unavailability inside the requested stable range is a consistency problem.
+The [storage interface](../integration/storage.md#storage-reads) specifies what
+each backend must return; the core's merged view does not replace that contract.
 
 ### Read half-open intervals out loud
 
@@ -150,7 +152,7 @@ worker and acknowledgements first.
 
 ### A heartbeat is not an append acknowledgement
 
-In this port `MsgHeartbeat` is separate from `MsgApp`. It carries no entries,
+`MsgHeartbeat` is separate from `MsgApp`. It carries no entries,
 so the leader sends that peer at most `min(Match, Committed)` for commit.
 The reply can unblock a paused probe, report activity for quorum checking,
 and echo a read context. It does **not** prove the peer has copied the latest
@@ -182,7 +184,7 @@ Distinguish two kinds of feedback: the sender's `ReportSnapshot` reports a
 transport result to progress tracking; a follower's protocol acknowledgement
 reports replication evidence. A successful transport can set up the next
 probe after the snapshot, without proving that the receiver has applied it.
-The [host contract](../public-api.md#network-transport) explains the paused
+The [transport contract](../integration/node.md#network-transport) explains the paused
 probe state. A later append acknowledgement can also resume replication if
 it proves the follower has reached the retained log boundary.
 

@@ -1,102 +1,41 @@
-# ADR 0002: Release and Compatibility Contract
+# ADR 0002: Release and compatibility contract
 
 - **Status:** Accepted
 - **Date:** 2026-10-03
-- **Decision owners:** dotnet-raft maintainers
 
 ## Context
 
-D00-D25 complete the declared synchronous and asynchronous `etcd/raft`
-behavioral port. D26 must turn that implementation into a reproducible,
-documented package without inventing compatibility or migration machinery for
-deployed users that do not yet exist.
-
-The repository already exposes public protocol, storage, `RawNode`, status,
-diagnostic, and concurrent `RaftNode` APIs. Packaging them without a recorded
-baseline would make later refactoring unable to distinguish accidental API
-breakage from intentional evolution.
+Keeping method signatures stable is not enough for a consensus library. A
+host can still break if a message field changes, old state can no longer
+restart, or a completion now requires different persistence ordering.
 
 ## Decision
 
-1. The first package version is `DotnetRaft` `1.0.0`, targeting `net10.0`.
-2. `DotnetRaft` is an educational consensus library, not a transport, gRPC
-   service, durable database, or replicated application. ADR 0006 adds the
-   optional `DotnetRaft.Sqlite` durable consensus-storage package without
-   changing the core package boundary.
-3. Public API compatibility begins at D26:
-   - a checked-in reflection-generated API manifest records the shipped
-     surface;
-   - later intentional breaking changes require a new ADR and appropriate
-     semantic-version change; and
-   - pre-D26 commits are not treated as released compatibility baselines.
-4. Semantic-version compatibility covers:
-   - managed binary API;
-   - C# source API, including nullability, named-argument parameter names,
-     optional defaults, generic constraints, and accessor modifiers;
-   - protobuf wire field numbers, types, cardinality, and enum numeric values;
-   - persisted log/snapshot restart compatibility;
-   - the separately approved `DotnetRaft.Sqlite` public API and schema version;
-   - the [host contract](../public-api.md) for ordering, durability, recovery,
-     Ready, and local-storage protocols first established in D21-D25;
-   - supported target frameworks; and
-   - dependency-major requirements visible to consumers.
-5. Version classification is:
-   - **major:** any incompatible change in the dimensions above, removal of a
-     target framework, or dependency-major change requiring consumer
-     migration;
-   - **minor:** backward-compatible additive API/protobuf fields or enum
-     values, an additional target framework, or opt-in behavior that preserves
-     existing defaults and protocols; and
-   - **patch:** compatible bug fixes, documentation/diagnostic improvements,
-     performance work, and dependency patch/minor updates that preserve the
-     declared contracts.
-6. The package includes:
-   - `DotnetRaft.dll`;
-   - portable symbols in a `.snupkg`;
-   - `README.md`;
-   - `LICENSE`; and
-   - `THIRD-PARTY-NOTICES.md`.
-   `DotnetRaft.Sqlite` independently includes its assembly, portable symbols,
-   SQLite-specific README, license, and notices.
-7. Runtime package dependencies include `Google.Protobuf`; `Grpc.Tools`
-   remains build-private and must not appear as a consumer dependency.
-8. The package is tag-ready but D26 does not publish to nuget.org or create a
-   Git tag automatically.
-9. Behavioral parity is documented in a feature/test matrix. Intentional
-   .NET/API deviations are listed explicitly rather than hidden.
-10. Performance baselines are informative and reproducible, not flaky CI
-   thresholds. CI runs a smoke workload; maintainers capture comparative
-   baselines before performance-sensitive changes.
+The `1.0.0` package baseline targets `net10.0`. Define compatibility across:
 
-## Consequences
+- managed binary and C# source API, including nullability, named parameters,
+  defaults, constraints, and accessors;
+- protobuf field numbers, types, cardinality, and enum values;
+- persisted log/snapshot restart and the separately approved SQLite schema;
+- [host ordering and recovery](../integration/README.md), including local
+  Ready and storage acknowledgement protocols; and
+- supported target frameworks and dependency-major requirements that a
+  consumer must satisfy.
 
-### Positive
+An incompatible change in these dimensions requires a new ADR and a
+**major** version. Use a **minor** version for compatible additions or opt-in
+behavior preserving existing defaults, and a **patch** for compatible bug
+fixes, documentation and diagnostic improvements, performance changes, or
+dependency updates that preserve the contracts.
 
-- Consumers receive complete license and provenance metadata.
-- Consensus-only consumers are not forced to restore native SQLite assets.
-- Package contents and dependencies are mechanically verified.
-- The first stable API boundary is explicit.
-- Post-D26 internal refactoring can rely on both behavioral tests and an API
-  manifest.
-- Benchmarks can detect major regressions without making unit tests timing
-  dependent.
+Check managed API, wire, and schema approvals separately. Keep package
+contents, dependencies, symbols, and attribution verifiable. The
+[release procedure](../maintaining/release.md) checks these surfaces without
+publishing or tagging a package.
 
-### Tradeoffs
+## Trade-offs
 
-- `net10.0` consumers require the .NET 10 runtime/toolchain.
-- Generated protobuf public types are part of the initial API manifest.
-- API evolution after 1.0.0 requires explicit compatibility decisions.
-- The repository maintains package, parity, and benchmark documentation.
-
-## Rejected alternatives
-
-- **Publish as `0.x` indefinitely:** rejected because D26 completes the
-  declared feature graph and establishes an explicit supported baseline.
-- **Multi-target older frameworks now:** rejected because no consumer
-  requirement justifies the additional compatibility/test matrix.
-- **Add migration shims before any released data/API dependency exists:**
-  rejected as premature complexity.
-- **Gate CI on wall-clock benchmark thresholds:** rejected as hardware-noisy
-  and likely to make tests flaky.
-- **Omit generated protocol types from compatibility tracking:** rejected
-  because they are public package types used by every host integration.
+Generated public message types are part of the managed API, so generator
+updates can require compatibility review. SQLite has a separate native
+dependency footprint. Timing measurements are comparative, not CI thresholds:
+reproducible workloads are useful without requiring identical machine speed.

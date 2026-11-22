@@ -2,9 +2,9 @@
 
 This chapter is for studying the implementation, not just running the test
 command. Learn to identify which layer is racing, what each test observes,
-and what would count as a counterexample. Our lab tests are inspired by
-MIT 6.824's approach to election, agreement, unreliable links, and recovery;
-they do not run the Go course grader or use its API and performance limits.
+and what would count as a counterexample. The lab separates consensus
+invariants, owner-loop races, client outcomes, and real-process durability
+because none of those observations can substitute for the others.
 
 ## Do not confuse two meanings of concurrency
 
@@ -55,11 +55,11 @@ with `ClaimWinsOverLaterCancellation`. Both issue cancellation; only one
 does so before the linearization point of the local queue claim. This is a
 local API guarantee, not a proof of KV linearizability.
 
-## What matches the 6.824 style
+## What the lab checks
 
-| Course-style question | Local executable evidence |
+| Question | Executable evidence |
 |---|---|
-| Does a healthy group elect and agree? | Core election and replication tests plus the pinned interaction scripts. |
+| Does a healthy group elect and agree? | Core election and replication tests plus deterministic interaction scripts. |
 | Can a disconnected leader still choose a new entry? | `MinorityCannotCommitAndItsOldLeaderRejoins`: 3 and 5 voters, both storage modes. The old leader retains a minority-only suffix, the majority elects and commits, and healing makes the old leader converge. |
 | Does a new process respect what survived the crash? | `CrashAtStorageBoundaryReplaysOnlyUnappliedWorkAndRejoins`: restart from durable consensus and physical application state, exercise replay and the asynchronous commit-only gap, and continue proposing with the surviving quorum. |
 | What if RPCs are lost, delivered out of order, or duplicated? | 32 fixed seeds, 200 choices each, in `RandomizedInteractionPropertyTests`. Incoming network delivery, ticks, commands, Ready, local workers, and crash/restart can interleave. |
@@ -67,7 +67,7 @@ local API guarantee, not a proof of KV linearizability.
 | Can an apparently successful concurrent KV history be wrong? | `ConcurrentClientsProduceALinearizableSingleKeyHistory` checks completed reads, puts, and deletes against a register model, respecting real-time precedence. |
 | Does recovery also work with real processes and files? | The durable KV smoke kills and restarts loopback gRPC processes, verifies snapshot catch-up and failover, and reopens the entire SQLite-backed cluster. SQLite contract tests also isolate publication and recovery. |
 
-### Read the simulator as a lab grader
+### Follow the simulated host
 
 Start in [`RaftLabTests.cs`](../../tests/DotnetRaft.Tests/Interaction/RaftLabTests.cs)
 and [`InteractionEnvironment.cs`](../../tests/DotnetRaft.Tests/Interaction/InteractionEnvironment.cs).
@@ -119,10 +119,9 @@ When a run fails, keep the storage mode, seed, first failing action number,
 and queued message state from the exception. Replay that seed, then reduce
 the sequence to the shortest trace that still breaks the invariant. For a
 stable regression, encode the reduced sequence in an ordinary test rather
-than replacing it with a much larger random loop. The
-[pinned corpus](../parity-matrix.md#corpus-integrity) is complementary: its
-28 files contain 558 checked commands/input cases with expected output,
-not 558 independent random executions.
+than replacing it with a much larger random loop. Deterministic script
+fixtures are complementary: they check named cases and expected output, not
+random coverage. See the [test map](../maintaining/testing.md).
 
 ## From agreement to a client history checker
 
@@ -180,12 +179,12 @@ remain separate from the fixed-membership KV workload.
 
 ### What a green test run cannot establish
 
-It does not exhaust all message orders, certify the implementation against
-the MIT grader, prove wall-clock availability, validate independent database
-backups, or prove that arbitrary client histories across arbitrary real
-failures are linearizable. Scope matters: an exact deterministic regression
-can be stronger evidence for one race than thousands of uncontrolled runs,
-and a process smoke supplies evidence that an in-memory oracle cannot.
+It does not exhaust all message orders, prove wall-clock availability,
+validate independent database backups, or prove that arbitrary client
+histories across real failures are linearizable. An exact deterministic
+regression can be stronger evidence for one race than thousands of
+uncontrolled runs, and a process smoke supplies evidence that an in-memory
+oracle cannot.
 
 Exercises for extending the lab:
 
@@ -199,5 +198,5 @@ Exercises for extending the lab:
    starts, returns, and uncertain results. Decide what a timeout means in
    the model before adding any more randomized actions.
 
-Return to the [main learning guide](../raft-learning-guide.md) for the manual
+Return to the [learning guide](README.md) for the manual
 lab and capstone exercises.

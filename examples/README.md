@@ -13,6 +13,9 @@ The two counter runs share one program. They use memory and a simulated
 network, so neither demonstrates crash durability. The KV cluster is an
 educational loopback host, not a production deployment template.
 
-Use the [host integration contract](../docs/public-api.md) when adapting
+Use the [host integration contract](../docs/integration/README.md) when adapting
 any example. In particular, choosing `RaftNode` for async calls does not
 require opting into asynchronous storage writes.
+
+Continue with the [learning path](../docs/learning/README.md) to explain the
+behaviors you observed, or return to the [documentation map](../docs/README.md).

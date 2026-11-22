@@ -11,7 +11,7 @@ const string PackageId = "DotnetRaft";
 const string SqlitePackageId = "DotnetRaft.Sqlite";
 const string PackageVersion = "1.0.0";
 const string Description =
-    "An educational, behavior-oriented C# implementation of the etcd Raft consensus state machine for .NET.";
+    "A deterministic Raft consensus library for building replicated state machines in .NET.";
 const string SqliteDescription =
     "Durable SQLite consensus storage for DotnetRaft.";
 
@@ -714,7 +714,7 @@ static Dictionary<string, string> ExtractedHashes(
                 StringComparison.OrdinalIgnoreCase)))
     {
         throw new InvalidOperationException(
-            "D26 packages must be unsigned.");
+            "Packages must be unsigned.");
     }
 
     return archive.Entries

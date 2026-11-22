@@ -9,8 +9,8 @@
     <Version>1.0.0</Version>
     <Authors>algorithm-apprentice</Authors>
     <Title>dotnet-raft</Title>
-    <Description>An educational, behavior-oriented C# implementation of the etcd Raft consensus state machine for .NET.</Description>
-    <PackageTags>raft;consensus;distributed-systems;etcd</PackageTags>
+    <Description>A deterministic Raft consensus library for building replicated state machines in .NET.</Description>
+    <PackageTags>raft;consensus;distributed-systems;replication</PackageTags>
     <PackageProjectUrl>https://github.com/algorithm-apprentice/dotnet-raft</PackageProjectUrl>
     <PackageLicenseFile>LICENSE</PackageLicenseFile>
     <PackageReadmeFile>README.md</PackageReadmeFile>

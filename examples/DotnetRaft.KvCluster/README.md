@@ -17,7 +17,7 @@ if you want to see the host loop without gRPC and SQLite. For this example,
 start reading at `ProcessReadyAsync` in [`RaftClusterHost`](RaftClusterHost.cs):
 Raft provides ordered committed entries and read barriers, while this host
 owns transport, the application database, and the client's success response.
-The [host design](../../docs/design/durable-grpc-kv-host.md) explains how
+The [host internals](../../docs/internals/kv-host.md) explain how
 application effects, request results, and recovery fit together.
 
 It is still an educational fixed-membership database. There is no TLS,
