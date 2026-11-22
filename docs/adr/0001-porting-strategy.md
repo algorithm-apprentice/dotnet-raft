@@ -5,6 +5,10 @@
 - **Reference:** `etcd-io/raft` commit
   `1c0011d2c6b7a0230f87bad38ad4c6e70d810f9e`
 
+The reference port is complete. This decision defines the core library
+boundary; [ADR 0006](0006-sqlite-durable-raft-storage.md) added optional
+durable storage as a separate package without changing it.
+
 ## Context
 
 `etcd/raft` is not a complete distributed server. It is a deterministic Raft

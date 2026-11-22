@@ -4,6 +4,11 @@
 - **Date:** 2026-10-04
 - **Decision owners:** dotnet-raft maintainers
 
+For the current operating procedure, use the
+[SQLite package guide](../../src/DotnetRaft.Sqlite/README.md). The
+[storage design](../design/sqlite-durable-storage.md) explains the schema
+and transaction mechanisms.
+
 ## Context
 
 `DotnetRaft` defines the complete stable-storage and Ready durability
@@ -148,7 +153,7 @@ and failure model.
 
 ## Acceptance criteria
 
-This decision is implemented when:
+The original storage milestone was accepted against these gates:
 
 1. every `MemoryStorage` read/mutation behavior has a SQLite-backed equivalent;
 2. Ready and D25 append publication are atomic and durable on return;

@@ -57,8 +57,9 @@ if (pending is not null)
 
 `GetInitialState` rejects startup while a pending snapshot remains.
 Acknowledgement requires the exact pending index and durable commit covering
-it. The snippet resolves only an incoming snapshot already marked pending.
-A null marker does not prove the application database is current. Continue
+it. The snippet resolves only an incoming snapshot already marked pending;
+do not use it to synthesize lost Raft state. A null marker does not prove the
+application database is current. Continue
 with the [host restart contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#restart).
 In particular, `SqliteStorage.GetInitialState()` takes `ConfState` from the
 retained snapshot; setting `RaftConfig.Applied` does not update it.
@@ -76,9 +77,10 @@ messages nor applies application state.
 For an incoming snapshot, restore the application, then acknowledge its exact
 index with `storage.AcknowledgeApplicationSnapshot(index)`. Do this before
 `Advance` in synchronous mode or before delivering the append responses in
-asynchronous mode, under the host's application barrier. In asynchronous mode,
-follow the linked worker protocol: step only responses addressed to the local
-node and send responses addressed to remote peers over the network.
+asynchronous mode, under the host's application barrier. Finish reconciliation
+before processing the next storage batch. In asynchronous mode, follow the
+linked worker protocol: step only responses addressed to the local node and
+send responses addressed to remote peers over the network.
 
 `GetEntries` reads a bounded prefix. It includes a first entry even if it
 exceeds `maxSize` and stops at the budget boundary without decoding the rest
@@ -103,3 +105,6 @@ transactions. If application state is stored separately, treat the Raft and
 application databases as one recovery set. The pending marker handles process
 crashes, not mismatched backups. Preserve the entire stopped node's data
 directory rather than backing up or restoring one database independently.
+
+For the layout and transaction rationale, see the
+[SQLite storage design](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/design/sqlite-durable-storage.md).

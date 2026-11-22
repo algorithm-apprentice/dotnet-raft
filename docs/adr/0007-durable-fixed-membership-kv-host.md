@@ -5,6 +5,12 @@
 - **Date:** 2026-10-04
 - **Decision owners:** dotnet-raft maintainers
 
+This decision supersedes the volatile storage and application portions of
+[ADR 0004](0004-educational-grpc-kv-cluster.md). Use the
+[example runbook](../../examples/DotnetRaft.KvCluster/README.md) and
+[current recovery design](../design/durable-grpc-kv-host.md#startup-and-recovery)
+for the implemented host.
+
 ## Context
 
 The three-node gRPC example demonstrates transport, Ready ordering, proposal
@@ -173,7 +179,7 @@ client protocol concerns in the consensus library.
 
 ## Acceptance criteria
 
-This decision is implemented when:
+The original durable host was accepted against these gates:
 
 1. component tests cover durable set/delete/no-op/configuration,
    deduplication, conflicts, snapshot serialization, restore, and reopening;
@@ -214,3 +220,8 @@ Counts, coverage, and mutation measurements are historical:
   fields; and
 - formatting, package consumers, deterministic package reproduction, and the
   same durable process smoke are enforced by CI.
+
+Later size-boundary work also applies the transport limit during startup
+reconciliation: an oversized replacement snapshot can be skipped only if
+the retained snapshot and suffix still form a valid recovery point. See the
+[current recovery design](../design/durable-grpc-kv-host.md#startup-and-recovery).

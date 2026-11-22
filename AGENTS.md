@@ -18,14 +18,18 @@
 - [Host integration contract](docs/public-api.md): Ready, persistence,
   application, snapshots, and recovery.
 - [SQLite package guide](src/DotnetRaft.Sqlite/README.md): SQLite-specific
-  persistence and operational requirements.
+  persistence and operational requirements. The
+  [storage design](docs/design/sqlite-durable-storage.md) explains the schema
+  and transaction choices.
 - [KV example](examples/DotnetRaft.KvCluster/README.md) and
   [example design](docs/design/durable-grpc-kv-host.md): running the host and
   its application protocol.
 - [Architecture](docs/reference-architecture.md),
   [parity matrix](docs/parity-matrix.md), and
   [design index](docs/design/README.md): ownership, reference coverage, and
-  historical context. Link to the current contract instead of copying it.
+  decision history. The numbered milestone notes are not current contracts.
+  Follow the [documentation maintenance rules](docs/design/README.md#maintaining-these-docs)
+  when recording a behavior change or design decision.
 
 ## Verify the boundary that changed
 

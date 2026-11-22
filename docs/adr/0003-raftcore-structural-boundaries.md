@@ -55,11 +55,15 @@ Apply the refactor incrementally with these techniques:
 
 ## Constraints
 
+These constraints applied to the completed, behavior-preserving extraction.
+See the [current component map](../reference-architecture.md#implemented-c-core-boundaries)
+for the resulting ownership and the [recorded baseline](../design/post-parity-refactor-safety-baseline.md)
+for the historical measurements.
+
 - No public API, protobuf, persisted format, exception text, log text, trace
   order, message order, or durability rule may change.
 - No extracted component or strategy may add a per-message architectural
-  allocation. Measured allocation and timing gates are defined by the
-  refactor plan and are mandatory.
+  allocation. The refactor used explicit allocation and timing gates.
 - Each extracted mutable value has exactly one authoritative owner.
 - Temporary forwarding properties are removed before completion.
 - Components never reference `RaftCore`.

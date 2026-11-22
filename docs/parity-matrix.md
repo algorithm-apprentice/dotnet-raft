@@ -4,7 +4,9 @@ Reference: `etcd-io/raft` commit
 `1c0011d2c6b7a0230f87bad38ad4c6e70d810f9e`.
 
 The matrix tracks behavior and invariants rather than Go syntax or goroutine
-structure.
+structure. D-numbers refer to [completed port milestones](design/README.md#completed-reference-port),
+not the current API contract. Use the [C# test map](reference-architecture.md#test-architecture)
+to find evidence for a change that crosses ownership boundaries.
 
 | Area | Reference sources | C# design/tests | Status |
 |---|---|---|---|

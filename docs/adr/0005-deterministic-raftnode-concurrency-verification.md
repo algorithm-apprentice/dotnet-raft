@@ -119,7 +119,9 @@ code from assertions that protect the owner-loop protocol.
 
 ## Acceptance criteria
 
-This decision is implemented when:
+These were the acceptance gates for the original hardening work, not current
+coverage thresholds. See the [test design](../design/raftnode-concurrency-hardening.md)
+for how to exercise the relevant boundaries today.
 
 1. focused Release coverage reaches at least 90% line and 85% branch for
    `RaftNode`;

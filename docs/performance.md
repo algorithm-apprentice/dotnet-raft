@@ -30,13 +30,14 @@ of SQLite, transport, or end-to-end KV throughput.
 
 ## Methodology
 
-The benchmark project follows the exact workloads, setup boundaries, FNV-1a
-checksum recurrence, GC policy, and JSON schema in
-[D26 parity/release design](design/d26-parity-release-hardening.md).
-
-Construction, snapshot restore, and election are outside proposal/status timed
-regions. Persistence and application operations inside a proposal cycle are
-included.
+The [release workload source](../benchmarks/DotnetRaft.Benchmarks/Program.cs)
+defines the exact setup, operations, checksum, and JSON output. It runs one
+warmup, forces GC before each measured iteration, and verifies that measured
+iterations produce identical checksums. Construction, snapshot restore, and
+election are outside proposal and status timing. The proposal cycle includes
+memory publication and application acknowledgement, not a real application
+transaction. The [refactor workloads](../benchmarks/DotnetRaft.RefactorBenchmarks/Program.cs)
+also report per-operation allocations.
 
 ## D26 reference capture
 

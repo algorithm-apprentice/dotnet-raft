@@ -132,10 +132,9 @@ with the [host integration contract](public-api.md) and trace the same cut in
 
 ## Further reference
 
-- [Architecture](reference-architecture.md) maps the pinned Go reference to
-  the current C# component owners.
+- [Architecture](reference-architecture.md) maps current C# component owners
+  and shows where to find the tests for each boundary.
 - [Parity matrix](parity-matrix.md) maps features to their executable evidence
   and lists intentional deviations from the pinned reference.
-- [Design records](design/README.md) preserve the completed port and later
-  design decisions. They describe their own milestone scope; use the current
-  contract and tests for integration details.
+- [Design records](design/README.md) explain why boundaries were chosen and
+  link the original port notes. Use the host contract for integration rules.

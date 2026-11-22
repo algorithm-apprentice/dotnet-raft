@@ -1,560 +1,129 @@
 # Durable gRPC KV Host Design
 
-- **Status:** Implemented
-- **Date:** 2026-10-04
-- **Scope:** crash-recoverable fixed three-node example
-- **Related decision:** ADR 0007
+This is the design of the fixed three-node example, not a second Raft host
+contract. See the [runbook](../../examples/DotnetRaft.KvCluster/README.md) for
+commands and HTTP behavior, the [host contract](../public-api.md) for shared
+ordering rules, and [ADR 0007](../adr/0007-durable-fixed-membership-kv-host.md)
+for the scope decision.
 
-For commands and observable client behavior, use the
-[KV example README](../../examples/DotnetRaft.KvCluster/README.md). This page
-describes the example's application and recovery design.
+## Two stores, one application prefix
 
-## Objective
+`raft.db` owns the stable log, hard state, retained Raft snapshot, and pending
+restore marker. `application.db` owns the KV rows, mutation results, physical
+cursor and its `ConfState`, and the immutable local node ID. The two databases
+do not share a transaction. The app can nevertheless advance its own cursor
+atomically with the effects and membership at that index.
 
-Turn the existing educational gRPC cluster into a minimal durable distributed
-KV store while preserving its fixed-membership and teaching-oriented scope.
-
-## Configuration
-
-`ClusterOptions` adds:
-
-```text
-Raft:DataDirectory
-Raft:SnapshotThresholdEntries
-Raft:MaxTransportMessageBytes
-```
-
-When `DataDirectory` is omitted:
-
-```text
-<current working directory>/data/node-<NodeId>
-```
-
-Validation requires:
-
-- an absolute normalized local path after resolution;
-- positive snapshot threshold;
-- transport maximum greater than 128 KiB;
-- the existing three loopback peers and port/timeouts; and
-- distinct node data directories in multi-process documentation/tests.
-
-Each node owns:
-
-```text
-<DataDirectory>/raft.db
-<DataDirectory>/application.db
-```
-
-## Security and deployment boundary
-
-Kestrel binds both HTTP and gRPC endpoints with `ListenLocalhost`. The example
-has no TLS, client authentication, peer authentication, or authorization.
-Structural Raft message validation does not bind `Message.From` to a transport
-identity. The listeners must not be exposed outside a trusted local teaching
-environment.
-
-The gRPC service checks the listener and decodes the envelope. The host's
-message receiver checks peer routing and rejects local message types before
-waiting for startup or dispatching to `RaftNode`. Both the gRPC and in-memory
-transports use that receiver rather than maintaining separate filters.
-
-## Projects and dependencies
-
-`examples/DotnetRaft.KvCluster` references:
-
-- `DotnetRaft`;
-- `DotnetRaft.Sqlite`;
-- `Microsoft.Data.Sqlite 10.0.12`; and
-- the existing gRPC packages.
-
-The example remains non-packable.
-
-## Replicated commands
-
-```csharp
-public enum KvCommandType
-{
-    Set = 1,
-    Delete = 2,
-}
-
-public sealed record KvCommand(
-    Guid RequestId,
-    KvCommandType Type,
-    string Key,
-    string? Value);
-```
-
-Validation:
-
-- request ID nonempty;
-- key nonempty;
-- set requires a value;
-- delete requires a null value;
-- unknown command types fail decoding.
-
-Encoding is deterministic UTF-8 JSON. SHA-256 of the encoded bytes is the
-durable deduplication fingerprint.
-
-## Application database
-
-Schema version 1:
-
-```sql
-CREATE TABLE app_metadata (
-    singleton        INTEGER PRIMARY KEY CHECK (singleton = 1),
-    format           TEXT NOT NULL,
-    schema_version   INTEGER NOT NULL,
-    node_id          BLOB NOT NULL CHECK (length(node_id) = 8),
-    physical_applied BLOB NOT NULL CHECK (length(physical_applied) = 8),
-    conf_state       BLOB NOT NULL
-) STRICT;
-
-CREATE TABLE kv (
-    key   TEXT PRIMARY KEY,
-    value TEXT NOT NULL
-) WITHOUT ROWID, STRICT;
-
-CREATE TABLE requests (
-    request_id   BLOB PRIMARY KEY CHECK (length(request_id) = 16),
-    command_hash BLOB NOT NULL CHECK (length(command_hash) = 32),
-    result_index BLOB NOT NULL CHECK (length(result_index) = 8)
-) WITHOUT ROWID, STRICT;
-
-PRAGMA user_version = 1;
-```
-
-Indexes use the same eight-byte big-endian encoding as
-`DotnetRaft.Sqlite`.
-
-The store uses:
-
-```text
-locking_mode=EXCLUSIVE
-journal_mode=WAL
-synchronous=FULL
-fullfsync=ON
-checkpoint_fullfsync=ON
-```
-
-One private monitor serializes all connection access.
-
-`node_id` is immutable. Opening a populated application database with another
-configured node ID fails before Raft starts. The store reports whether it was
-newly created; a missing/recreated application database beside nonempty Raft
-state is always rejected. Process-crash recovery assumes both durable database
-files remain present.
-
-### Backup and restore set
-
-`raft.db` and `application.db` form one recovery set even though they do not
-share a transaction. Pending-snapshot reconciliation handles supported
-process-crash orderings, not arbitrary backup mixing. Startup detects
-missing/recreated application storage and cursor/configuration contradictions
-that can be proven from retained Raft state, but it cannot prove that every
-valid-looking application database contains the bytes produced by that Raft
-generation.
-
-The simple supported backup procedure stops the node and preserves its complete
-data directory as one unit. A production host would need a coordinated online
-backup protocol. Independently backing up, replacing, or restoring either
-database is unsupported.
-
-## Application invariants
-
-Metadata always represents one physically complete prefix:
-
-```text
-physicalApplied = highest transactionally applied committed entry
-ConfState       = membership after exactly physicalApplied
-```
-
-Every apply operation requires:
-
-```text
-entry.Index == physicalApplied + 1
-```
-
-and commits the cursor in the same transaction as its effects.
+[`SqliteKeyValueStateMachine`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.cs)
+applies one entry at a time, checking it is the next index. The
+[schema approval](../../tests/DotnetRaft.Tests/Examples/TestData/DurableApplicationSchema.approved.sql)
+records the exact tables; the design depends on the cursor, configuration,
+and command result committing together, not on a specific SQL listing here.
 
 ## Mutation application and deduplication
 
-The durable `requests` row owns the winning hash and result index. Before
-proposing, the host queries it:
+The durable winner for a mutation ID is the first applied command using it.
+The application keeps that command's SHA-256 fingerprint and result index.
+A matching retry returns the original result; a different command with that
+ID conflicts. Neither repeats the KV effect, but both still advance the
+physical cursor if they appear in the log.
 
-- absent: join or register a pending proposal. The owning registration checks
-  the durable row again before submitting, since another node's proposal or
-  a snapshot can complete between the first lookup and registration;
-- matching hash: return the stored result index as a durable duplicate;
-- different hash: return conflict without proposing.
+[`RaftClusterHost`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs)
+checks durable results before proposing and the owning registration checks
+again after registering. A result can become durable in that interval. The
+[pending registry](../../examples/DotnetRaft.KvCluster/PendingOperations.cs)
+coalesces matching local callers and owns the submission's cancellation:
+one timed-out caller must not cancel work still awaited by another. Apply or
+snapshot completion resolves the current waiter against the durable winner,
+not against the bytes of a later conflicting entry.
 
-The pending registry stores `(requestId, expectedHash, completion)`.
-Same-ID/same-hash local callers share one completion. Same-ID/different-hash
-callers with no durable result can be rejected locally. A pending conflict
-does not override a durable result that became available since the first read.
-Apply and snapshot completions always resolve the current waiter against the
-stored winner, never the hash of a losing log entry or the result computed for
-a previous waiter. A matching waiter receives the original result index; if
-the winner was already durable, it receives a duplicate result even when a
-conflicting entry triggered completion.
-
-The owning registration starts one shared proposal submission. Its cancellation
-token is owned by the registry entry rather than by the first HTTP caller, and
-is canceled only after every waiter leaves or the request completes. A timed
-out owner therefore cannot remove the only queued proposal while another
-identical waiter is still active.
-
-When applying a committed command:
-
-1. read existing request row;
-2. if absent, execute set/delete and insert request result;
-3. if hash matches, perform no KV effect and return the original result index;
-4. if hash differs, perform no KV effect and return deterministic conflict;
-5. update physical-applied to the current log index; and
-6. commit one FULL transaction.
-
-The pending origin receives:
-
-```text
-request ID
-original result index
-current physical-applied index
-duplicate flag
-conflict flag
-```
-
-### Deduplication retention
-
-The MVP never deletes rows from `requests`. Every unique mutation request ID
-therefore remains in `application.db` and in every later application snapshot.
-Storage and snapshot size grow with unique mutation history. A production
-retention protocol would need to define the retry horizon and coordinate safe
-pruning across replicas and snapshots; that policy is outside this example.
+Mutation success follows local durable application or an existing durable
+result. It does not follow merely from `ProposeAsync` returning. Reads use
+the [physical ReadIndex barrier](../public-api.md#read-index); the local-read
+endpoint makes no linearizability promise.
 
 ## Configuration and no-op entries
 
-For bootstrap indexes 1-3:
-
-1. validate the exact generated entry;
-2. call `ApplyConfChangeAsync`;
-3. transactionally persist the expected configuration prefix for that
-   bootstrap index and the physical index.
-
-`RaftNode.Start` installs the complete peer set internally before it emits the
-generated bootstrap entries, so `ApplyConfChangeAsync` can report all three
-voters while index 1 or 2 is being applied. Persisting the deterministic
-prefix, rather than that preinstalled runtime result, preserves the
-application invariant at every crash boundary.
-
-Empty normal entries and rejected later configuration entries transactionally
-advance only physical-applied.
-
-The application store validates recovered configuration:
-
-```text
-Applied = 0 -> no voters
-Applied = 1 -> first sorted peer
-Applied = 2 -> first two sorted peers
-Applied >= 3 -> all three sorted peers
-```
-
-No accepted configuration change exists after index 3 in the fixed-membership
-host.
+The host validates and accepts the three bootstrap entries in order. `Start`
+preinstalls all three voters in the node, so `ApplyConfChangeAsync` can return
+the full set while applying the first or second record. Persist the actual
+prefix instead: zero voters at index 0, then the first one, first two, and all
+three sorted peers as the respective bootstrap entries apply. Empty entries
+and later, rejected configuration changes advance only the physical cursor.
+[`FixedMembershipConfiguration`](../../examples/DotnetRaft.KvCluster/FixedMembershipConfiguration.cs)
+shares this rule between application and recovery checks.
 
 ## Snapshot format
 
-Application snapshot version 1 is deterministic JSON:
-
-```text
-version
-physicalApplied
-ConfState protobuf bytes
-sorted [{ key, value }]
-sorted [{ requestId, commandHash, resultIndex }]
-```
-
-Restore validates:
-
-- version;
-- payload physical index equals Raft snapshot index;
-- payload configuration equals Raft snapshot `ConfState`;
-- unique sorted keys and request IDs;
-- request hash/index lengths; and
-- no result index above physical-applied.
-
-KV rows are materialized and sorted with `StringComparer.Ordinal` before
-serialization, and restore uses the same UTF-16 ordinal comparison. SQLite
-`BINARY` collation is not used as the snapshot ordering contract because its
-UTF-8 byte order differs for some supplementary Unicode keys.
-
-Restore replaces metadata, KV rows, and request rows in one FULL transaction.
-Repeating the same restore is idempotent.
-
-After a live Ready snapshot is restored and acknowledged, pending proposal
-registrations are resolved against the restored request table. Matching
-requests complete as durable duplicates and mismatching fingerprints complete
-as conflicts.
+An application snapshot carries the physical index, its exact membership,
+KV rows, and all durable mutation results. Omitting the request table would
+allow a previously successful mutation to execute again after catch-up.
+Serialization and validation use the same ordinal key order; SQLite's UTF-8
+`BINARY` order is not equivalent to .NET ordinal order for all Unicode keys.
+Restore validates the payload against Raft metadata and replaces all
+application tables and metadata in one transaction. It can repeat a restore
+at the same index, but refuses to move the application backward.
 
 ## Ready processing
 
-For one Ready:
-
-```text
-raftStorage.PersistReady
-send Ready.Messages in order
-if Ready.Snapshot:
-    resolve the pending application snapshot
-apply every Ready.CommittedEntry transactionally
-complete or defer Ready.ReadStates until physicalApplied reaches their index
-AdvanceAsync
-maybe create application snapshot and compact
-```
-
-No application effect occurs before Raft persistence.
+The host uses `RaftNode` with [synchronous storage](../public-api.md#synchronous-ready-loop).
+It persists the batch before sending messages, restores an incoming snapshot
+if present, and applies committed entries before `AdvanceAsync`. The same
+consumer runs restoration and application in order; it does not use early
+admission.
 
 ### Pending application snapshot
 
-Live Ready processing and startup use the same completion sequence: restore
-the snapshot transactionally in the application store, require durable
-`HardState`, repair its commit upward only if needed, and acknowledge the
-exact snapshot index. A failed application restore leaves the marker in place
-and cannot complete a pending proposal. On startup, also verify that the
-durable term covers the snapshot and the retained last-entry term before any
-commit repair or acknowledgement. The live path has already validated those
-terms when persisting the Ready.
-
-## Transport size boundary
-
-The default maximum serialized Raft envelope is 64 MiB.
-
-- ASP.NET Core gRPC send/receive limits use the same configured value;
-- Kestrel's HTTP request-body limit uses the same configured value rather than
-  its smaller default;
-- `RaftConfig.MaxSizePerMessage` reserves envelope overhead below that value;
-- commands exceeding the supported payload are rejected before proposal with
-  HTTP 413;
-- outbound oversize messages return unavailable/snapshot-failure semantics
-  instead of faulting the Ready loop; and
-- if application snapshot bytes exceed the transport maximum minus envelope
-  reserve, the host retains log entries and skips compaction rather than
-  creating a snapshot no peer can receive.
+Live processing and restart share `CompletePendingSnapshot` in
+[`DurableHostRecovery`](../../examples/DotnetRaft.KvCluster/DurableHostRecovery.cs).
+It completes application restoration, ensures durable hard state and commit
+coverage, then clears the exact marker. Recovery also checks that durable
+term covers the retained snapshot and log tail; neither an application cursor
+nor a snapshot term supplies a replacement term or vote. A failed restore
+does not clear the marker or complete client requests from the snapshot.
 
 ## Startup and recovery
 
-1. open `raft.db` and `application.db`, validating immutable local node ID;
-2. resolve any [pending application snapshot](#pending-application-snapshot);
-3. read the retained Raft snapshot;
-4. when application physical-applied is below that snapshot index, restore the
-   retained snapshot transactionally even if it has no pending marker;
-5. read application physical-applied and `ConfState`;
-6. validate fixed-membership configuration for that cursor;
-7. require physical-applied not beyond retained Raft last index;
-8. require or repair `HardState.Commit >= physicalApplied` only when retained
-   log/snapshot proves the cursor;
-9. when physical-applied exceeds the retained snapshot index, serialize the
-   current application state and durably create/compact a matching local Raft
-   snapshot before node construction when it fits the transport-safe payload;
-10. if the matching application snapshot is too large, retain the previous
-    transportable snapshot and the complete log suffix instead of compacting
-    into an undeliverable recovery point;
-11. require the retained snapshot not to exceed physical-applied, require the
-    retained prefix to be covered by that snapshot, and require its
-    `ConfState` to equal application `ConfState`;
-12. if both stores are logically empty, call `RaftNode.Start` with sorted
-    peers;
-13. otherwise call `RaftNode.Restart` with
-   `RaftConfig.Applied = physicalApplied`.
+An absent or recreated application database beside nonempty Raft storage is
+an error, even if some data could be replayed. The host cannot reconstruct
+the missing database's node-ID binding or assume the pair forms a valid
+generation. Treat both databases as one [recovery set](../../examples/DotnetRaft.KvCluster/README.md#durable-files-and-restart).
 
-Committed entries after physical-applied are emitted and reapplied by the
-normal Ready loop.
+`Reconcile` finishes any pending restore, then uses a retained snapshot if
+the existing application is still behind it. Recovery verifies the physical
+cursor, fixed membership, and durable log bounds before constructing the
+node. If the trusted application cursor is ahead of the recovered commit,
+it repairs only commit as described in the [restart contract](../public-api.md#restart).
+Replay starts after the recovered physical cursor, not after the last
+volatile `Advance`.
 
-If only application storage is nonempty while Raft storage is empty, startup
-fails. If application storage was newly created while Raft is nonempty, startup
-fails even when a retained snapshot or full log could rebuild application
-content. Deleting the application database also deletes the immutable local
-node-ID binding and is treated as storage corruption. An existing application
-database at physical index zero may replay from zero only when the retained
-snapshot index is zero and the log starts at index 1.
+After application has advanced beyond the retained snapshot, recovery tries
+to publish a matching snapshot and compact. If the new payload is too large
+to transmit, it retains the old snapshot and full suffix. Startup still
+requires that the retained prefix is covered and the retained snapshot's
+configuration matches the application at its recovered cursor. An old but
+transportable snapshot is not permission to restart with stale membership.
 
-A startup latch guards inbound messages, campaign, mutation, and ReadIndex.
-It completes only after the complete fixed bootstrap prefix is physically
-applied, advanced, and reconciled with durable configuration. Host failure
-completes the latch exceptionally.
+The startup gate keeps external Raft input and client requests that depend
+on Raft out until the bootstrap prefix is physically applied and the durable
+configuration matches. A fresh cluster does not wait for a network quorum
+to apply its local bootstrap records.
 
 ## Snapshot and compaction policy
 
-After `AdvanceAsync`:
-
-1. read physical-applied;
-2. read retained Raft snapshot index;
-3. create a snapshot when:
-   - the retained snapshot configuration does not represent the current
-     bootstrap/application cursor; or
-   - `physicalApplied - snapshotIndex >= SnapshotThresholdEntries`;
-4. serialize the application snapshot under the application-store monitor;
-5. call `raftStorage.CreateSnapshot` with exact application `ConfState`;
-6. call `raftStorage.Compact` at the same index.
-
-Compaction never precedes `Advance` or durable application snapshot creation.
-If serialization exceeds the transport-safe size, the host records that
-attempted physical index and waits another configured threshold interval
-before retrying. The prior transportable snapshot and retained suffix remain
-the recovery point.
-
-## HTTP API
-
-```text
-PUT    /kv/{key}       { value, requestId? }
-DELETE /kv/{key}?requestId=<guid>
-GET    /kv/{key}       linearizable
-GET    /local/{key}    potentially stale
-GET    /status
-POST   /campaign
-```
-
-Mutation responses report duplicate/conflict state. Conflicting request ID
-reuse maps to HTTP 409.
-
-When request ID is omitted, the generated ID is returned only with a
-successful response. Such calls are not safely retryable after an unknown
-timeout outcome. Retry-safe clients supply and reuse their own ID.
-
-## Lifecycle
-
-The host continues supervising Ready, tick, and `RaftNode.Completion`.
-Shutdown order:
-
-1. cancel network/tick/Ready work;
-2. stop and dispose `RaftNode`;
-3. dispose transport;
-4. host DI disposes application and Raft SQLite stores.
-
-Any application database, schema, decode, restore, or persistence failure
-faults the host and stops ASP.NET.
+While running, the Ready loop considers a new local snapshot after
+`AdvanceAsync`, when the application cursor is already physical. It
+reconciles a configuration mismatch or takes a snapshot once the configured
+entry threshold is reached. It does not compact into an undeliverable
+snapshot. The [runbook](../../examples/DotnetRaft.KvCluster/README.md#snapshot-policy)
+owns the size settings and retry interval.
 
 ## Testing
 
-### Component
-
-- options and data-directory validation;
-- command set/delete encoding and fingerprints;
-- application schema approval;
-- set/delete/no-op/configuration transactions and reopen;
-- identical and conflicting request IDs;
-- shared proposal submission lifetime across caller cancellation;
-- restored request rows completing live proposal waiters;
-- deferred read barriers completing only after physical application;
-- deterministic snapshot bytes and idempotent restore;
-- cursor/configuration invariants;
-- wrong-node-ID reopen and missing/recreated application database rejection.
-
-### Deterministic integration
-
-- three nodes bootstrap durably;
-- follower proposal and linearizable read;
-- stop all hosts, recreate from the same directories, and continue;
-- duplicate request retry after restart;
-- different commands concurrently proposed under one request ID, proving the
-  losing waiter receives conflict;
-- oversized application snapshots wait another threshold interval before a
-  new serialization attempt.
-
-### Recovery components
-
-- application-ahead recovery creates and compacts a matching local snapshot;
-- application-behind recovery restores the retained snapshot;
-- replay from zero behind a compacted prefix is rejected;
-- a recoverable application-ahead cursor repairs HardState commit;
-- missing/recreated application databases beside nonempty Raft fail startup;
-- oversized recovery snapshots preserve the prior transportable snapshot and
-  retained suffix; and
-- pending snapshot recovery is idempotent at restore, commit-repair, and
-  acknowledgement crash cuts.
-
-### Real processes
-
-- require `curl`, `jq`, and `python3`, a prebuilt Release host, and unused
-  loopback ports before starting;
-- launch three Kestrel processes with separate data directories;
-- elect a leader, wait until every active node observes it, and write through
-  a follower;
-- retry only transport failures and HTTP 408, 429, 500, 502, 503, or 504
-  mutation responses with the same durable request ID;
-- kill the leader by PID;
-- use SIGKILL for the crash phase and bounded curl/process deadlines;
-- restart it with the same directory;
-- continue quorum writes while it is down;
-- verify the restarted node catches up and serves a linearizable read;
-- stop and restart all nodes, then verify retained data; and
-- print every node log when any smoke step fails.
-
-The bounded retry path exercises the documented client contract rather than
-masking deterministic failures: mutation retries reuse the exact request ID,
-while all other HTTP errors fail immediately.
-
-The pending-snapshot component test constructs and reopens the two durable
-stores at these boundaries. It does not kill a process at each boundary:
-
-```text
-Raft snapshot committed / application not restored
-application restored / commit not repaired
-commit repaired / marker not acknowledged
-marker acknowledged / node not constructed
-```
-
-The component test checks hard-state term/vote, idempotent restore, commit
-repair, and exact marker clearance. Continued reads and writes are exercised
-separately by cluster restart integration and the real-process smoke.
-
-Wall-clock timeouts are deadlock guards only. Process IDs are tracked
-explicitly; no name-based process termination is used.
-
-## Non-goals
-
-- MVCC history;
-- compare/transaction;
-- watch;
-- lease/TTL;
-- auth;
-- dynamic membership;
-- sharding;
-- cross-database transactions;
-- deduplication pruning;
-- online application-schema migration;
-- TLS or deployment automation; and
-- etcd-compatible APIs.
-
-## Validation sequence
-
-1. design review;
-2. failing component/integration/recovery tests;
-3. implementation;
-4. recovery crash-cut tests and real-process crash smoke;
-5. focused coverage/mutation where valuable;
-6. full Debug/Release and formatting;
-7. benchmark and package/reproducibility gates;
-8. independent GPT-5.6 Sol code review;
-9. commit, push, and green CI.
-
-## Implementation evidence
-
-These are milestone results recorded with
-[`5dfc201`](https://github.com/algorithm-apprentice/dotnet-raft/commit/5dfc201f0b65124a6707686d1dd5bc8c8d7df722),
-not current test counts or coverage measurements:
-
-- 998 core/example tests and 33 SQLite tests pass in both Debug and Release;
-- focused tests for durable example behavior pass as part of the core/example
-  suite;
-- `SqliteKeyValueStateMachine` reaches 94.37% line and 74.59% branch coverage;
-- `DurableHostRecovery` reaches 89.54% line and 78.78% branch coverage;
-- `DurableKvCommandCodec` reaches 100% line and 92.85% branch coverage;
-- `PendingProposalRegistry` reaches 81.96% line and 76.31% branch coverage;
-- `PendingReadRegistry` reaches 91.66% line and 87.50% branch coverage;
-- the final pre-review focused mutation run exercised 513 mutants, killing
-  295 and producing three reviewed liveness timeouts; subsequent review fixes
-  have dedicated regression tests instead of another full mutation rerun;
-- both benchmark smoke suites preserve their expected checksums and allocation
-  fields; and
-- three consecutive real-process runs passed follower-originated writes,
-  31 MiB HTTP ingestion and snapshot catch-up, SIGKILL leader loss, quorum
-  progress, old-leader recovery, and full-cluster restart.
+The [component tests](../../tests/DotnetRaft.Tests/Examples/DurableKvComponentTests.cs)
+exercise exact bootstrap prefixes, deduplication across snapshots, repeated
+pending restore, and recovery without compacting into an oversized snapshot.
+The [integration tests](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.cs)
+cover delivery and restart; the [process smoke](../../eng/smoke-durable-kv-cluster.sh)
+runs the separately hosted cluster. A green process-crash run does not
+establish that arbitrary independently captured database copies are compatible.

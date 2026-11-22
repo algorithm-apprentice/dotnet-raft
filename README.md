@@ -77,16 +77,17 @@ compares the APIs and storage modes side by side.
 
 ## Documentation
 
-- [Offline Raft learning guide and implementation deep dives](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/raft-learning-guide.md)
-- [Public API and host responsibilities](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
-- [Durable SQLite storage package](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/src/DotnetRaft.Sqlite)
-- [Behavioral parity matrix](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/parity-matrix.md)
-- [Reference architecture](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/reference-architecture.md)
-- [Design records and completed porting plan](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/design/README.md)
-- [Performance methodology and baseline](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/performance.md)
-- [Release and compatibility ADR](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/adr/0002-release-and-compatibility-contract.md)
-- [Apache-2.0 license](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/LICENSE)
-- [Third-party notices](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/THIRD-PARTY-NOTICES.md)
+| If you want to… | Start here |
+|---|---|
+| Integrate a node, persist Ready work, or recover after a crash | [Host integration contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md) |
+| Use durable SQLite storage | [SQLite package guide](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/src/DotnetRaft.Sqlite) |
+| Learn Raft by running the system | [Offline learning guide and labs](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/raft-learning-guide.md) |
+| Find the C# component that owns a rule | [Architecture and test map](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/reference-architecture.md) |
+| Understand design decisions or find the original port notes | [Design index](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/design/README.md) |
+| Check upstream parity, compatibility, or performance | [Parity matrix](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/parity-matrix.md), [compatibility policy](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/adr/0002-release-and-compatibility-contract.md), [benchmarks](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/performance.md) |
+
+[Apache-2.0 license](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/LICENSE) ·
+[Third-party notices](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/THIRD-PARTY-NOTICES.md)
 
 ## Project status
 

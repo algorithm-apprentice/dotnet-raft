@@ -5,9 +5,10 @@ open sockets, start timers, publish durable writes, execute application
 commands, or choose snapshot and compaction policies. It does read the
 host-provided stable log synchronously through `IStorage`.
 
-This is the current host contract for package version 1.0.0. For the design
-history and reference-porting milestones, see the [design index](design/README.md).
-For code you can run, see the [examples](../examples/README.md).
+This is the current host contract. Choose a [synchronous Ready loop](#synchronous-ready-loop)
+or [asynchronous storage workers](#asynchronous-storage-writes) independently
+of which facade you use. For runnable code, see the [examples](../examples/README.md).
+For component ownership or rationale, start at the [design index](design/README.md).
 
 ## Architecture boundary
 
@@ -43,6 +44,17 @@ See the [installation instructions](../README.md#install) and the
 APIs, crash recovery with pending application snapshots, and supported backup
 procedure. Restoring Raft state alone cannot recover a separate application
 store.
+
+## Publishing a storage batch
+
+For either storage protocol, publish the snapshot, entries, and hard state
+as one coherent generation. Install an incoming snapshot before appending
+its suffix; the install can discard the previous log. An omitted hard-state
+update leaves the stored value unchanged. After a crash, the recovered view
+must be either the previous generation or a complete new one, not a mix of
+partial writes. The persisted commit must not exceed the retained log or
+fall behind a published snapshot. Atomic publication and forcing a write to
+durable media are separate requirements; follow the mode-specific rules below.
 
 ## Storage reads
 
@@ -141,15 +153,18 @@ FirstIndex - 1 <= RaftConfig.Applied <= effective commit <= LastIndex
 IStorage.GetInitialState().ConfState = membership at RaftConfig.Applied
 ```
 
-Use the recovered `HardState.Commit` when hard state is present; a fresh
-empty store starts at zero. Do not use `Applied = 0` to request replay below
-the compacted boundary: the core initializes its cursors to `FirstIndex - 1`
-before considering a nonzero `Applied` value. If a non-forced commit update
-was lost while later application state survived, durably repair only `Commit`
-before constructing the node, using trusted application state backed by
-retained durable log or snapshot data. Otherwise roll the application back
-to a compatible retained prefix or fail startup. Never derive `Term` or
-`Vote` from an application cursor or snapshot.
+Use `HardState.Commit` when the recovered hard state is nonempty. The node
+initializes commit and application cursors at `FirstIndex - 1` (zero for empty
+storage) before loading hard state and a nonzero `Applied` value. A null or
+all-zero hard state leaves the initial commit unchanged. `Applied = 0` does
+not request replay of compacted entries, and the initial cursor values do
+not reconstruct a missing durable term or vote.
+
+If a non-forced commit update was lost while later application state
+survived, durably repair only `Commit` before constructing the node, using
+trusted application state backed by retained durable log or snapshot data.
+Otherwise roll the application back to a compatible retained prefix or fail
+startup. Never derive `Term` or `Vote` from an application cursor or snapshot.
 
 `Applied` suppresses replay through that index; it does **not** load
 membership from a separate application database. Both built-in stores return
@@ -166,18 +181,21 @@ For `AsyncStorageWrites == false`:
 
 1. wait until `HasReady`;
 2. call `Ready`;
-3. atomically publish snapshot, entries, and hard state;
+3. [atomically publish](#publishing-a-storage-batch) the snapshot, entries,
+   and hard state;
 4. force durability when `Ready.MustSync` is true;
 5. send `Ready.Messages` only after required persistence;
 6. restore the snapshot and apply committed entries in log order;
 7. apply every accepted configuration entry before advancement;
-8. admit every `ReadState` to the same ordered application pipeline; and
-9. call `Advance` with the exact returned `Ready`.
+8. hand each `ReadState` to the [read-completion path](#read-index); and
+9. call `Advance` with the exact returned `Ready` (`RaftNode` retains the
+   batch for `AdvanceAsync`).
 
-Snapshot presence does not participate in `Ready.MustSync`. Complete snapshot
+New entries and term or vote changes set `Ready.MustSync`. A commit-only
+update or snapshot presence does not set it by itself. Complete snapshot
 persistence according to the storage implementation's durability contract
-before dependent messages or `Advance`; do not infer a separate generic flush
-solely because `Ready.Snapshot` is present.
+before dependent messages or `Advance`. Do not advance a batch after
+persistence or application processing fails.
 
 Only one Ready can be outstanding. Inputs can continue accumulating while it
 is outstanding; newer work appears after advancement.
@@ -192,24 +210,25 @@ Confirmation of an older snapshot cannot restore its configuration over a
 newer one. The host still applies the earlier Ready in order; it does not need
 to pause inbound messages around configuration apply.
 
-`Advance` may occur after irrevocable ordered admission rather than slow
-physical completion, but the host must separately maintain `physicalApplied`.
-A linearizable read can execute only when:
-
-```text
-snapshot restoration complete
-&& physicalApplied >= ReadState.Index
-```
-
-Snapshots and compaction use physical, not logical, progress.
+After persistence and any required configuration decisions, `Advance` may
+acknowledge irrevocable ordered admission instead of waiting for physical
+completion. This requires an application pipeline that cannot silently lose
+or reorder the admitted work. Wait if the host cannot decide a configuration
+entry at its log position yet. Complete any storage-specific snapshot
+reconciliation required before advancement, such as the
+[SQLite pending marker](../src/DotnetRaft.Sqlite/README.md#persisting-ready-and-local-append-work).
+Keep [application progress](#application-progress) separately, and stop the
+host if admitted work fails.
 
 ## `RaftNode`
 
 `RaftNode` owns a single background loop and is safe for concurrent callers.
 That loop serializes node commands; it does not consume Ready on the host's
 behalf. Start one independently running Ready consumer before awaiting any
-proposal. With no known leader, `ProposeAsync` waits, and the election itself
-may need the consumer to send its outgoing vote requests.
+proposal; an election may need the consumer to send outgoing vote requests.
+`ProposeAsync` can wait while there is no known leader or after the node has
+observed its own removal from the progress tracker. Learner membership is
+not removal. Use cancellation to bound the wait before dispatch.
 
 With the default Ready/Advance storage protocol, that consumer repeatedly
 awaits `WaitForReadyAsync`, processes the batch in the
@@ -272,13 +291,15 @@ do not label a partial bootstrap snapshot with the full voter set. The
 shows how to record the prefix.
 
 An exception after configuration dispatch faults that node instance. Discard
-it and reconstruct from the prior complete durable/application generation.
+it and follow [fault recovery](#fault-handling) instead of retrying a change
+on a possibly partially mutated node.
 
 ## Asynchronous storage writes
 
-With `AsyncStorageWrites = true`, do not process the diagnostic
-`Ready.HardState`, `Entries`, `Snapshot`, or `CommittedEntries` fields and do
-not call `Advance` or `AdvanceAsync`. Consume `Ready.ReadStates` in this mode
+With `AsyncStorageWrites = true`, use `Ready.Messages` to drive persistence,
+application, and transport. The direct `Ready.HardState`, `Entries`,
+`Snapshot`, `CommittedEntries`, and `MustSync` fields do not drive worker
+actions. Do not call `Advance` or `AdvanceAsync`. Consume `Ready.ReadStates`
 as well; read barriers still depend on physical application.
 
 Route messages by target. Each local worker queue must be FIFO and lossless.
@@ -311,24 +332,28 @@ node/host failure; never discard a local storage request by ignoring a false
 
 ### Append worker
 
-`MsgStorageAppend` carries entries, optional snapshot, and optional hard state
-encoded in its term/vote/commit fields.
+`MsgStorageAppend` carries entries, an optional snapshot, and optional hard
+state. A hard-state update sets all three `Term`, `Vote`, and `Commit` fields,
+including any zero values. If they are absent, leave stored hard state
+unchanged.
 
-Atomically publish snapshot, entries, and hard state. If responses are
+[Atomically publish the batch](#publishing-a-storage-batch). If responses are
 present, force durability before delivering them in order. The response list,
-not snapshot presence by itself, defines the asynchronous forced-durability
-decision.
+not snapshot presence by itself, defines the protocol's forced-durability
+decision. A storage backend may always provide stronger durability.
 
-A snapshot-bearing request also restores physical application state and
-configuration under the same exclusive application-state barrier used by the
-apply worker. Older apply work starting afterward skips entries covered by the
-snapshot but still returns its response to release accounting.
+A snapshot-bearing request also restores physical application state, its
+cursor, and configuration under the same exclusive application-state barrier
+used by the apply worker. Older apply work starting afterward skips effects
+for entries covered by the snapshot, including configuration changes, but
+still returns its original response to release accounting.
 
 After persistence and any required snapshot restoration or storage-specific
-acknowledgement, deliver the responses in their listed order. An append request
-can contain both a local confirmation and responses to remote peers such as
-`MsgVoteResp` or `MsgAppResp`. Route by each response's `To`, not by the
-request's target or the response's type:
+acknowledgement, deliver the responses in their listed order. If any of those
+steps fails, do not release the responses. An append request can contain both
+a local confirmation and responses to remote peers such as `MsgVoteResp` or
+`MsgAppResp`. Route by each response's `To`, not by the request's target or
+the response's type:
 
 ```csharp
 foreach (Message response in appendRequest.Responses)
@@ -355,20 +380,41 @@ a superseded snapshot does not reinstall its configuration.
 
 ### Apply worker
 
-`MsgStorageApply` carries committed entries. Apply them in order, including
-the configuration rules above, then deliver its response.
+`MsgStorageApply` carries committed entries already acknowledged as stable.
+Apply them in order, including the [configuration rules](#configuration-entries),
+then step its response on the originating node. Do not acknowledge after an
+apply failure. Append and apply are independently ordered; apply can complete
+while a separate commit-only write is still outstanding. This is one reason
+to reconcile the recovered commit and application cursor on restart.
 
-Do not mutate library-generated response messages. Local responses are the
-acknowledgement protocol and are scoped to the exact node instance that emitted
-them.
+Deliver each generated local response once, in its worker's FIFO order.
+Do not change it or step it into another node instance, even if the sender,
+term, and index still match. See [Fault handling](#fault-handling) before
+restarting with these stores.
 
-After crash, stop, or fault, discard old worker queues/responses before
-constructing a new node.
+## Application progress
+
+`BasicStatus.Applied` is the **Raft acknowledgement cursor**. The host's
+`physicalApplied` is the end of the contiguous prefix actually reflected in
+application state, with its matching `ConfState`. A restored snapshot or an
+applied no-op also advances the physical prefix. In a durable application,
+persist the cursor and its configuration consistently with the effects.
+
+| Storage protocol | What an increase in Raft `Applied` means |
+|---|---|
+| Synchronous | `Advance` acknowledged application or ordered admission. The cursor can lead physical work after early admission, or lag work done before `Advance`. |
+| Asynchronous | The node processed a response after physical application or snapshot restoration. The Raft cursor can lag completed work. |
+
+Use physical progress for [reads](#read-index) and [snapshot creation and
+compaction](#snapshots-and-compaction). For [restart](#restart), use the cursor
+recovered together with application state, not a cached status response.
 
 ## Network transport
 
 Send every nonlocal Ready message to `Message.To`. Clone or serialize it
-before sharing across threads.
+before sharing across threads. Do not modify a Ready payload or local worker
+request before carrying out the effects it describes: detached values do not
+change the acknowledgement the node expects.
 
 Authenticate the connection-level peer, restrict the listener to authorized
 cluster peers, and validate that `Message.To` is the exact local node. For
@@ -447,6 +493,10 @@ Match `ReadState.RequestContext` to the pending attempt and wait for
 Read the value and check the application index under the application's own
 synchronization or transactional read barrier.
 
+A batch can deliver a read barrier before all entries through that index are
+available for application. Defer the read without blocking the Ready consumer
+or workers that must advance application to its barrier.
+
 A follower without a known leader can ignore the submission, and leadership
 changes can interrupt confirmation. Bound the wait in the host and remove
 stale waiters; the API cancellation token does not remove an already
@@ -464,8 +514,8 @@ assumption.
 ## Status, descriptions, and tracing
 
 `GetBasicStatus`, `GetStatus`, and `VisitProgress` return detached snapshots.
-`BasicStatus.Applied` is logical in synchronous early-admission mode and
-physical-completed in asynchronous storage mode.
+See [Application progress](#application-progress) for how `Applied` relates
+to actual state-machine effects.
 
 `RaftDescriptions` produces deterministic invariant-culture text.
 
@@ -476,11 +526,10 @@ throw.
 ## Fault handling
 
 Do not retry a partially dispatched operation on the same faulted instance.
-Recover from:
-
-- the actual durable append prefix;
-- the actual physical application prefix;
-- the matching `ConfState`; and
-- a commit index repaired to at least physical application.
-
-Then create a new instance and discard every old local response.
+After the node stops or faults, stop its Ready consumer and any append or
+application workers. Before reading the recovery point, ensure no in-flight
+work from the old instance can still write to Raft storage or application
+state. Discard unprocessed work and undelivered local responses, not effects
+already published. Follow
+[Restart](#restart) to reconcile the durable append prefix, physical
+application state, and matching `ConfState` before creating a new instance.

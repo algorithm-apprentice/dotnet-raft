@@ -36,8 +36,8 @@ breakage from intentional evolution.
    - protobuf wire field numbers, types, cardinality, and enum numeric values;
    - persisted log/snapshot restart compatibility;
    - the separately approved `DotnetRaft.Sqlite` public API and schema version;
-   - D21-D25 host ordering, durability, recovery, Ready, and local-storage
-     protocols;
+   - the [host contract](../public-api.md) for ordering, durability, recovery,
+     Ready, and local-storage protocols first established in D21-D25;
    - supported target frameworks; and
    - dependency-major requirements visible to consumers.
 5. Version classification is:

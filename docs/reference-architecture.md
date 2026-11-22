@@ -1,233 +1,101 @@
 # Reference Architecture
 
-The first sections describe the pinned Go reference. For the implementation
-in this repository, start at [the C# component map](#implemented-c-core-boundaries).
-The [host integration contract](public-api.md) defines the current public
-behavior and recovery requirements.
-
-## Reference snapshot
-
-The analysis is based on `etcd-io/raft` commit
-`1c0011d2c6b7a0230f87bad38ad4c6e70d810f9e`. The module contains six internal
-packages:
-
-```mermaid
-flowchart LR
-    rafttest --> raft
-    rafttest --> raftpb
-    rafttest --> tracker
-
-    raft --> confchange
-    raft --> quorum
-    raft --> raftpb
-    raft --> tracker
-
-    confchange --> quorum
-    confchange --> raftpb
-    confchange --> tracker
-
-    tracker --> quorum
-    tracker --> raftpb
-```
-
-`raftpb` and `quorum` are leaves. `tracker` builds on both.
-`confchange` builds on `tracker`. The root `raft` package composes every
-algorithmic component, and `rafttest` is an external black-box harness.
+This page maps the current C# implementation. The [host integration contract](public-api.md)
+specifies ordering and recovery; the [design index](design/README.md) links the
+decisions and historical port records.
 
 ## Architectural boundary
 
-The reference library delegates network transport, durable writes, and
-application effects to its host. Its core can be modeled as:
-
 ```text
-current state + Message/Tick
-              |
-              v
-       deterministic Raft step
-              |
-              v
-Ready {
-  state to persist,
-  entries to persist,
-  messages to send,
-  entries to apply
-}
-              |
-              v
-application persists, sends, and applies
-              |
-              v
-Advance / local storage response
+host input: peer message, tick, proposal, or work completion
+    -> serialized RawNode call -> deterministic RaftCore step
+    -> Ready: persistence, transport, application, and read work
+    -> host executes the work -> Advance or local storage responses
 ```
 
-This boundary is the most important design choice to preserve. A message may
-represent a remote RPC, a local timer event, a proposal, or completion of local
-storage work. The core does not perform the publication or transport steps
-itself, but synchronously queries the host's stable storage. `IStorage`
-reads may block on disk, including when `AsyncStorageWrites` is enabled.
+`RaftCore` chooses log and membership transitions without running host
+effects. `IStorage` gives it a synchronous stable read view, including when
+async storage **writes** are enabled. `RaftNode` serializes calls into
+`RawNode`; it does not run the Ready consumer or implement a second protocol.
 
-## Component map
-
-| Component | Reference files | Responsibility | Direct logical dependencies |
-|---|---|---|---|
-| Protocol model | `raftpb/raft.proto`, `raftpb/*.go` | Entries, messages, hard state, snapshots, and membership-change payloads | None |
-| Quorum algebra | `quorum/*.go` | Majority and joint-quorum vote and commit calculations | Node identifiers and indexes |
-| Replication tracking | `tracker/*.go` | Per-follower progress, inflight windows, voters, learners, votes, and committed index | Protocol model, quorum algebra |
-| Configuration changes | `confchange/*.go` | Simple changes, joint consensus, restore, and invariant validation | Protocol model, quorum algebra, tracker |
-| Stable storage | `storage.go` | Storage contract and in-memory implementation | Protocol model |
-| Unstable log | `log_unstable.go` | Entries and snapshots not yet known to be durable | Protocol model |
-| Unified Raft log | `log.go`, `types.go` | Stable/unstable merged view, conflict detection, slicing, commit, and apply cursors | Storage, unstable log, protocol model |
-| Read-only tracking | `read_only.go` | Quorum confirmation for linearizable reads | Protocol model, quorum algebra |
-| Core state machine | `raft.go` | Terms, roles, ticks, elections, replication, commits, snapshots, membership, and extensions | Every algorithmic component |
-| Deterministic API | `rawnode.go`, `bootstrap.go` | `Step`, `Tick`, `Ready`, `Advance`, bootstrap, and reporting APIs | Core state machine |
-| Concurrent API | `node.go` | Channel-based serialization and lifecycle around `RawNode` | Deterministic API |
-| Status and diagnostics | `status.go`, `util.go`, `state_trace*.go`, `logger.go` | Inspection, formatting, logging, and tracing | Core and tracker |
-| External test harness | `rafttest/*`, `interaction_test.go`, `testdata/*` | Message delivery, partitions, storage processing, and golden interaction scenarios | Public Raft API |
+| Boundary | Owner | Not its job |
+|---|---|---|
+| Consensus | [`RaftCore`](../src/DotnetRaft/Core/RaftCore.cs) | Sending on sockets, writing databases, or executing commands |
+| Ready and acknowledgements | [`RawNode`](../src/DotnetRaft/RawNode.cs), with [`RaftNode`](../src/DotnetRaft/RaftNode.cs) as the concurrent facade | Performing the host's work or declaring it complete independently |
+| Stable storage | [`IStorage`](../src/DotnetRaft/Storage/IStorage.cs) implemented by [`MemoryStorage`](../src/DotnetRaft/Storage/MemoryStorage.cs) or the optional [SQLite package](../src/DotnetRaft.Sqlite/README.md) | Deciding what is committed, or storing the application state machine |
+| Transport and application | The consuming host; see the [counter](../examples/DotnetRaft.Counter/README.md) and [durable KV example](../examples/DotnetRaft.KvCluster/README.md) | Reimplementing consensus or conflating Raft acknowledgement with actual application |
 
 ## Implemented C# core boundaries
 
-The C# implementation preserves the reference package boundary while
-decomposing mutable core ownership:
-
 ```mermaid
 flowchart TD
-    RawNode --> RaftCore
-    RaftNode --> RawNode
-
+    RaftNode --> RawNode --> RaftCore
+    RaftCore --> RaftRoleState
     RaftCore --> RaftClock
     RaftCore --> RaftOutput
-    RaftCore --> RaftRoleState
-    RaftCore --> ReadIndexCoordinator
     RaftCore --> ProposalAdmission
-    RaftCore --> ProgressTracker
-    RaftCore --> RaftLog
-
+    RaftCore --> ReadIndexCoordinator --> ReadOnlyTracker
+    RaftCore --> ProgressTracker --> Quorum
+    RaftCore --> RaftLog --> UnstableLog
+    RaftLog --> IStorage
     RaftCore --> RoleStrategies
     RoleStrategies --> RaftCore
-
-    ProgressTracker --> Quorum
-    ReadIndexCoordinator --> ReadOnlyTracker
-    RaftLog --> Storage
-    RaftLog --> UnstableLog
 ```
 
-| C# component | Authoritative responsibility |
+| Component | What it owns |
 |---|---|
-| `RaftCore` | Cross-component sequencing, term routing, coordinated reset, log mutation, commit/read ordering, membership orchestration, async storage responses, tracing, and logging |
-| `RaftClock` | Election/heartbeat elapsed values, configured ticks, randomized timeout, and overflow-safe tick/reset behavior |
-| `RaftOutput` | Immediate and after-append queues, outbound cloning, sender/term normalization, and queue classification |
-| `RaftRoleState` | Term, vote, leader ID, role, and leadership transferee |
-| `ReadIndexCoordinator` | `ReadOnlyTracker`, gated reads, quorum advancement, and completed `ReadState` output |
-| `ProposalAdmission` | Uncommitted payload accounting and pending configuration index |
-| `ProgressTracker` | Installed configuration/progress maps, votes, quorum-derived commit, and voter/learner queries |
-| Role strategies | Stateless follower, pre-candidate, candidate, and leader message routing resolved from the authoritative role on every dispatch |
+| [`RaftCore`](../src/DotnetRaft/Core/RaftCore.cs) | Cross-component sequencing: term routing, log mutation, commit and read admission, configuration installation, and completion ordering |
+| [`RaftRoleState`](../src/DotnetRaft/Core/RaftRoleState.cs), [`RaftClock`](../src/DotnetRaft/Core/RaftClock.cs) | Term, vote, leader, role and transferee; election and heartbeat timers and randomized timeouts |
+| [`RaftOutput`](../src/DotnetRaft/Core/RaftOutput.cs) | Outbound normalization, cloning, immediate and after-append queues |
+| [`RaftLog`](../src/DotnetRaft/Core/RaftLog.cs), [`UnstableLog`](../src/DotnetRaft/Core/UnstableLog.cs) | Merged log bounds, matching, commit/apply cursors; entries and snapshots awaiting stable acknowledgement |
+| [`ProgressTracker`](../src/DotnetRaft/Tracker/ProgressTracker.cs), [`ConfigurationChanger`](../src/DotnetRaft/ConfChange/ConfigurationChanger.cs) | Installed voters, learners and replication progress, quorum calculations; validation and construction of a candidate membership change |
+| [`ProposalAdmission`](../src/DotnetRaft/Core/ProposalAdmission.cs), [`ReadIndexCoordinator`](../src/DotnetRaft/Core/ReadIndexCoordinator.cs) | Uncommitted payload and pending configuration index; gated requests, read quorums, and completed read states |
+| [`RaftRoleStrategies`](../src/DotnetRaft/Core/RaftRoleStrategies.cs) | Stateless dispatch for messages routed to a role, selected from the current role after shared term handling |
 
-Only role strategies reference `RaftCore`, through explicit internal handler
-methods. Other collaborators never reference the aggregate. Mutable component
-state has one owner; tests use component fixtures or explicit `ForTesting`
-hooks rather than writable forwarding properties.
-
-`RawNode` publishes and acknowledges Ready work. `RaftNode` adds concurrency
-around `RawNode`, not another implementation of consensus or persistence.
-`IStorage` is the core's stable read boundary; its in-memory implementation
-and the optional `DotnetRaft.Sqlite` package supply it without putting SQLite
-in the core package. `examples/DotnetRaft.KvCluster` composes `RaftNode`,
-`SqliteStorage`, transport, and a separate application database. The example
-owns disk publication, application effects, and recovery across both stores.
-See the [host contract](public-api.md) for ordering at these boundaries.
-
-## Core state
-
-The root `raft` object combines five categories of state:
-
-1. **Persistent consensus state:** current term, vote, and committed index.
-2. **Log state:** stable storage, unstable entries, committed/applying/applied
-   cursors, and an optional snapshot.
-3. **Role state:** follower, pre-candidate, candidate, or leader; current
-   leader; election and heartbeat counters.
-4. **Leader replication state:** a `Progress` object for each voter or learner,
-   including `Match`, `Next`, mode, and inflight append messages.
-5. **Extension state:** pending membership changes, read-index requests,
-   leadership transfer, quorum activity, and storage-work completion.
-
-Role-specific behavior is selected through a state-specific step function:
-
-- follower: forward proposals, receive append/heartbeat/snapshot messages;
-- candidate or pre-candidate: collect votes and step down for a valid leader;
-- leader: append proposals, replicate entries, advance commit, and manage
-  follower progress.
+The role strategies call explicit handlers on the core. Its other collaborators
+do not depend on the aggregate. Mutable state has one owner, and tests use
+component fixtures or explicit test hooks rather than writable forwarding
+properties. See [ADR 0003](adr/0003-raftcore-structural-boundaries.md).
 
 ## Important invariants
 
-The C# port must make these invariants explicit and test them close to the
-component that owns them.
-
-### Log invariants
-
-- Log indexes are contiguous.
-- Terms never decrease within a log.
-- A committed entry is never overwritten.
-- `applied <= applying <= committed <= lastIndex`.
-- Stable and unstable log ranges form one coherent logical log.
-- A leader commits an index through quorum acknowledgement only when the entry
-  at that index belongs to the leader's current term.
-
-### Election invariants
-
-- Terms increase monotonically.
-- A node grants at most one real vote per term.
-- A candidate's log must be at least as up to date as the voter's log.
-- A relevant higher-term message normally makes a candidate or leader a
-  follower. Pre-vote requests and granted pre-vote responses do not advance
-  the term. `CheckQuorum` can also suppress ordinary vote requests during an
-  active leader lease. See [term handling](learning/01-safety-and-elections.md#the-actual-election-path-in-c).
-- Election timeouts are logical ticks and are randomized in
-  `[ElectionTick, 2 * ElectionTick)`.
-
-### Replication invariants
-
-- For each follower, `0 <= Match < Next`.
-- An acknowledgement can only raise `Match` within one progress record.
-  Role/term resets and configuration reconstruction can reset that record.
-- Probe mode has at most one effective append in flight.
-- Replicate mode may optimistically advance `Next`, bounded by inflight limits.
-- Snapshot mode pauses append replication.
-- Append rejection handling never moves `Next` below `Match + 1`.
-
-### Persistence invariants
-
-- Term and vote changes are durable before a granted vote response is sent.
-- New log entries are durable before an append acknowledgement is sent.
-- Synchronous `Ready` batches are advanced in order. In asynchronous storage
-  mode, append and apply each have their own ordered completion stream. See
-  [the host contract](public-api.md#asynchronous-storage-writes) for the
-  different acknowledgement rules.
-
-### Membership invariants
-
-- Every voter or learner has a corresponding progress record.
-- Active learners and voters are disjoint.
-- Joint consensus requires a majority of both incoming and outgoing voter
-  sets.
-- Configuration changes become active when applied, not merely appended.
-- Ordinary proposal admission prevents overlapping unapplied configuration
-  changes unless `DisableConfChangeValidation` disables that admission check.
+| Area | What to preserve |
+|---|---|
+| [Elections](learning/01-safety-and-elections.md) | Terms never go backward; there is at most one real vote per term; a granted vote requires an up-to-date candidate log. |
+| [Log and replication](learning/02-log-and-replication.md) | Entries are contiguous and terms do not decrease within a log. A committed entry is never overwritten. `Match < Next`; only a current-term entry can advance leader commit by counting replicas. |
+| [Ready and recovery](learning/03-ready-and-recovery.md) | `Applied <= Applying <= Committed <= LastIndex` is a core invariant, not the host's physical cursor. A real vote grant or successful append must not attest work that has not crossed the required durability barrier. |
+| [Membership and reads](learning/04-membership-reads-and-liveness.md) | Joint consensus requires both majorities; learners do not vote. An accepted configuration takes effect when applied, not when appended. ReadIndex does not replace physical application. |
 
 ## Test architecture
 
-The reference tests form a layered specification:
+Use the [testing lab](learning/05-concurrency-and-testing.md) for runnable
+commands and the [parity matrix](parity-matrix.md) for reference coverage. ABA
+is the case where a log tail returns to the same `(index, term)` while an
+older write acknowledgement is still in flight.
+Choose evidence for the boundary that changed:
 
-| Layer | Representative sources | What it specifies |
-|---|---|---|
-| Leaf units | `quorum/*_test.go`, `tracker/*_test.go`, `storage_test.go`, `log_unstable_test.go`, `log_test.go` | Local data structures and invariants |
-| Paper scenarios | `raft_paper_test.go` | Elections, log matching, commitment, and safety rules from the Raft paper |
-| Core behavior | `raft_test.go`, `raft_snap_test.go`, `raft_flow_control_test.go` | Full state-machine behavior and extensions |
-| API contract | `rawnode_test.go`, `node_test.go` | `Ready`/`Advance`, persistence ordering, and concurrent wrapper behavior |
-| Golden interactions | `interaction_test.go`, `testdata/*.txt` | Multi-step cluster scenarios, membership changes, snapshots, pre-vote, and async storage |
-| End-to-end harness | `rafttest/network.go`, `rafttest/node.go` | Message loss, delay, disconnect, restart, and application integration |
+| Boundary | Where to look |
+|---|---|
+| Consensus transitions, including snapshot and membership installation | [Core tests](../tests/DotnetRaft.Tests/Core/), [role dispatch approvals](../tests/DotnetRaft.Tests/Core/RaftCoreDispatchCharacterizationTests.cs) |
+| Ready identity, persistence, and early admission | [`RawNodeReadyTests`](../tests/DotnetRaft.Tests/RawNode/RawNodeReadyTests.cs), [`RawNodePersistenceTests`](../tests/DotnetRaft.Tests/RawNode/RawNodePersistenceTests.cs) |
+| Async worker routing, supersession, and ABA | [Async storage tests](../tests/DotnetRaft.Tests/AsyncStorage/), [SQLite response routing](../tests/DotnetRaft.Sqlite.Tests/SqliteStorageRawNodeTests.cs) |
+| Owner-loop races versus interleaved cluster failures | [RaftNode tests](../tests/DotnetRaft.Tests/Node/), [cluster lab tests](../tests/DotnetRaft.Tests/Interaction/RaftLabTests.cs) |
+| Atomic publication and process restart | [SQLite durability tests](../tests/DotnetRaft.Sqlite.Tests/SqliteStorageDurabilityTests.cs), [KV recovery tests](../tests/DotnetRaft.Tests/Examples/DurableKvComponentTests.cs), [real-process smoke](../eng/smoke-durable-kv-cluster.sh) |
 
-The current C# test suites are mapped in the [parity matrix](parity-matrix.md).
-The [test laboratory](learning/05-concurrency-and-testing.md) explains the
-pinned scripts, local owner-loop tests, simulated crash schedules, and real
-process smoke. The [implementation DAG](implementation-dag.md) records the
-completed port's sequencing, not future implementation work.
+## Reference snapshot
+
+The Go comparison is pinned to [`etcd-io/raft` at `1c0011d`](https://github.com/etcd-io/raft/tree/1c0011d2c6b7a0230f87bad38ad4c6e70d810f9e).
+This pin identifies the behavioral baseline, not the current C# layout. See
+the [parity matrix](parity-matrix.md#intentional-deviations) for later fixes and
+intentional differences.
+The [original reference analysis](https://github.com/algorithm-apprentice/dotnet-raft/blob/45160468cb7a0a3465c5fbebf088b5998188890b/docs/reference-architecture.md#reference-snapshot)
+has the detailed Go package and source map.
+
+### Component map
+
+`raftpb` and `quorum` are dependency leaves. `tracker` uses both;
+`confchange` builds on `tracker`. The root `raft` package composes the
+state machine and host-facing APIs. `rafttest` drives that API from outside
+and supplies the basis for the pinned C# interaction corpus. The
+[porting timeline](implementation-dag.md) records the order in which these
+responsibilities were brought over.

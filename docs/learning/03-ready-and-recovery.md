@@ -2,9 +2,9 @@
 
 If [chapter 2](02-log-and-replication.md) explains what the algorithm chooses,
 this chapter explains when the outside world is allowed to see the choice.
-The [host contract](../public-api.md) specifies the integration ordering;
-the executions below explain why that ordering is necessary and how to
-recognize mistakes in the implementation.
+The [host contract](../public-api.md) specifies the integration ordering and
+[application progress](../public-api.md#application-progress); the executions
+below explain why those boundaries exist and how to recognize mistakes.
 
 ## Separate a decision from its effects
 
