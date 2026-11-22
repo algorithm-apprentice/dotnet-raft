@@ -34,6 +34,11 @@ jobs:
       - name: Test Release
         run: dotnet test DotnetRaft.sln -c Release --no-restore --verbosity quiet
 
+      - name: Replicated counter examples
+        run: |
+          dotnet run --project examples/DotnetRaft.Counter -c Release --no-restore
+          dotnet run --project examples/DotnetRaft.Counter -c Release --no-build -- --async-storage
+
       - name: Durable KV cluster smoke
         run: ./eng/smoke-durable-kv-cluster.sh "$GITHUB_WORKSPACE"
 

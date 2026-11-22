@@ -6,6 +6,7 @@ when application snapshots are safe.
 
 This is the current host contract for package version 1.0.0. For the design
 history and reference-porting milestones, see the [design index](design/README.md).
+For code you can run, see the [examples](../examples/README.md).
 
 ## Architecture boundary
 
@@ -259,6 +260,8 @@ foreach (Message response in appendRequest.Responses)
 ```
 
 For `RawNode`, deliver local responses with `Step` on its serialized owner.
+The [counter demo](../examples/DotnetRaft.Counter/README.md#asynchronous-storage-writes)
+shows both worker queues and routes nested responses in a three-node run.
 The [SQLite integration test](../tests/DotnetRaft.Sqlite.Tests/SqliteStorageRawNodeTests.cs)
 exercises a durable append with both destinations.
 The [same membership rule as synchronous mode](#synchronous-ready-loop)

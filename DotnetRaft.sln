@@ -31,6 +31,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetRaft.Sqlite.Tests", "
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetRaft.Sqlite.CrashHarness", "tools\DotnetRaft.Sqlite.CrashHarness\DotnetRaft.Sqlite.CrashHarness.csproj", "{0E173837-5D44-40A2-BD01-C95235F36237}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetRaft.Counter", "examples\DotnetRaft.Counter\DotnetRaft.Counter.csproj", "{E57C1AB3-FFD3-4D96-AB06-C723F682641F}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -149,6 +151,18 @@ Global
 		{0E173837-5D44-40A2-BD01-C95235F36237}.Release|x64.Build.0 = Release|Any CPU
 		{0E173837-5D44-40A2-BD01-C95235F36237}.Release|x86.ActiveCfg = Release|Any CPU
 		{0E173837-5D44-40A2-BD01-C95235F36237}.Release|x86.Build.0 = Release|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Debug|x64.Build.0 = Debug|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Debug|x86.Build.0 = Debug|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|x64.ActiveCfg = Release|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|x64.Build.0 = Release|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|x86.ActiveCfg = Release|Any CPU
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -163,5 +177,6 @@ Global
 		{D48DB008-7BBE-47EE-9043-200DBC208D97} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{A3AAC16A-3ED2-4E08-918A-D0424C632856} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{0E173837-5D44-40A2-BD01-C95235F36237} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
+		{E57C1AB3-FFD3-4D96-AB06-C723F682641F} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
 	EndGlobalSection
 EndGlobal

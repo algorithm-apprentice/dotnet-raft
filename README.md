@@ -51,14 +51,21 @@ native database dependencies.
 
 Either facade can use synchronous Ready/Advance or opt into asynchronous
 storage writes. Follow the [host integration contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
-for the required ordering. To see the complete synchronous loop running with
-three nodes, start the [gRPC KV example](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.KvCluster).
+for the required ordering.
+
+## Examples
+
+Start with the [replicated counter](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.Counter):
+three in-memory nodes, one command, and two selectable storage protocols.
+Then try the [durable gRPC KV cluster](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.KvCluster)
+to see a service with real networking and restart from SQLite. The
+[example index](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples)
+compares the APIs and storage modes side by side.
 
 ## Documentation
 
 - [Offline Raft learning guide and implementation deep dives](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/raft-learning-guide.md)
 - [Public API and host responsibilities](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
-- [Runnable gRPC key-value cluster example](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.KvCluster)
 - [Durable SQLite storage package](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/src/DotnetRaft.Sqlite)
 - [Behavioral parity matrix](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/parity-matrix.md)
 - [Reference architecture](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/reference-architecture.md)
@@ -73,10 +80,5 @@ three nodes, start the [gRPC KV example](https://github.com/algorithm-apprentice
 - **Completed milestone:** M7 Parity release
 - **Completed nodes:** D00-D26
 - **Completed:** behavior-preserving post-parity `RaftCore` refactoring
-- **Available example:** three-process ASP.NET Core gRPC key-value cluster
 - **Available storage:** durable SQLite Raft log, hard state, snapshots, and
   restart support through `DotnetRaft.Sqlite`
-
-The example remains intentionally educational, but now persists both Raft and
-application state with SQLite, supports crash/restart recovery, request
-deduplication, snapshots, compaction, transport, and read-index barriers.

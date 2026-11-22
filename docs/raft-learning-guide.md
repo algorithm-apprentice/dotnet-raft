@@ -17,6 +17,10 @@ You do not need the Raft paper or an internet connection while following this
 guide. The paper remains useful background, but the explanations and all
 required links below are local to the repository.
 
+For a first run, try the [replicated counter](../examples/DotnetRaft.Counter/README.md).
+It makes the host boundary visible before the durable KV laboratory adds a
+network, databases, and a client API.
+
 ## Implementation deep dives
 
 Use these chapters when you want to derive the rules, step through their C#

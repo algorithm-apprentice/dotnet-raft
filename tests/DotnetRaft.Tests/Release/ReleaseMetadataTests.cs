@@ -196,10 +196,14 @@ public sealed partial class ReleaseMetadataTests
     public void RepositoryDocumentationLinksResolve()
     {
         string root = ReleaseTestPaths.RepositoryRoot;
-        string[] documents = Directory.GetFiles(
-            Path.Combine(root, "docs"),
-            "*.md",
-            SearchOption.AllDirectories);
+        IEnumerable<string> documents = Directory.EnumerateFiles(
+                Path.Combine(root, "docs"),
+                "*.md",
+                SearchOption.AllDirectories)
+            .Concat(Directory.EnumerateFiles(
+                Path.Combine(root, "examples"),
+                "README.md",
+                SearchOption.AllDirectories));
         foreach (string document in documents)
         {
             string text = File.ReadAllText(document);
