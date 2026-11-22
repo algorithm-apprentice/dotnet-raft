@@ -178,12 +178,13 @@ of business state. Separate three cases at the receiver:
    unstable, restore its consensus membership, and wait for persistence and
    application reconciliation before exposing later committed entries.
 
-After the host publishes a snapshot, the sender can start with the first
-entry after the snapshot. Distinguish two kinds of feedback: the host's
-`ReportSnapshot` reports a transport result to progress tracking; a follower's
-protocol acknowledgement reports replication evidence. A successful RPC
-transport return is not permission to pretend that the peer has matched
-unrelated later entries.
+Distinguish two kinds of feedback: the sender's `ReportSnapshot` reports a
+transport result to progress tracking; a follower's protocol acknowledgement
+reports replication evidence. A successful transport can set up the next
+probe after the snapshot, without proving that the receiver has applied it.
+The [host contract](../public-api.md#network-transport) explains the paused
+probe state. A later append acknowledgement can also resume replication if
+it proves the follower has reached the retained log boundary.
 
 ## Experiments
 

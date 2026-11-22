@@ -172,7 +172,7 @@ Read these in order, instead of starting from an HTTP endpoint:
    the core. [`RaftClock`](../../src/DotnetRaft/Core/RaftClock.cs) increments
    elapsed counters and chooses a fresh timeout in
    `[ElectionTick, 2 * ElectionTick)` on reset. The host chooses how often to
-   call `Tick`; the deterministic core does not read a wall clock.
+   call `Tick`; the core counts logical ticks, not wall-clock time.
 2. `RaftCore.TickElection` triggers a local campaign for an eligible node.
    A learner or a node with a pending unstable snapshot cannot campaign.
    `HandleHup` also protects the application of committed configuration
@@ -184,7 +184,11 @@ Read these in order, instead of starting from an HTTP endpoint:
    [`RaftOutput`](../../src/DotnetRaft/Core/RaftOutput.cs).
 4. An incoming message passes the term logic in `RaftCore.Step` before the
    stateless [`RaftRoleStrategies`](../../src/DotnetRaft/Core/RaftRoleStrategies.cs)
-   route it. Higher-term traffic normally makes the node a follower.
+   route it. Higher-term traffic normally makes the node a follower. A
+   higher-term pre-vote request or granted pre-vote response is not a real
+   term change. With `CheckQuorum`, an active leader lease can also suppress
+   an ordinary higher-term vote or pre-vote request, but not a transfer
+   campaign's vote request.
    `HandleVoteRequest` decides whether voting is permitted and the candidate's
    log is sufficiently new. Unknown, stale, and duplicate vote responses
    must not create another quorum.
@@ -194,7 +198,7 @@ Read these in order, instead of starting from an HTTP endpoint:
    acknowledged through persistence too.
 
 This ordering explains an important observation in a debugger: you can see
-stored `Vote` change in memory and find an outbound vote response without the
+the in-memory `Vote` change and find an outbound vote response without the
 response having been sent or even delivered to the same node. The `Ready`
 boundary separates planned protocol effects from observable durable effects;
 see [chapter 3](03-ready-and-recovery.md).
@@ -221,7 +225,7 @@ lease mechanisms.
 ## Experiments
 
 From the repository root, after the setup in the
-[learning guide](../raft-learning-guide.md#2-prepare-the-repository-for-offline-use):
+[learning guide](../raft-learning-guide.md#prepare-the-repository-for-offline-use):
 
 ```bash
 dotnet test tests/DotnetRaft.Tests -c Debug --no-restore \

@@ -1,5 +1,10 @@
 # D23 Deterministic Interaction Harness Design
 
+> **Milestone record.** The tables describe the original synchronous harness.
+> [D25](d25-asynchronous-storage-writes.md#interaction-harness) subsequently
+> implemented `process-append-thread` and `process-apply-thread`; see the
+> [test laboratory](../learning/05-concurrency-and-testing.md) for current use.
+
 - **Status:** Accepted
 - **Date:** 2026-10-03
 - **DAG node:** D23
@@ -445,7 +450,7 @@ Lexical conversion follows the pinned Go helpers:
 
 | Command | Contract |
 |---|---|
-| `add-nodes <count>` | `count` is positive. Options: `voters=(...)`, `learners=(...)`, `inflight=<positive-int>`, `index=<ulong>`, `content=<raw-token>`, `prevote=<bool>`, `checkquorum=<bool>`, `max-committed-size-per-ready=<ulong>`, `disable-conf-change-validation=<bool>`, `read-only=safe|lease-based`, and `step-down-on-removal=<bool>`. Defaults are the deterministic construction values, empty membership/data, index zero, safe reads, and false booleans. `async-storage-writes` is recognized but any true value is rejected until D25. |
+| `add-nodes <count>` | `count` is positive. Options: `voters=(...)`, `learners=(...)`, `inflight=<positive-int>`, `index=<ulong>`, `content=<raw-token>`, `prevote=<bool>`, `checkquorum=<bool>`, `max-committed-size-per-ready=<ulong>`, `disable-conf-change-validation=<bool>`, `read-only=safe\|lease-based`, and `step-down-on-removal=<bool>`. Defaults are the deterministic construction values, empty membership/data, index zero, safe reads, and false booleans. `async-storage-writes` is recognized but any true value is rejected until D25. |
 | `campaign <node>` | Exactly one node. |
 | `compact <node> <index>` | Exactly one node and compact-through index. |
 | `deliver-msgs [node ...] [drop=(...)] [type=<MessageType>]` | Bare nodes are delivered. Drop IDs are dropped. At least one recipient is required. The same ID cannot appear in both sets. Type is optional and defaults to all messages. |
@@ -461,7 +466,7 @@ Lexical conversion follows the pinned Go helpers:
 | `forget-leader <node>` | Exactly one node. |
 | `send-snapshot <from> <to>` | Exactly two instantiated nodes. |
 | `propose <node> <raw-token>` | Exactly one payload token. Quote characters are ordinary bytes and remain in the UTF-8 proposal data. |
-| `propose-conf-change <node> [v1=<bool>] [transition=auto|implicit|explicit]` | Input is zero or more whitespace-separated compact changes `v<ID>`, `l<ID>`, `r<ID>`, or `u<ID>`. Defaults are `v1=false` and `transition=auto`. Empty V2 input is leave-joint. V1 requires exactly one operation and `transition=auto`. |
+| `propose-conf-change <node> [v1=<bool>] [transition=auto\|implicit\|explicit]` | Input is zero or more whitespace-separated compact changes `v<ID>`, `l<ID>`, `r<ID>`, or `u<ID>`. Defaults are `v1=false` and `transition=auto`. Empty V2 input is leave-joint. V1 requires exactly one operation and `transition=auto`. |
 | `report-unreachable <node> <peer>` | Exactly two instantiated nodes; the second node's Raft ID is reported from the first. |
 | `process-append-thread <node ...>` / `process-apply-thread <node ...>` | Known syntax, but execution throws the explicit D25 `NotSupportedException`. |
 

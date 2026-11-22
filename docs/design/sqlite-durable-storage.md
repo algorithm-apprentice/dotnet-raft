@@ -359,12 +359,13 @@ A non-bootstrap incoming snapshot also sets
 `CreateSnapshot`, because locally created snapshots already describe
 physically applied application state.
 
-While a pending marker exists, all mutation methods except `SetHardState` and
-`AcknowledgeApplicationSnapshot` are rejected. `SetHardState` is allowed only
-to durably repair commit so it covers the pending snapshot without exceeding
-the retained last index. This prevents later log or snapshot state from
-advancing before the host establishes the corresponding application state.
-Reads needed to obtain and restore the pending snapshot remain available.
+While a pending marker exists, writes to the log and snapshot are blocked.
+The [package guide](../../src/DotnetRaft.Sqlite/README.md#open-and-restart)
+shows how the host uses `SetHardState` and `AcknowledgeApplicationSnapshot`
+to finish reconciliation. Storage validates hard-state transitions and
+requires commit to cover the snapshot without exceeding the last index. It
+does not infer the host's intent to repair only commit. Reads needed for
+reconciliation remain available.
 
 ### Hard state
 
@@ -372,7 +373,9 @@ Serialize and replace the singleton hard-state BLOB.
 
 ## Atomic Ready publication
 
-`PersistReady` serializes every input before starting one transaction:
+`PersistReady` takes ownership of the inputs before publishing them in one
+transaction. This describes the atomic result, not the order of individual
+SQL statements:
 
 ```text
 apply Snapshot, when present
@@ -394,8 +397,10 @@ max(snapshot.term, lastEntry.term) <= hardState.term
 ```
 
 Term and commit cannot regress, and a nonzero vote cannot change within one
-term. Direct mutation methods use the same final-state validator, so no
-successful call can create a database that reopening would reject.
+term. Direct mutation methods use the final-state validator as well. A direct
+`ApplySnapshot` can deliberately leave commit below the snapshot while the
+application marker is pending; such a file can be reopened for reconciliation,
+but is not ready for node construction.
 
 Because every transaction uses FULL synchronous durability, successful return
 satisfies `Ready.MustSync` whether it is true or false.
@@ -458,20 +463,10 @@ After a failed write:
 Reopening after process termination relies on SQLite WAL recovery. Startup
 validation then reconstructs the same IStorage view.
 
-Before constructing a restarted `RawNode` or `RaftNode`, the host must:
-
-1. call `GetPendingApplicationSnapshot`;
-2. when non-null, atomically restore application state, physical-applied index,
-   and `ConfState` from that snapshot;
-3. require trusted durable `HardState.Term` to cover both the snapshot term and
-   retained last-entry term;
-4. repair `HardState.Commit` when required by the D21 physical-applied
-   recovery rule;
-5. call `AcknowledgeApplicationSnapshot`; and
-6. only then construct the node.
-
-This closes the crash window after SQLite snapshot commit but before
-application restore.
+The [package recovery procedure](../../src/DotnetRaft.Sqlite/README.md#open-and-restart)
+closes the crash window after SQLite snapshot commit but before application
+restore. Use the [host restart contract](../public-api.md#restart) before
+constructing the new node.
 
 ## Testing
 
@@ -554,6 +549,10 @@ contract; an instrumented VFS is outside this milestone.
 10. commit, push, and green CI.
 
 ## Validation outcome
+
+These results describe the
+[SQLite milestone](https://github.com/algorithm-apprentice/dotnet-raft/commit/2932af5893400710713447cea43f465c5c73f6a8),
+not current coverage or mutation results.
 
 | Gate | Result |
 |---|---:|

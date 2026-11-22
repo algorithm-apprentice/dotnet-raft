@@ -1,5 +1,10 @@
 # D26 Parity and Release Hardening Design
 
+> **Milestone record.** The CI and package examples document the original
+> parity release. See the [current workflow](../../.github/workflows/ci.yml),
+> [installation instructions](../../README.md#install), and
+> [performance guide](../performance.md) for current commands.
+
 - **Status:** Accepted
 - **Date:** 2026-10-03
 - **DAG node:** D26

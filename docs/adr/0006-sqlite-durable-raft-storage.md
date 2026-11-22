@@ -173,8 +173,9 @@ Implemented as the separate `DotnetRaft.Sqlite 1.0.0` package.
   exact schema validation, and unsigned big-endian indexes are enforced.
 - `PersistReady` and `PersistStorageAppend` publish durable categories in one
   transaction.
-- every committed state validates non-regressing HardState and requires its
-  term/commit to cover retained snapshot and log terms/indexes;
+- hard-state transitions validate non-regression. Commit cannot exceed the
+  retained log; a pending direct snapshot install may temporarily have commit
+  below the snapshot index, but cannot be acknowledged until commit covers it;
 - unchanged snapshot BLOBs are not rebound for ordinary hard-state, append,
   acknowledgement, or compaction transactions;
 - incoming snapshots create a durable application-reconciliation marker;

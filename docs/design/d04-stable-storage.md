@@ -1,5 +1,8 @@
 # D04 Stable Storage Design
 
+> **Milestone record.** For the current backend contract and recovery rules,
+> see [Storage reads](../public-api.md#storage-reads) and [Restart](../public-api.md#restart).
+
 - **Status:** Accepted
 - **Date:** 2026-09-30
 - **DAG node:** D04

@@ -5,6 +5,10 @@
 - **Scope:** deterministic verification and surgical fixes
 - **Related decision:** ADR 0005
 
+The measurements and acceptance gates describe the
+[concurrency-hardening milestone](https://github.com/algorithm-apprentice/dotnet-raft/commit/006bb0808f07bbd4f131f3a71f799ae7da01116d).
+See [the host contract](../public-api.md#raftnode) for current call behavior.
+
 ## Objective
 
 Build a deterministic regression boundary around `RaftNode` before any later

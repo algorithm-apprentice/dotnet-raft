@@ -1,5 +1,8 @@
 # D25 Asynchronous Storage Writes Design
 
+> **Design record.** For host-side routing, worker ordering, and the runnable
+> counter demo, start at [Asynchronous storage writes](../public-api.md#asynchronous-storage-writes).
+
 - **Status:** Accepted
 - **Date:** 2026-10-03
 - **DAG node:** D25
@@ -346,7 +349,9 @@ each queue's own order and delivering responses.
 
 ## RawNode message filtering
 
-In async mode `RawNode.Step` accepts exactly:
+For **local storage completions** in async mode, `RawNode.Step` accepts only
+these sender/type/destination combinations. Ordinary Raft messages still
+use the network-message path:
 
 ```text
 MsgStorageAppendResp from AppendThread to local ID

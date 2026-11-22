@@ -121,10 +121,11 @@ admits an order consistent with real time.
 
 ### Trace a read through this port
 
-1. [`RawNode`](../../src/DotnetRaft/RawNode.cs) supplies an opaque request
-   context. The caller uses it to correlate one request and result; the KV
-   example uses a GUID. Role routing can forward a follower's `MsgReadIndex`
-   to its known leader.
+1. The caller supplies an opaque request context to
+   [`RawNode.ReadIndex`](../../src/DotnetRaft/RawNode.cs) to correlate one
+   request with its later `ReadState`; the KV example uses a GUID. Role
+   routing can forward a follower's `MsgReadIndex` to its known leader.
+   See the [host contract](../public-api.md#read-index) for timeouts and retries.
 2. In [`RaftCore.HandleLeaderReadIndex`](../../src/DotnetRaft/Core/RaftCore.cs),
    inspect the current-term gate and the local singleton fast path. A single
    local voter has no remote peer to confirm leadership with; it still
@@ -185,7 +186,7 @@ dotnet test tests/DotnetRaft.Tests -c Debug --no-restore \
    [read-index tests](../../tests/DotnetRaft.Tests/Core/RaftCoreReadIndexQuorumTests.cs).
    Write down the acknowledgement set after each step; say which majority is
    still missing before inspecting the assertions.
-2. In the [manual cluster lab](../raft-learning-guide.md#8-manual-laboratory),
+2. In the [manual cluster lab](../raft-learning-guide.md#manual-laboratory),
    compare the stale local endpoint with the ReadIndex endpoint after losing
    a quorum. Explain why "cannot verify a fresh value" does not mean the
    local database must be empty or unavailable for inspection.

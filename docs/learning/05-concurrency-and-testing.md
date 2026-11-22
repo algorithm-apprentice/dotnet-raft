@@ -80,7 +80,7 @@ the new instance starts from the stable store and the recovered physical
 application prefix. Local worker queues keep their FIFO contract; only
 network messages are selected for out-of-order delivery, loss, or duplication.
 
-A split is a link predicate, not an instruction to switch the stopped
+A split is a link predicate, not an instruction to switch the isolated
 leader's `Role`. This matters. The minority case deliberately lets the old
 leader accept and persist an uncommitted proposal, then observes that it
 cannot **apply** it without a quorum. After the new leader commits and the

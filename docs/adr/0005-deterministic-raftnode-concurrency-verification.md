@@ -140,6 +140,9 @@ This decision is implemented when:
 ## Outcome
 
 Implemented without changing the public API or single-owner architecture.
+The counts and measurements below are from the
+[concurrency-hardening milestone](https://github.com/algorithm-apprentice/dotnet-raft/commit/006bb0808f07bbd4f131f3a71f799ae7da01116d),
+not current coverage or timing claims.
 
 - test synchronization now uses explicit entered, release, and exited gates;
   no timeout runs inside an owner callback;

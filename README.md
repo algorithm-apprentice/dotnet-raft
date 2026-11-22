@@ -20,13 +20,22 @@ dotnet pack src/DotnetRaft/DotnetRaft.csproj -c Release
 dotnet pack src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj -c Release
 ```
 
-In the consumer project, create `NuGet.Config` if it does not already have one,
-add the local package directory alongside NuGet.org, and install:
+In a .NET 10 consumer project, create `nuget.config` if the project does not
+already have a NuGet configuration. The .NET SDK template creates this
+lowercase filename and includes NuGet.org for dependencies:
 
 ```bash
 dotnet new nugetconfig
+```
+
+From the consumer project directory, add the local package directory and
+install. Replace the placeholder path with the absolute path to your
+checkout. If using an existing configuration, pass its actual filename
+and keep a source for external dependencies:
+
+```bash
 dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
-  --name dotnet-raft-local --configfile NuGet.Config
+  --name dotnet-raft-local --configfile nuget.config
 dotnet add package DotnetRaft --version 1.0.0
 ```
 
@@ -37,6 +46,10 @@ For durable SQLite consensus storage:
 ```bash
 dotnet add package DotnetRaft.Sqlite --version 1.0.0
 ```
+
+To verify a freshly rebuilt package with the same version, restore in a
+consumer with an isolated NuGet package cache; NuGet may otherwise reuse
+the previously installed `1.0.0`.
 
 `DotnetRaft.Sqlite` is optional and keeps the core consensus package free of
 native database dependencies.

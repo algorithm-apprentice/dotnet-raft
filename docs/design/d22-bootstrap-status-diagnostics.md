@@ -1,5 +1,8 @@
 # D22 Bootstrap, Status, and Diagnostics Design
 
+> **Milestone record.** For current bootstrap and recovery requirements, see
+> [the host contract](../public-api.md#rawnode) and [Restart](../public-api.md#restart).
+
 - **Status:** Accepted
 - **Date:** 2026-10-04
 - **DAG node:** D22

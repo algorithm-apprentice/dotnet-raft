@@ -5,6 +5,10 @@
 - **Scope:** crash-recoverable fixed three-node example
 - **Related decision:** ADR 0007
 
+For commands and observable client behavior, use the
+[KV example README](../../examples/DotnetRaft.KvCluster/README.md). This page
+describes the example's application and recovery design.
+
 ## Objective
 
 Turn the existing educational gRPC cluster into a minimal durable distributed
@@ -488,7 +492,8 @@ The bounded retry path exercises the documented client contract rather than
 masking deterministic failures: mutation retries reuse the exact request ID,
 while all other HTTP errors fail immediately.
 
-Pending-snapshot recovery additionally terminates at:
+The pending-snapshot component test constructs and reopens the two durable
+stores at these boundaries. It does not kill a process at each boundary:
 
 ```text
 Raft snapshot committed / application not restored
@@ -497,8 +502,9 @@ commit repaired / marker not acknowledged
 marker acknowledged / node not constructed
 ```
 
-Every restart must preserve hard-state term/vote, restore idempotently, clear
-only the exact marker, and continue linearizable reads/writes.
+The component test checks hard-state term/vote, idempotent restore, commit
+repair, and exact marker clearance. Continued reads and writes are exercised
+separately by cluster restart integration and the real-process smoke.
 
 Wall-clock timeouts are deadlock guards only. Process IDs are tracked
 explicitly; no name-based process termination is used.
@@ -532,7 +538,9 @@ explicitly; no name-based process termination is used.
 
 ## Implementation evidence
 
-The completed implementation has the following local evidence:
+These are milestone results recorded with
+[`5dfc201`](https://github.com/algorithm-apprentice/dotnet-raft/commit/5dfc201f0b65124a6707686d1dd5bc8c8d7df722),
+not current test counts or coverage measurements:
 
 - 998 core/example tests and 33 SQLite tests pass in both Debug and Release;
 - focused tests for durable example behavior pass as part of the core/example

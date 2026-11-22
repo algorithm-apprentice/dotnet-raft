@@ -62,8 +62,8 @@ Running the existing check is safe:
 - if another proposal precondition fails, the existing typed drop handling
   leaves state unchanged and logs the pending condition.
 
-The pinned and current upstream implementations instead wait for the next
-application acknowledgement. This project intentionally retries earlier at
+The pinned upstream implementation waits for the next application
+acknowledgement. This project intentionally retries earlier at
 transfer timeout to avoid making joint-exit liveness depend on unrelated client
 traffic.
 
@@ -113,7 +113,8 @@ transfer target in `TickLeader`.
 
 - The focused leadership-transfer, membership, quorum, and safety set passes
   109 tests.
-- Full Debug and Release validation each pass 1,023 core/example tests and 33
-  SQLite tests.
+- At the [fix commit](https://github.com/algorithm-apprentice/dotnet-raft/commit/138be137fcd77cfe8155c171af0ea5cfe2a4b617),
+  full Debug and Release validation each passed 1,023 core/example tests and
+  33 SQLite tests.
 - The regression test proves immediate single-proposal retry, duplicate
   suppression, and check-quorum step-down ordering.

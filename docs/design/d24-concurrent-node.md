@@ -1,5 +1,9 @@
 # D24 Concurrent Node Wrapper Design
 
+> **Milestone record.** Later work added [async storage](d25-asynchronous-storage-writes.md)
+> and [deterministic concurrency verification](raftnode-concurrency-hardening.md).
+> Use the [current RaftNode contract](../public-api.md#raftnode) for integration.
+
 - **Status:** Accepted
 - **Date:** 2026-10-03
 - **DAG node:** D24

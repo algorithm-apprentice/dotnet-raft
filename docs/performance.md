@@ -3,7 +3,9 @@
 Performance measurements are comparative diagnostics, not CI pass/fail
 thresholds.
 
-## Command
+## Run the benchmarks
+
+From the repository root, run the release workload:
 
 ```bash
 dotnet run \
@@ -12,15 +14,19 @@ dotnet run \
   -- --operations 10000 --iterations 5
 ```
 
-CI uses:
+The refactor suite also reports allocations for the proposal cycle, follower
+heartbeat dispatch, and safe-read completion:
 
 ```bash
 dotnet run \
-  --project benchmarks/DotnetRaft.Benchmarks/DotnetRaft.Benchmarks.csproj \
-  -c Release \
-  --no-restore \
-  -- --smoke
+  --project benchmarks/DotnetRaft.RefactorBenchmarks/DotnetRaft.RefactorBenchmarks.csproj \
+  -c Release
 ```
+
+[CI](../.github/workflows/ci.yml) runs both projects with `--smoke`. That
+checks that the workloads execute and produce valid results, not whether
+timings meet a threshold. These are in-memory microbenchmarks, not measures
+of SQLite, transport, or end-to-end KV throughput.
 
 ## Methodology
 
@@ -34,8 +40,9 @@ included.
 
 ## D26 reference capture
 
-This section is populated by D26 validation after the benchmark project is
-built and run.
+This is the historical D26 reference capture, not a measurement of the
+current checkout. Later refactor measurements are recorded separately in the
+[refactor safety baseline](design/post-parity-refactor-safety-baseline.md).
 
 ```text
 commit: 2907292d80fc7401e48ea2094eeb750d473aca90

@@ -19,8 +19,10 @@ targets `net10.0` and uses `Microsoft.Data.Sqlite`.
 
 ## Open and restart
 
-Run the pending-snapshot reconciliation before constructing a restarted node.
-`RestoreApplicationSnapshot` below is supplied by the host.
+Resolve the pending snapshot before constructing a restarted node.
+`RestoreApplicationSnapshot` is a host-supplied operation that must
+transactionally restore the snapshot's application bytes, applied index,
+and `ConfState`. It must be safe to repeat after a crash.
 
 ```csharp
 using DotnetRaft.Protocol;
@@ -32,41 +34,34 @@ Snapshot? pending =
     storage.GetPendingApplicationSnapshot();
 if (pending is not null)
 {
-    // Atomically restore application bytes, physical-applied index,
-    // and pending.Metadata.ConfState before acknowledging.
-    RestoreApplicationSnapshot(pending);
-
-    HardState hardState =
-        storage.GetHardState()
+    HardState hardState = storage.GetHardState()
         ?? throw new InvalidDataException(
             "A pending non-bootstrap snapshot requires durable HardState.");
-    if (hardState.Term
-        < pending.Metadata.Term)
+    ulong lastTerm = storage.GetTerm(storage.GetLastIndex());
+    if (hardState.Term < Math.Max(pending.Metadata.Term, lastTerm))
     {
         throw new InvalidDataException(
-            "Recovered HardState term is older than the pending snapshot.");
+            "Recovered HardState term is older than the retained Raft state.");
     }
 
-    if (hardState.Commit
-        < pending.Metadata.Index)
+    RestoreApplicationSnapshot(pending);
+    if (hardState.Commit < pending.Metadata.Index)
     {
-        hardState.Commit =
-            pending.Metadata.Index;
+        hardState.Commit = pending.Metadata.Index;
         storage.SetHardState(hardState);
     }
 
-    storage.AcknowledgeApplicationSnapshot(
-        pending.Metadata.Index);
+    storage.AcknowledgeApplicationSnapshot(pending.Metadata.Index);
 }
 ```
 
 `GetInitialState` rejects startup while a pending snapshot remains.
 Acknowledgement requires the exact pending index and durable commit covering
-it. Repair commit only from trusted recovery evidence; never infer term and
-vote from snapshot metadata. Restoring the same snapshot after a crash must be
-safe and idempotent. Then follow the
-[host restart contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#rawnode)
-to supply the recovered physical application cursor and its configuration.
+it. The snippet resolves only an incoming snapshot already marked pending.
+A null marker does not prove the application database is current. Continue
+with the [host restart contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#restart).
+In particular, `SqliteStorage.GetInitialState()` takes `ConfState` from the
+retained snapshot; setting `RaftConfig.Applied` does not update it.
 
 ## Persisting Ready and local append work
 
@@ -93,15 +88,18 @@ of the requested range.
 
 - keep the database, `-wal`, and `-shm` files on one local filesystem;
 - do not access one database through hard-link aliases;
-- only one `SqliteStorage` owner may open a database at a time;
-- copy live databases only through SQLite's backup facilities, never by
-  copying the main file alone; and
+- only one `SqliteStorage` owner may open a database at a time; and
 - dispose the storage during orderly shutdown.
+
+The package does not expose a live backup API. An external SQLite `.backup`
+against the live, exclusively owned Raft database is not supported. The
+supported procedure is to stop the node, dispose storage, and preserve the
+complete recovery set together. Never copy only the main file of a live WAL
+database.
 
 The package stores Raft consensus state only. It does not implement an
 application state machine, MVCC, lease/watch/auth, or cross-database
 transactions. If application state is stored separately, treat the Raft and
 application databases as one recovery set. The pending marker handles process
-crashes, not mismatched backups. Stop the host and preserve its complete data
-directory together, or use a coordinated backup protocol; backing up one live
-SQLite database is not a coordinated backup of both.
+crashes, not mismatched backups. Preserve the entire stopped node's data
+directory rather than backing up or restoring one database independently.

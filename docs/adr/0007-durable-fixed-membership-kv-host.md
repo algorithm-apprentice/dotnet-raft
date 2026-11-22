@@ -181,8 +181,9 @@ This decision is implemented when:
    directories and continues linearizable reads/writes;
 3. crash-window tests cover Raft-persisted/application-unapplied and
    application-applied/Ready-unadvanced states;
-4. pending-snapshot tests terminate after Raft snapshot persistence,
-   application restore, commit repair, and acknowledgement boundaries;
+4. pending-snapshot tests reconstruct and reopen the persisted state at Raft
+   snapshot persistence, application restore, commit repair, and acknowledgement
+   boundaries;
 5. a real three-process smoke kills and restarts a node, then continues quorum
    operation with the same data;
 6. snapshot generation and compaction preserve restart and follower catch-up;
@@ -194,7 +195,9 @@ This decision is implemented when:
 
 ## Implementation evidence
 
-The implementation satisfies the local acceptance gates:
+The implementation satisfied these local acceptance gates at the
+[durable-host milestone](https://github.com/algorithm-apprentice/dotnet-raft/commit/5dfc201f0b65124a6707686d1dd5bc8c8d7df722).
+Counts, coverage, and mutation measurements are historical:
 
 - 998 core/example tests and 33 SQLite tests pass in both Debug and Release;
 - the durable three-process SIGKILL, snapshot catch-up, quorum, and full

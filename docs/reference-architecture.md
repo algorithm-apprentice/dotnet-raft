@@ -1,5 +1,10 @@
 # Reference Architecture
 
+The first sections describe the pinned Go reference. For the implementation
+in this repository, start at [the C# component map](#implemented-c-core-boundaries).
+The [host integration contract](public-api.md) defines the current public
+behavior and recovery requirements.
+
 ## Reference snapshot
 
 The analysis is based on `etcd-io/raft` commit
@@ -31,8 +36,8 @@ algorithmic component, and `rafttest` is an external black-box harness.
 
 ## Architectural boundary
 
-The reference library deliberately excludes network and disk I/O. Its core can
-be modeled as:
+The reference library delegates network transport, durable writes, and
+application effects to its host. Its core can be modeled as:
 
 ```text
 current state + Message/Tick
@@ -57,7 +62,9 @@ Advance / local storage response
 
 This boundary is the most important design choice to preserve. A message may
 represent a remote RPC, a local timer event, a proposal, or completion of local
-storage work. The core performs no blocking I/O.
+storage work. The core does not perform the publication or transport steps
+itself, but synchronously queries the host's stable storage. `IStorage`
+reads may block on disk, including when `AsyncStorageWrites` is enabled.
 
 ## Component map
 
@@ -170,17 +177,18 @@ component that owns them.
 - Terms increase monotonically.
 - A node grants at most one real vote per term.
 - A candidate's log must be at least as up to date as the voter's log.
-- A candidate or leader receiving a valid higher-term message becomes a
-  follower, except that `MsgPreVote` and granted `MsgPreVoteResp` messages do
-  not advance the local term. A rejected higher-term pre-vote response follows
-  the normal higher-term transition.
+- A relevant higher-term message normally makes a candidate or leader a
+  follower. Pre-vote requests and granted pre-vote responses do not advance
+  the term. `CheckQuorum` can also suppress ordinary vote requests during an
+  active leader lease. See [term handling](learning/01-safety-and-elections.md#the-actual-election-path-in-c).
 - Election timeouts are logical ticks and are randomized in
   `[ElectionTick, 2 * ElectionTick)`.
 
 ### Replication invariants
 
 - For each follower, `0 <= Match < Next`.
-- `Match` never decreases.
+- An acknowledgement can only raise `Match` within one progress record.
+  Role/term resets and configuration reconstruction can reset that record.
 - Probe mode has at most one effective append in flight.
 - Replicate mode may optimistically advance `Next`, bounded by inflight limits.
 - Snapshot mode pauses append replication.
@@ -190,9 +198,10 @@ component that owns them.
 
 - Term and vote changes are durable before a granted vote response is sent.
 - New log entries are durable before an append acknowledgement is sent.
-- `Ready` batches are observed and advanced in order.
-- Entries, hard state, snapshots, messages, and applied entries retain the
-  ordering contract documented by `Ready`.
+- Synchronous `Ready` batches are advanced in order. In asynchronous storage
+  mode, append and apply each have their own ordered completion stream. See
+  [the host contract](public-api.md#asynchronous-storage-writes) for the
+  different acknowledgement rules.
 
 ### Membership invariants
 
@@ -201,7 +210,8 @@ component that owns them.
 - Joint consensus requires a majority of both incoming and outgoing voter
   sets.
 - Configuration changes become active when applied, not merely appended.
-- At most one unapplied configuration change is accepted at a time.
+- Ordinary proposal admission prevents overlapping unapplied configuration
+  changes unless `DisableConfChangeValidation` disables that admission check.
 
 ## Test architecture
 
@@ -216,18 +226,8 @@ The reference tests form a layered specification:
 | Golden interactions | `interaction_test.go`, `testdata/*.txt` | Multi-step cluster scenarios, membership changes, snapshots, pre-vote, and async storage |
 | End-to-end harness | `rafttest/network.go`, `rafttest/node.go` | Message loss, delay, disconnect, restart, and application integration |
 
-Tests will be translated with the DAG node that first owns the behavior. The
-golden interaction harness is intentionally late because it depends on the
-public deterministic API.
-
-## Porting implications
-
-- Go files are not C# module boundaries. Several root-package concerns must be
-  separated into implementation capabilities before they are recomposed.
-- `RawNode` is the semantic center of the public API. The concurrent `Node`
-  wrapper is an adapter, not the algorithm.
-- Storage and message durability ordering are part of Raft safety, not merely
-  host plumbing.
-- Advanced features must not be mixed into the first election and replication
-  milestone, but their dependencies must be anticipated so the core is not
-  rewritten later.
+The current C# test suites are mapped in the [parity matrix](parity-matrix.md).
+The [test laboratory](learning/05-concurrency-and-testing.md) explains the
+pinned scripts, local owner-loop tests, simulated crash schedules, and real
+process smoke. The [implementation DAG](implementation-dag.md) records the
+completed port's sequencing, not future implementation work.

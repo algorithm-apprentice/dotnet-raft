@@ -1,5 +1,10 @@
 # D21 RawNode and Ready Design
 
+> **Milestone record.** D21 originally supported only Ready/Advance.
+> [D25](d25-asynchronous-storage-writes.md) subsequently enabled async storage
+> on `RawNode` and `RaftNode`. Use the [host contract](../public-api.md) when
+> writing a host; the API sketches below are scoped to the porting milestone.
+
 - **Status:** Accepted
 - **Date:** 2026-10-03
 - **DAG node:** D21
@@ -62,10 +67,10 @@ D21 supports:
 RaftConfig.AsyncStorageWrites == false
 ```
 
-Constructing `RawNode` with asynchronous storage writes enabled throws
-`NotSupportedException`. Silently treating the option as synchronous would
-misrepresent durability ordering. D25 removes this guard when the local
-storage-message protocol is implemented.
+At D21, constructing `RawNode` with asynchronous storage writes enabled
+threw `NotSupportedException` rather than silently changing the protocol.
+[D25](d25-asynchronous-storage-writes.md) removed that construction guard.
+Today it is `Advance` that is unsupported in async storage mode.
 
 The underlying core retains its existing async configuration field so D25 can
 add the reference protocol without redesigning state.

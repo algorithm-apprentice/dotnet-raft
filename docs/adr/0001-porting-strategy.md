@@ -36,9 +36,9 @@ boundary and an implementation order that exposes the protocol incrementally.
    dependency requirement appears.
 6. **Target `net10.0`.** The initial implementation uses the installed .NET 10
    SDK and current language features without multi-targeting.
-7. **Implement strictly through the dependency DAG.** A node may start only
-   after every predecessor is complete. Independent ready nodes are still
-   implemented sequentially using the selected stable topological order.
+7. **For the reference port, implement through the dependency DAG.** The
+   [completed DAG](../implementation-dag.md) records the selected sequencing;
+   it is not a requirement to reopen those milestones for later changes.
 8. **Treat tests as executable protocol specifications.** Relevant
    `etcd/raft` tests are translated with each capability instead of postponing
    validation until the end.

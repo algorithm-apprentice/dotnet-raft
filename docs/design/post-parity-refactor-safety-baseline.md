@@ -228,7 +228,7 @@ sequence. The equivalent release mutant subtracts an equal payload and reaches
 the same zero result.
 
 | Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
-|---|---:|---:|---:|---:|---:|---|
+|---|---:|---:|---:|---:|---|
 | Sync proposal cycle | 4796.6 | -4.03% | 6050.2424 | 9240325797370691861 | Pass |
 | Follower heartbeat dispatch | 285.66208 | -4.69% | 2464.00088 | 10936930208570869669 | Pass |
 | Safe read completion | 1748.0083 | +4.58% | 5432.0248 | 3884428198604542453 | Pass |
@@ -243,7 +243,7 @@ scored 100% mutation coverage: all five executable mutants were killed and
 five redundant block mutants were ignored.
 
 | Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
-|---|---:|---:|---:|---:|---:|---|
+|---|---:|---:|---:|---:|---|
 | Sync proposal cycle | 4756.0833 | -4.84% | 6050.2424 | 9240325797370691861 | Pass |
 | Follower heartbeat dispatch | 285.28834 | -4.81% | 2464.00088 | 10936930208570869669 | Pass |
 | Safe read completion | 1744.1792 | +4.35% | 5432.0248 | 3884428198604542453 | Pass |
@@ -258,7 +258,7 @@ strategy target retained 100% mutation coverage: all 11 executable mutants
 were killed and five redundant block mutants were ignored.
 
 | Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
-|---|---:|---:|---:|---:|---:|---|
+|---|---:|---:|---:|---:|---|
 | Sync proposal cycle | 4960.1666 | -0.76% | 6050.2424 | 9240325797370691861 | Pass |
 | Follower heartbeat dispatch | 289.61667 | -3.37% | 2464.00088 | 10936930208570869669 | Pass |
 | Safe read completion | 1739.4917 | +4.07% | 5432.0248 | 3884428198604542453 | Pass |
@@ -274,7 +274,7 @@ branches were removed from the legacy leader path. The strategy target retained
 redundant block mutants were ignored.
 
 | Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
-|---|---:|---:|---:|---:|---:|---|
+|---|---:|---:|---:|---:|---|
 | Sync proposal cycle | 4763.6041 | -4.69% | 6050.2424 | 9240325797370691861 | Pass |
 | Follower heartbeat dispatch | 283.31417 | -5.47% | 2464.00088 | 10936930208570869669 | Pass |
 | Safe read completion | 1703.7208 | +1.93% | 5432.0248 | 3884428198604542453 | Pass |
@@ -294,7 +294,7 @@ detached worktree. The current medians below still satisfy the original
 absolute ceilings.
 
 | Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
-|---|---:|---:|---:|---:|---:|---|
+|---|---:|---:|---:|---:|---|
 | Sync proposal cycle | 4601.8208 | -7.93% | 6050.2424 | 9240325797370691861 | Pass |
 | Follower heartbeat dispatch | 295.34 | -1.46% | 2464.00088 | 10936930208570869669 | Pass |
 | Safe read completion | 1737.925 | +3.97% | 5432.0248 | 3884428198604542453 | Pass |
@@ -322,7 +322,7 @@ Stage 7.4 commit because the host continued to show bimodal short-loop timing.
 The current medians also satisfy the original absolute ceilings.
 
 | Benchmark | Median ns/op | Change | Bytes/op | Checksum | Result |
-|---|---:|---:|---:|---:|---:|---|
+|---|---:|---:|---:|---:|---|
 | Sync proposal cycle | 4557.475 | -8.81% | 6050.2424 | 9240325797370691861 | Pass |
 | Follower heartbeat dispatch | 299.74583 | +0.01% | 2464.00088 | 10936930208570869669 | Pass |
 | Safe read completion | 1631.4667 | -2.40% | 5432.0248 | 3884428198604542453 | Pass |

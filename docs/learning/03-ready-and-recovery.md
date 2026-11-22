@@ -31,10 +31,11 @@ batch drains the corresponding output queues, marks unstable work in
 progress, and reserves the committed entries it is handing to the host. A
 synchronous batch also keeps detached acknowledgement metadata. That metadata
 is why mutating a returned protobuf cannot make `Advance` confirm a different
-log entry. One batch can be outstanding, but other inputs can still change
-the core while that batch is being processed.
+log entry. In synchronous mode, only one batch can be outstanding, but other
+inputs can still change the core while that batch is being processed. Async
+storage permits multiple batches' work to be in flight.
 
-### Track four positions on paper
+### Track the log and application positions on paper
 
 Suppose a leader has appended through 46, knows that it committed through 44,
 and has handed entries through 42 to its host. The last acknowledged index
@@ -173,7 +174,10 @@ and [`DurableHostRecovery.Reconcile`](../../examples/DotnetRaft.KvCluster/Durabl
 Then compare the [SQLite package recovery guide](../../src/DotnetRaft.Sqlite/README.md#open-and-restart).
 The example's process-kill tests check transaction/restart behavior; they do
 not emulate a storage device losing power or prove that independent live
-copies of two databases are compatible.
+copies of two databases are compatible. On restart, handing Raft a newer
+`Applied` does not update the membership supplied by storage. Work through
+the [restart contract](../public-api.md#restart) if the application has
+already applied a configuration entry newer than the retained snapshot.
 
 ### A newer snapshot does not make an older Ready retroactively disappear
 
