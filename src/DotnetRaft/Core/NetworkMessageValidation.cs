@@ -9,17 +9,14 @@ namespace DotnetRaft.Core;
 
 internal static class NetworkMessageValidation
 {
-    internal static void Validate(
+    internal static LogSlice? Prepare(
         Message message,
         ulong lastIndex,
         bool handlesLeaderMessages,
         bool handlesLeaderResponses,
-        Action<ByteString> validateReadContext,
         Action<Snapshot?> validateSnapshot)
     {
         ArgumentNullException.ThrowIfNull(message);
-        ArgumentNullException.ThrowIfNull(
-            validateReadContext);
         ArgumentNullException.ThrowIfNull(
             validateSnapshot);
 
@@ -47,8 +44,7 @@ internal static class NetworkMessageValidation
                 ValidateProposal(message);
                 break;
             case MessageType.MsgApp:
-                ValidateAppend(message);
-                break;
+                return LogSlice.ParseOwnedPeerAppend(message);
             case MessageType.MsgAppResp:
                 if (handlesLeaderResponses
                     && !message.Reject
@@ -84,15 +80,9 @@ internal static class NetworkMessageValidation
                 }
 
                 break;
-            case MessageType.MsgHeartbeatResp:
-                if (handlesLeaderResponses)
-                {
-                    validateReadContext(
-                        message.Context);
-                }
-
-                break;
         }
+
+        return null;
     }
 
     internal static void ValidateType(
@@ -121,58 +111,7 @@ internal static class NetworkMessageValidation
         }
     }
 
-    private static void ValidateAppend(
-        Message message)
-    {
-        ulong previousIndex = message.Index;
-        ulong previousTerm = message.LogTerm;
-        foreach (Entry entry in message.Entries)
-        {
-            ValidateEntry(entry);
-            if (previousIndex == ulong.MaxValue)
-            {
-                throw Invalid(
-                    $"Append entries cannot follow index {ulong.MaxValue}.");
-            }
-
-            ulong expectedIndex =
-                previousIndex + 1;
-            if (entry.Index != expectedIndex)
-            {
-                throw Invalid(
-                    $"Append entry index {entry.Index} does not follow {previousIndex}.");
-            }
-
-            if (entry.Index == ulong.MaxValue)
-            {
-                throw Invalid(
-                    $"Append entry index {ulong.MaxValue} has no representable successor.");
-            }
-
-            if (entry.Term < previousTerm)
-            {
-                throw Invalid(
-                    $"Append entry term {entry.Term} precedes prior term {previousTerm}.");
-            }
-
-            if (entry.Term > message.Term)
-            {
-                throw Invalid(
-                    $"Append entry term {entry.Term} exceeds message term {message.Term}.");
-            }
-
-            previousIndex = entry.Index;
-            previousTerm = entry.Term;
-        }
-
-        if (message.Term < previousTerm)
-        {
-            throw Invalid(
-                $"Append message term {message.Term} precedes prior term {previousTerm}.");
-        }
-    }
-
-    private static void ValidateEntry(
+    internal static void ValidateEntry(
         Entry entry)
     {
         if (!Enum.IsDefined(entry.Type))
@@ -210,7 +149,7 @@ internal static class NetworkMessageValidation
         }
     }
 
-    private static ArgumentException Invalid(
+    internal static ArgumentException Invalid(
         string message)
     {
         return new ArgumentException(

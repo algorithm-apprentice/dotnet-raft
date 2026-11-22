@@ -80,9 +80,14 @@ timing.
 The host owns peer identity and routing. `RawNode.Step` separates local
 storage responses from peer traffic and checks owned message shapes before
 core mutation. [`NetworkMessageValidation`](../../src/DotnetRaft/Core/NetworkMessageValidation.cs)
-validates state-dependent fields only along the term and role path that would
-use them. An ignored message need not validate an unused commit or context;
-an already matched snapshot tuple does not reinstall its configuration.
+prepares a [`LogSlice`](../../src/DotnetRaft/Core/LogSlice.cs) from an owned
+peer Append. `RaftCore.StepPeerMessage` prepares a
+[`ReadAcknowledgement`](../../src/DotnetRaft/Read/ReadAcknowledgement.cs)
+only when the current leader can consume it. Preparation and dispatch run
+in the same serialized operation. The heartbeat handler receives the read
+position, not bytes it needs to decode. An ignored message need not interpret
+an unused commit or context; an already matched snapshot tuple does not
+reinstall its configuration.
 
 Structural configuration checks are shared between network and public
 proposal paths. They do not predict whether a future membership change is

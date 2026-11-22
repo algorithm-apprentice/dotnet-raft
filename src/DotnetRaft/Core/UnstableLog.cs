@@ -239,6 +239,16 @@ internal sealed class UnstableLog
                 nameof(entries));
         }
 
+        AppendOwnedSuffix(incomingEntries);
+    }
+
+    internal void TruncateAndAppend(LogSlice slice, int offset)
+    {
+        AppendOwnedSuffix(slice.CloneSuffix(offset));
+    }
+
+    private void AppendOwnedSuffix(List<Entry> incomingEntries)
+    {
         ulong fromIndex = incomingEntries[0].Index;
         if (_snapshot is not null && fromIndex <= _snapshot.Metadata.Index)
         {

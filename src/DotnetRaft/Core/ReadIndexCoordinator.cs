@@ -66,14 +66,12 @@ internal sealed class ReadIndexCoordinator
         ulong localId,
         JointConfig voters)
     {
-        readOnly.AddRequest(
+        ReadAcknowledgement local = readOnly.AddRequest(
             commitIndex,
             message);
-        ByteString context =
-            readOnly.GetHeartbeatContext();
         readOnly.ReceiveAcknowledgement(
             localId,
-            context);
+            local);
         ReadIndexRequest[] completed =
             readOnly.Advance(voters);
         return new ReadIndexAdvanceResult(
@@ -83,12 +81,12 @@ internal sealed class ReadIndexCoordinator
 
     internal ReadIndexRequest[] Acknowledge(
         ulong from,
-        ByteString context,
+        ReadAcknowledgement acknowledgement,
         JointConfig voters)
     {
         readOnly.ReceiveAcknowledgement(
             from,
-            context);
+            acknowledgement);
         return readOnly.Advance(voters);
     }
 
@@ -149,11 +147,9 @@ internal sealed class ReadIndexCoordinator
         return readOnly.GetHeartbeatContext();
     }
 
-    internal void ValidateAcknowledgementContext(
-        ByteString context)
+    internal ReadAcknowledgement? ParseAcknowledgement(ByteString context, bool fromPeer)
     {
-        readOnly.ValidateAcknowledgementContext(
-            context);
+        return readOnly.ParseAcknowledgement(context, fromPeer);
     }
 
     internal void Reset()

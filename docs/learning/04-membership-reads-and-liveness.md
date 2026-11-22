@@ -140,14 +140,17 @@ admits an order consistent with real time.
    request with its later `ReadState`; the KV example uses a GUID. Role
    routing can forward a follower's `MsgReadIndex` to its known leader.
    See the [read contract](../integration/application.md#read-index) for timeouts and retries.
-2. In [`RaftCore.HandleLeaderReadIndex`](../../src/DotnetRaft/Core/RaftCore.cs),
+2. In [`RaftCore.HandleLeaderReadIndex`](../../src/DotnetRaft/Core/RaftCore.ReadIndex.cs),
    follow the current-term gate before the local singleton fast path. Neither
    that fast path nor a lease-based reply bypasses the application's physical
    read barrier.
 3. [`ReadIndexCoordinator`](../../src/DotnetRaft/Core/ReadIndexCoordinator.cs)
    and [`ReadOnlyTracker`](../../src/DotnetRaft/Read/ReadOnlyTracker.cs) track
-   pending reads. The heartbeat context on this path is an internally
-   encoded sequence position, not the client's opaque correlation bytes.
+    pending reads. The heartbeat context on this path is an internally
+    encoded sequence position, not the client's opaque correlation bytes.
+    When an eligible reply reaches the leader, preparation parses the
+    position once before dispatch. The leader records its own registered
+    position directly, without a heartbeat byte round trip.
    Each peer's maximum acknowledged position covers all earlier positions;
    one quorum can release a prefix of reads efficiently. Joint config uses
    both majorities, and a learner cannot substitute for a voter.

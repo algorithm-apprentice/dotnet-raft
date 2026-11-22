@@ -236,9 +236,7 @@ public sealed class RaftNode : IRaftNode
         Action<RawNode> step = rawNode =>
         {
             if (MessageClassifier.IsResponse(owned.Type)
-                && !IsKnownPeer(
-                    rawNode,
-                    owned.From))
+                && !rawNode.HasPeerProgress(owned.From))
             {
                 return;
             }
@@ -847,10 +845,7 @@ public sealed class RaftNode : IRaftNode
 
     private void RefreshLocalProgress()
     {
-        var present = false;
-        _rawNode.VisitProgress(
-            (id, _) => present |= id == _id);
-        if (present)
+        if (_rawNode.HasPeerProgress(_id))
         {
             _hasObservedLocalProgress = true;
             _removedFromProgress = false;
@@ -859,16 +854,6 @@ public sealed class RaftNode : IRaftNode
         {
             _removedFromProgress = true;
         }
-    }
-
-    private static bool IsKnownPeer(
-        RawNode rawNode,
-        ulong id)
-    {
-        var known = false;
-        rawNode.VisitProgress(
-            (peerId, _) => known |= peerId == id);
-        return known;
     }
 
     private static bool IsExpectedRequestException(

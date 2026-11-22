@@ -122,7 +122,6 @@ internal sealed class RaftLog
         out int appendedCount)
     {
         ArgumentNullException.ThrowIfNull(slice);
-        slice.Validate();
 
         if (!MatchTerm(slice.Previous))
         {
@@ -135,27 +134,24 @@ internal sealed class RaftLog
         lastNewIndex = slice.LastIndex;
         firstAppendedIndex = 0;
         appendedCount = 0;
-        ulong conflictIndex = FindConflict(slice.Entries);
-        if (conflictIndex != 0)
+        for (int offset = 0; offset < slice.Count; offset++)
         {
-            if (conflictIndex <= Committed)
+            EntryId incoming = slice.EntryIdAt(offset);
+            if (!ConflictsWithLocalLog(incoming))
             {
-                throw new RaftInvariantException(
-                    $"Entry {conflictIndex} conflicts with committed index {Committed}.");
+                continue;
             }
 
-            ulong firstIncomingIndex = slice.Previous.Index + 1;
-            ulong position = conflictIndex - firstIncomingIndex;
-            if (position > (ulong)slice.Entries.Count)
+            if (incoming.Index <= Committed)
             {
                 throw new RaftInvariantException(
-                    $"Conflict position {position} exceeds {slice.Entries.Count} incoming entries.");
+                    $"Entry {incoming.Index} conflicts with committed index {Committed}.");
             }
 
-            Append(slice.Entries.Skip(checked((int)position)));
-            firstAppendedIndex = conflictIndex;
-            appendedCount =
-                slice.Entries.Count - checked((int)position);
+            Unstable.TruncateAndAppend(slice, offset);
+            firstAppendedIndex = incoming.Index;
+            appendedCount = slice.Count - offset;
+            break;
         }
 
         return true;
@@ -197,22 +193,30 @@ internal sealed class RaftLog
         foreach (Entry entry in entries)
         {
             var entryId = EntryId.From(entry);
-            if (MatchTerm(entryId))
+            if (ConflictsWithLocalLog(entryId))
             {
-                continue;
+                return entryId.Index;
             }
-
-            if (entryId.Index <= LastIndex)
-            {
-                ulong existingTerm = GetTermOrZero(entryId.Index);
-                LogInformation(
-                    $"Found conflict at index {entryId.Index}: existing term {existingTerm}, incoming term {entryId.Term}.");
-            }
-
-            return entryId.Index;
         }
 
         return 0;
+    }
+
+    private bool ConflictsWithLocalLog(EntryId entryId)
+    {
+        if (MatchTerm(entryId))
+        {
+            return false;
+        }
+
+        if (entryId.Index <= LastIndex)
+        {
+            ulong existingTerm = GetTermOrZero(entryId.Index);
+            LogInformation(
+                $"Found conflict at index {entryId.Index}: existing term {existingTerm}, incoming term {entryId.Term}.");
+        }
+
+        return true;
     }
 
     internal EntryId FindConflictByTerm(ulong index, ulong term)

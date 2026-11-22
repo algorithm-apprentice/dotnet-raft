@@ -38,7 +38,7 @@ public sealed class ReadOnlyTrackerTests
         Assert.Equal(8, context.Length);
         Assert.Equal(2UL, Decode(context));
 
-        tracker.ReceiveAcknowledgement(1, Encode(1));
+        AcknowledgeAt(tracker, 1, 1);
         ReadIndexRequest confirmed = Assert.Single(tracker.Advance(voters));
         Assert.Equal("first", RequestContext(confirmed.Request));
         Assert.Equal(2UL, Decode(tracker.GetHeartbeatContext()));
@@ -62,14 +62,14 @@ public sealed class ReadOnlyTrackerTests
         });
 
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
-        tracker.AddRequest(42, original);
+        ReadAcknowledgement local = tracker.AddRequest(42, original);
 
         original.Type = MessageType.MsgProp;
         original.Context = ByteString.CopyFromUtf8("changed-message");
         original.Entries[0].Data = ByteString.CopyFromUtf8("changed-request");
         original.Entries.Clear();
 
-        tracker.ReceiveAcknowledgement(1, tracker.GetHeartbeatContext());
+        tracker.ReceiveAcknowledgement(1, local);
         ReadIndexRequest confirmed = Assert.Single(
             tracker.Advance(Voters(1)));
 
@@ -87,9 +87,9 @@ public sealed class ReadOnlyTrackerTests
     {
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         tracker.AddRequest(10, Request("same"));
-        tracker.AddRequest(20, Request("same"));
+        ReadAcknowledgement latest = tracker.AddRequest(20, Request("same"));
 
-        tracker.ReceiveAcknowledgement(1, tracker.GetHeartbeatContext());
+        tracker.ReceiveAcknowledgement(1, latest);
         ReadIndexRequest[] confirmed = tracker.Advance(Voters(1));
 
         Assert.Equal(2, confirmed.Length);
@@ -105,8 +105,7 @@ public sealed class ReadOnlyTrackerTests
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         tracker.AddRequest(10, Request("first"));
 
-        tracker.ValidateAcknowledgementContext(ByteString.Empty);
-        tracker.ReceiveAcknowledgement(1, ByteString.Empty);
+        Assert.Null(tracker.ParseAcknowledgement(ByteString.Empty, fromPeer: true));
 
         Assert.Empty(tracker.Advance(Voters(1)));
         Assert.Equal(1, tracker.PendingCount);
@@ -124,9 +123,9 @@ public sealed class ReadOnlyTrackerTests
         ByteString malformed = ByteString.CopyFrom(new byte[length]);
 
         ArgumentException input = Assert.Throws<ArgumentException>("context",
-            () => tracker.ValidateAcknowledgementContext(malformed));
+            () => tracker.ParseAcknowledgement(malformed, fromPeer: true));
         RaftInvariantException invariant = Assert.Throws<RaftInvariantException>(
-            () => tracker.ReceiveAcknowledgement(1, malformed));
+            () => tracker.ParseAcknowledgement(malformed, fromPeer: false));
 
         Assert.StartsWith(invariant.Message, input.Message, StringComparison.Ordinal);
         Assert.Equal(1, tracker.PendingCount);
@@ -143,9 +142,9 @@ public sealed class ReadOnlyTrackerTests
 
         ByteString invalid = Encode(position);
         ArgumentException input = Assert.Throws<ArgumentException>("context",
-            () => tracker.ValidateAcknowledgementContext(invalid));
+            () => tracker.ParseAcknowledgement(invalid, fromPeer: true));
         RaftInvariantException invariant = Assert.Throws<RaftInvariantException>(
-            () => tracker.ReceiveAcknowledgement(1, invalid));
+            () => tracker.ParseAcknowledgement(invalid, fromPeer: false));
 
         Assert.StartsWith(invariant.Message, input.Message, StringComparison.Ordinal);
         Assert.Empty(tracker.Advance(Voters(1)));
@@ -161,14 +160,14 @@ public sealed class ReadOnlyTrackerTests
         tracker.AddRequest(10, Request("first"));
 
         Assert.Throws<RaftInvariantException>(
-            () => tracker.ReceiveAcknowledgement(2, Encode(2)));
+            () => tracker.ParseAcknowledgement(Encode(2), fromPeer: false));
 
-        tracker.ReceiveAcknowledgement(1, Encode(1));
-        tracker.ReceiveAcknowledgement(2, Encode(1));
+        AcknowledgeAt(tracker, 1, 1);
+        AcknowledgeAt(tracker, 2, 1);
         Assert.Single(tracker.Advance(voters));
 
-        tracker.AddRequest(20, Request("second"));
-        tracker.ReceiveAcknowledgement(1, Encode(2));
+        ReadAcknowledgement next = tracker.AddRequest(20, Request("second"));
+        tracker.ReceiveAcknowledgement(1, next);
 
         Assert.Empty(tracker.Advance(voters));
         Assert.Equal(1, tracker.PendingCount);
@@ -183,9 +182,9 @@ public sealed class ReadOnlyTrackerTests
         tracker.AddRequest(20, Request("second"));
         tracker.AddRequest(30, Request("third"));
 
-        tracker.ReceiveAcknowledgement(2, Encode(3));
-        tracker.ReceiveAcknowledgement(2, Encode(1));
-        tracker.ReceiveAcknowledgement(1, Encode(2));
+        AcknowledgeAt(tracker, 2, 3);
+        AcknowledgeAt(tracker, 2, 1);
+        AcknowledgeAt(tracker, 1, 2);
 
         ReadIndexRequest[] confirmed = tracker.Advance(voters);
 
@@ -203,8 +202,8 @@ public sealed class ReadOnlyTrackerTests
         tracker.AddRequest(20, Request("second"));
         tracker.AddRequest(30, Request("third"));
 
-        tracker.ReceiveAcknowledgement(1, Encode(3));
-        tracker.ReceiveAcknowledgement(2, Encode(1));
+        AcknowledgeAt(tracker, 1, 3);
+        AcknowledgeAt(tracker, 2, 1);
 
         ReadIndexRequest first = Assert.Single(tracker.Advance(voters));
         Assert.Equal(10UL, first.Index);
@@ -212,7 +211,7 @@ public sealed class ReadOnlyTrackerTests
         Assert.Equal(2, tracker.PendingCount);
         Assert.Equal(1UL, tracker.ConfirmedCount);
 
-        tracker.ReceiveAcknowledgement(2, Encode(3));
+        AcknowledgeAt(tracker, 2, 3);
 
         ReadIndexRequest[] remainder = tracker.Advance(voters);
         Assert.Equal([20UL, 30UL], remainder.Select(item => item.Index));
@@ -234,26 +233,26 @@ public sealed class ReadOnlyTrackerTests
         var incomingOnly = new ReadOnlyTracker(ReadOnlyOption.Safe);
         incomingOnly.AddRequest(10, Request("incoming"));
 
-        incomingOnly.ReceiveAcknowledgement(1, Encode(1));
-        incomingOnly.ReceiveAcknowledgement(2, Encode(1));
-        incomingOnly.ReceiveAcknowledgement(3, Encode(1));
+        AcknowledgeAt(incomingOnly, 1, 1);
+        AcknowledgeAt(incomingOnly, 2, 1);
+        AcknowledgeAt(incomingOnly, 3, 1);
 
         Assert.Empty(incomingOnly.Advance(voters));
 
-        incomingOnly.ReceiveAcknowledgement(4, Encode(1));
+        AcknowledgeAt(incomingOnly, 4, 1);
         ReadIndexRequest incoming = Assert.Single(
             incomingOnly.Advance(voters));
         Assert.Equal("incoming", RequestContext(incoming.Request));
 
         var outgoingOnly = new ReadOnlyTracker(ReadOnlyOption.Safe);
         outgoingOnly.AddRequest(20, Request("outgoing"));
-        outgoingOnly.ReceiveAcknowledgement(4, Encode(1));
-        outgoingOnly.ReceiveAcknowledgement(5, Encode(1));
+        AcknowledgeAt(outgoingOnly, 4, 1);
+        AcknowledgeAt(outgoingOnly, 5, 1);
 
         Assert.Empty(outgoingOnly.Advance(voters));
 
-        outgoingOnly.ReceiveAcknowledgement(1, Encode(1));
-        outgoingOnly.ReceiveAcknowledgement(2, Encode(1));
+        AcknowledgeAt(outgoingOnly, 1, 1);
+        AcknowledgeAt(outgoingOnly, 2, 1);
         ReadIndexRequest outgoing = Assert.Single(
             outgoingOnly.Advance(voters));
         Assert.Equal("outgoing", RequestContext(outgoing.Request));
@@ -266,11 +265,11 @@ public sealed class ReadOnlyTrackerTests
         JointConfig voters = Voters(1, 2, 3);
         tracker.AddRequest(10, Request("first"));
 
-        tracker.ReceiveAcknowledgement(1, Encode(1));
-        tracker.ReceiveAcknowledgement(4, Encode(1));
+        AcknowledgeAt(tracker, 1, 1);
+        AcknowledgeAt(tracker, 4, 1);
         Assert.Empty(tracker.Advance(voters));
 
-        tracker.ReceiveAcknowledgement(2, Encode(1));
+        AcknowledgeAt(tracker, 2, 1);
         Assert.Single(tracker.Advance(voters));
     }
 
@@ -281,12 +280,12 @@ public sealed class ReadOnlyTrackerTests
         JointConfig voters = Voters(1, 2, 3);
         tracker.AddRequest(10, Request("first"));
 
-        tracker.ReceiveAcknowledgement(1, Encode(1));
-        tracker.ReceiveAcknowledgement(2, Encode(1));
+        AcknowledgeAt(tracker, 1, 1);
+        AcknowledgeAt(tracker, 2, 1);
         Assert.Single(tracker.Advance(voters));
 
-        tracker.ReceiveAcknowledgement(1, Encode(1));
-        tracker.ReceiveAcknowledgement(2, Encode(1));
+        AcknowledgeAt(tracker, 1, 1);
+        AcknowledgeAt(tracker, 2, 1);
 
         Assert.Empty(tracker.Advance(voters));
         Assert.Equal(0, tracker.PendingCount);
@@ -330,12 +329,27 @@ public sealed class ReadOnlyTrackerTests
 
         Assert.Throws<ArgumentNullException>(
             () => tracker.AddRequest(0, null!));
-        Assert.Throws<ArgumentNullException>(
-            () => tracker.ReceiveAcknowledgement(1, null!));
         Assert.Throws<ArgumentNullException>("context",
-            () => tracker.ValidateAcknowledgementContext(null!));
+            () => tracker.ParseAcknowledgement(null!, fromPeer: true));
         Assert.Throws<ArgumentNullException>(
             () => tracker.Advance(null!));
+    }
+
+    [Fact]
+    public void DefaultAcknowledgementIsNotEvidence()
+    {
+        var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
+        tracker.AddRequest(10, Request("first"));
+
+        Assert.Throws<RaftInvariantException>(() => tracker.ReceiveAcknowledgement(1, default));
+        Assert.Empty(tracker.Advance(Voters(1)));
+    }
+
+    private static void AcknowledgeAt(ReadOnlyTracker tracker, ulong from, ulong position)
+    {
+        ReadAcknowledgement? acknowledgement = tracker.ParseAcknowledgement(Encode(position), fromPeer: true);
+        Assert.True(acknowledgement.HasValue);
+        tracker.ReceiveAcknowledgement(from, acknowledgement.Value);
     }
 
     private static JointConfig Voters(params ulong[] ids)
@@ -377,8 +391,8 @@ public sealed class ReadOnlyTrackerTests
     private static WeakReference ConfirmAndForgetRequest(
         ReadOnlyTracker tracker)
     {
-        tracker.AddRequest(10, Request("collectable"));
-        tracker.ReceiveAcknowledgement(1, tracker.GetHeartbeatContext());
+        ReadAcknowledgement local = tracker.AddRequest(10, Request("collectable"));
+        tracker.ReceiveAcknowledgement(1, local);
         ReadIndexRequest confirmed = Assert.Single(
             tracker.Advance(Voters(1)));
         return new WeakReference(confirmed.Request);

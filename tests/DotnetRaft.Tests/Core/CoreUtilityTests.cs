@@ -23,7 +23,7 @@ public sealed class CoreUtilityTests
     }
 
     [Fact]
-    public void LogSliceValidatesContiguousIndexesAndMonotonicTerms()
+    public void LogSliceParsesOnlyContiguousIndexesAndMonotonicTerms()
     {
         var cases = new[]
         {
@@ -39,22 +39,36 @@ public sealed class CoreUtilityTests
             new LogSliceCase(10, new EntryId(2, 12), Entries((13, 2), (15, 2)), false, default),
             new LogSliceCase(10, new EntryId(2, 12), Entries((13, 2), (14, 1)), false, default),
             new LogSliceCase(10, new EntryId(2, 12), Entries((13, 2), (14, 3)), true, new EntryId(3, 14)),
+            new LogSliceCase(10, new EntryId(2, ulong.MaxValue), [], true, new EntryId(2, ulong.MaxValue)),
+            new LogSliceCase(10, new EntryId(2, ulong.MaxValue), Entries((0, 2)), false, default),
+            new LogSliceCase(10, new EntryId(2, ulong.MaxValue - 1), Entries((ulong.MaxValue, 2)), false, default),
         };
 
         foreach (var testCase in cases)
         {
-            var slice = new LogSlice(testCase.Term, testCase.Previous, testCase.Entries);
-
             if (!testCase.IsValid)
             {
-                Assert.Throws<RaftInvariantException>(slice.Validate);
+                Assert.Throws<RaftInvariantException>(() => LogSlice.ParseInternal(
+                    testCase.Term, testCase.Previous, testCase.Entries));
                 continue;
             }
 
-            slice.Validate();
+            LogSlice slice = LogSlice.ParseInternal(testCase.Term, testCase.Previous, testCase.Entries);
             Assert.Equal(testCase.Last, slice.LastEntryId);
             Assert.Equal(testCase.Last.Index, slice.LastIndex);
         }
+    }
+
+    [Fact]
+    public void LogSliceDoesNotExposeMutableEntries()
+    {
+        Entry[] entries = Entries((2, 1), (3, 2));
+        LogSlice slice = LogSlice.ParseInternal(2, new EntryId(1, 1), entries);
+        entries[1].Index = 50;
+        slice.CloneSuffix(1)[0].Term = 9;
+
+        Assert.Equal(new EntryId(2, 3), slice.EntryIdAt(1));
+        Assert.Equal(new EntryId(2, 3), EntryId.From(Assert.Single(slice.CloneSuffix(1))));
     }
 
     [Fact]

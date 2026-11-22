@@ -25,7 +25,7 @@ internal sealed class ReadOnlyTracker : IAckedIndexer
 
     internal ulong ConfirmedCount => confirmedCount;
 
-    internal void AddRequest(ulong commitIndex, Message request)
+    internal ReadAcknowledgement AddRequest(ulong commitIndex, Message request)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -39,18 +39,14 @@ internal sealed class ReadOnlyTracker : IAckedIndexer
         pendingRequests.Enqueue(new ReadIndexRequest(
             request.Clone(),
             commitIndex));
+        return ReadAcknowledgement.FromRegistration(currentPosition + 1);
     }
 
     internal void ReceiveAcknowledgement(
         ulong from,
-        ByteString context)
+        ReadAcknowledgement acknowledgement)
     {
-        ulong position = DecodeAcknowledgementContext(context, fromNetwork: false);
-        if (position == 0)
-        {
-            return;
-        }
-
+        ulong position = acknowledgement.Position;
         if (!acknowledgements.TryGetValue(from, out ulong acknowledged)
             || position > acknowledged)
         {
@@ -58,49 +54,9 @@ internal sealed class ReadOnlyTracker : IAckedIndexer
         }
     }
 
-    internal void ValidateAcknowledgementContext(
-        ByteString context)
+    internal ReadAcknowledgement? ParseAcknowledgement(ByteString context, bool fromPeer)
     {
-        _ = DecodeAcknowledgementContext(context, fromNetwork: true);
-    }
-
-    // An empty context is a heartbeat without a read acknowledgement.
-    // A nonempty context must identify a position in this term's read stream.
-    private ulong DecodeAcknowledgementContext(ByteString context, bool fromNetwork)
-    {
-        ArgumentNullException.ThrowIfNull(context);
-        if (context.Length == 0)
-        {
-            return 0;
-        }
-
-        if (context.Length != sizeof(ulong))
-        {
-            throw InvalidAcknowledgement(
-                "Read-only acknowledgement context must contain exactly eight bytes.",
-                fromNetwork,
-                nameof(context));
-        }
-
-        ulong position = BinaryPrimitives.ReadUInt64LittleEndian(context.Span);
-        ulong currentPosition = GetCurrentPosition();
-        if (position == 0 || position > currentPosition)
-        {
-            throw InvalidAcknowledgement(
-                $"Read-only acknowledgement position {position} is outside " +
-                $"the valid range 1..{currentPosition}.",
-                fromNetwork,
-                nameof(context));
-        }
-
-        return position;
-    }
-
-    private static Exception InvalidAcknowledgement(string message, bool fromNetwork, string parameterName)
-    {
-        return fromNetwork
-            ? new ArgumentException(message, parameterName)
-            : new RaftInvariantException(message);
+        return ReadAcknowledgement.Parse(context, GetCurrentPosition(), fromPeer);
     }
 
     internal ReadIndexRequest[] Advance(JointConfig voters)

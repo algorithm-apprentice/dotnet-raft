@@ -14,6 +14,11 @@ is a third concern and is not inferred from a well-shaped message.
 
 Validate owned message structure at `RawNode.Step` before core mutation.
 Check state-dependent content only along a term/role path that will use it.
+When such a check decodes a value, pass the parsed result into the
+transition instead of discarding it. For a leader's heartbeat acknowledgement
+that is a read position; for an Append it is a contiguous log slice. See the
+[input boundary design](../maintaining/input-boundary-design.md) for the
+preparation and dispatch lifetime.
 Use the same structural configuration checks for local proposals and peer
 input. Node ID zero represents an explicit no-op in a configuration change;
 reserved local worker IDs are not member IDs. Disabling proposal admission

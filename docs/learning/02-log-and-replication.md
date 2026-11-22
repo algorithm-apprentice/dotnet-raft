@@ -32,9 +32,12 @@ advance commit no further than entries this request established
 acknowledge only after the required durable publication
 ```
 
-[`LogSlice`](../../src/DotnetRaft/Core/LogSlice.cs) expresses the batch and
-preceding tuple. `RaftLog.MaybeAppendEntries` and `FindConflict` do the log
-work. [`RaftCore.HandleAppendEntries`](../../src/DotnetRaft/Core/RaftCore.Replication.cs)
+The peer boundary parses the batch and preceding tuple into a
+[`LogSlice`](../../src/DotnetRaft/Core/LogSlice.cs). That slice establishes
+index continuity and term ordering, not a match with the receiver's log.
+`RaftLog.MaybeAppendEntries` checks the local prefix and retains a detached
+copy of only the conflicting suffix.
+[`RaftCore.HandleAppendEntries`](../../src/DotnetRaft/Core/RaftCore.Replication.cs)
 traces accepted entries, advances commit
 to `min(message.Commit, lastNewIndex)`, and queues a `MsgAppResp`. A conflict
 at or below the committed index is an invariant failure, not an instruction

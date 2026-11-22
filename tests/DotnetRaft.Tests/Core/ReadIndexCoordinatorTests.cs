@@ -72,13 +72,14 @@ public sealed class ReadIndexCoordinatorTests
         Assert.Empty(first.Completed);
         Assert.Empty(second.Completed);
         Assert.True(second.HeartbeatRequired);
-        ByteString context =
-            coordinator.GetHeartbeatContext();
+        ReadAcknowledgement? acknowledgement = coordinator.ParseAcknowledgement(
+            coordinator.GetHeartbeatContext(), fromPeer: true);
+        Assert.True(acknowledgement.HasValue);
 
         ReadIndexRequest[] completed =
             coordinator.Acknowledge(
                 from: 2,
-                context,
+                acknowledgement.Value,
                 voters);
 
         Assert.Equal(

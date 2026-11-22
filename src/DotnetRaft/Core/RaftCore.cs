@@ -204,6 +204,14 @@ internal sealed partial class RaftCore
                 $"{message.Type} must carry a nonzero term.");
         }
 
+        Dispatch(message, new PreparedInput(
+            Append: null,
+            PrepareReadAcknowledgement(message, fromPeer: false)));
+    }
+
+    // Kept private so a caller cannot pair a message with unrelated parsed data.
+    private void Dispatch(Message message, PreparedInput input)
+    {
         TraceMessage(
             RaftTraceEventType.MessageReceived,
             message);
@@ -245,25 +253,37 @@ internal sealed partial class RaftCore
                 HandleStorageApplyResponse(message);
                 return;
             default:
-                HandleRoleMessage(message);
+                HandleRoleMessage(message, input);
                 return;
         }
     }
 
-    internal void ValidateNetworkMessage(
-        Message message)
+    internal void StepPeerMessage(Message message, Action accept)
     {
-        bool handlesLeaderMessages =
-            HandlesLeaderMessage(message);
-        NetworkMessageValidation.Validate(
+        LogSlice? append = NetworkMessageValidation.Prepare(
             message,
             Log.LastIndex,
-            handlesLeaderMessages,
-            Role == RaftRole.Leader
-                && (message.Term == 0
-                    || message.Term == Term),
-            reads.ValidateAcknowledgementContext,
+            HandlesLeaderMessage(message),
+            HandlesLeaderResponse(message),
             ValidateNetworkSnapshot);
+        ReadAcknowledgement? readAcknowledgement = PrepareReadAcknowledgement(message, fromPeer: true);
+
+        // Activate the facade only after peer input is known to be usable.
+        accept();
+        Dispatch(message, new PreparedInput(append, readAcknowledgement));
+    }
+
+    private bool HandlesLeaderResponse(Message message) =>
+        Role == RaftRole.Leader && (message.Term == 0 || message.Term == Term);
+
+    private ReadAcknowledgement? PrepareReadAcknowledgement(Message message, bool fromPeer)
+    {
+        return message.Type == MessageType.MsgHeartbeatResp
+            && !message.Context.IsEmpty
+            && HandlesLeaderResponse(message)
+            && Tracker.Contains(message.From)
+                ? reads.ParseAcknowledgement(message.Context, fromPeer)
+                : null;
     }
 
     private bool HandlesLeaderMessage(
@@ -464,22 +484,22 @@ internal sealed partial class RaftCore
                 && !message.Reject);
     }
 
-    private void HandleRoleMessage(Message message)
+    private void HandleRoleMessage(Message message, PreparedInput input)
     {
         // Step may have changed the role while processing the message term.
         switch (Role)
         {
             case RaftRole.Follower:
-                StepFollower(message);
+                StepFollower(message, input.Append);
                 return;
             case RaftRole.PreCandidate:
-                StepCampaigning(message, preCandidate: true);
+                StepCampaigning(message, input.Append, preCandidate: true);
                 return;
             case RaftRole.Candidate:
-                StepCampaigning(message, preCandidate: false);
+                StepCampaigning(message, input.Append, preCandidate: false);
                 return;
             case RaftRole.Leader:
-                StepLeader(message);
+                StepLeader(message, input.ReadAcknowledgement);
                 return;
             default:
                 throw new RaftInvariantException(
@@ -487,7 +507,7 @@ internal sealed partial class RaftCore
         }
     }
 
-    private void StepFollower(Message message)
+    private void StepFollower(Message message, LogSlice? append)
     {
         switch (message.Type)
         {
@@ -517,12 +537,12 @@ internal sealed partial class RaftCore
             case MessageType.MsgSnap:
                 clock.ResetElectionElapsed();
                 roleState.SetLeader(message.From);
-                HandleAcceptedLeaderMessage(message);
+                HandleAcceptedLeaderMessage(message, append);
                 return;
         }
     }
 
-    private void StepCampaigning(Message message, bool preCandidate)
+    private void StepCampaigning(Message message, LogSlice? append, bool preCandidate)
     {
         switch (message.Type)
         {
@@ -537,7 +557,7 @@ internal sealed partial class RaftCore
             case MessageType.MsgHeartbeat:
             case MessageType.MsgSnap:
                 BecomeFollower(Term, message.From);
-                HandleAcceptedLeaderMessage(message);
+                HandleAcceptedLeaderMessage(message, append);
                 return;
             case MessageType.MsgPreVoteResp when preCandidate:
             case MessageType.MsgVoteResp when !preCandidate:
@@ -546,7 +566,7 @@ internal sealed partial class RaftCore
         }
     }
 
-    private void StepLeader(Message message)
+    private void StepLeader(Message message, ReadAcknowledgement? readAcknowledgement)
     {
         switch (message.Type)
         {
@@ -566,7 +586,7 @@ internal sealed partial class RaftCore
                 HandleAppendResponse(message);
                 return;
             case MessageType.MsgHeartbeatResp:
-                HandleHeartbeatResponse(message);
+                HandleHeartbeatResponse(message.From, readAcknowledgement);
                 return;
             case MessageType.MsgReadIndex:
                 HandleLeaderReadIndex(message);
@@ -581,12 +601,13 @@ internal sealed partial class RaftCore
     }
 
     private void HandleAcceptedLeaderMessage(
-        Message message)
+        Message message,
+        LogSlice? append)
     {
         switch (message.Type)
         {
             case MessageType.MsgApp:
-                HandleAppendEntries(message);
+                HandleAppendEntries(message, append);
                 return;
             case MessageType.MsgHeartbeat:
                 HandleHeartbeat(message);
@@ -716,4 +737,6 @@ internal sealed partial class RaftCore
             state.Term,
             state.Vote);
     }
+
+    private readonly record struct PreparedInput(LogSlice? Append, ReadAcknowledgement? ReadAcknowledgement);
 }

@@ -146,7 +146,7 @@ public sealed class RaftLogTests
         log.CommitTo(1);
 
         bool matched = log.MaybeAppendEntries(
-            new LogSlice(
+            LogSlice.ParseInternal(
                 4,
                 new EntryId(Term: 3, Index: 3),
                 Entries((4, 4), (5, 4))),
@@ -164,7 +164,7 @@ public sealed class RaftLogTests
             log.GetEntries(1));
 
         Assert.False(log.MaybeAppendEntries(
-            new LogSlice(
+            LogSlice.ParseInternal(
                 5,
                 new EntryId(Term: 2, Index: 3),
                 Entries((4, 5))),
@@ -182,7 +182,7 @@ public sealed class RaftLogTests
         log.CommitTo(3);
 
         Assert.Throws<RaftInvariantException>(() => log.MaybeAppendEntries(
-            new LogSlice(
+            LogSlice.ParseInternal(
                 4,
                 new EntryId(Term: 1, Index: 1),
                 Entries((2, 4))),

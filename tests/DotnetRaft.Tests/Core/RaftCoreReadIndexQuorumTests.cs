@@ -62,6 +62,9 @@ public sealed class RaftCoreReadIndexQuorumTests
         RaftCore core = NewLeader(voters: [1, 2, 3]);
         core.Step(ReadRequest("invalid"));
         core.TakeMessages();
+        var progress = core.Tracker.Progress[2];
+        progress.RecentActive = false;
+        progress.AppendFlowPaused = true;
         ByteString context = kind switch
         {
             "short" => ByteString.CopyFrom([1]),
@@ -80,6 +83,9 @@ public sealed class RaftCoreReadIndexQuorumTests
                 context)));
 
         Assert.Empty(core.TakeReadStates());
+        Assert.Empty(core.TakeMessages());
+        Assert.False(progress.RecentActive);
+        Assert.True(progress.AppendFlowPaused);
         Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
     }
 

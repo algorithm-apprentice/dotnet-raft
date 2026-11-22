@@ -273,9 +273,10 @@ internal sealed partial class RaftCore
         return true;
     }
 
-    private void HandleAppendEntries(Message message)
+    private void HandleAppendEntries(Message message, LogSlice? append)
     {
-        if (message.Index < Log.Committed)
+        EntryId previous = append?.Previous ?? new EntryId(message.LogTerm, message.Index);
+        if (previous.Index < Log.Committed)
         {
             Send(new Message
             {
@@ -286,12 +287,7 @@ internal sealed partial class RaftCore
             return;
         }
 
-        var slice = new LogSlice(
-            message.Term,
-            new EntryId(
-                Term: message.LogTerm,
-                Index: message.Index),
-            message.Entries);
+        LogSlice slice = append ?? LogSlice.ParseInternal(message.Term, previous, message.Entries);
         ulong previousCommit = Log.Committed;
         if (Log.MaybeAppendEntries(
                 slice,
@@ -322,16 +318,16 @@ internal sealed partial class RaftCore
         }
 
         ulong hintIndex = Math.Min(
-            message.Index,
+            previous.Index,
             Log.LastIndex);
         EntryId hint = Log.FindConflictByTerm(
             hintIndex,
-            message.LogTerm);
+            previous.Term);
         Send(new Message
         {
             To = message.From,
             Type = MessageType.MsgAppResp,
-            Index = message.Index,
+            Index = previous.Index,
             Reject = true,
             RejectHint = hint.Index,
             LogTerm = hint.Term,
@@ -504,10 +500,11 @@ internal sealed partial class RaftCore
     }
 
     private void HandleHeartbeatResponse(
-        Message message)
+        ulong from,
+        ReadAcknowledgement? readAcknowledgement)
     {
         if (!Tracker.Progress.TryGetValue(
-                message.From,
+                from,
                 out Progress? progress))
         {
             return;
@@ -519,17 +516,17 @@ internal sealed partial class RaftCore
             || progress.State == ProgressState.Probe)
         {
             MaybeSendAppend(
-                message.From,
+                from,
                 progress,
                 sendIfEmpty: true);
         }
 
-        if (!message.Context.IsEmpty)
+        if (readAcknowledgement is { } acknowledgement)
         {
             ReadIndexRequest[] completed =
                 reads.Acknowledge(
-                    message.From,
-                    message.Context,
+                    from,
+                    acknowledgement,
                     Tracker.Config.Voters);
             CompleteReadIndexRequests(completed);
         }

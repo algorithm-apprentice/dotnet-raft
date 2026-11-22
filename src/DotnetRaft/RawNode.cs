@@ -15,6 +15,7 @@ namespace DotnetRaft;
 public sealed partial class RawNode
 {
     private readonly RaftCore _core;
+    private readonly Action _activate;
     private SoftState _previousSoftState;
     private HardState _previousHardState;
     private Ready? _outstanding;
@@ -41,6 +42,7 @@ public sealed partial class RawNode
         _core = new RaftCore(
             config,
             randomOffset);
+        _activate = Activate;
         _previousSoftState = _core.SoftState;
         _previousHardState = _core.HardState;
     }
@@ -229,18 +231,18 @@ public sealed partial class RawNode
             }
 
             if (MessageClassifier.IsResponse(owned.Type)
-                && !_core.Tracker.Progress.ContainsKey(
-                    owned.From))
+                && !HasPeerProgress(owned.From))
             {
                 throw new InvalidOperationException(
                     $"Response sender {owned.From} is not a known peer.");
             }
 
-            _core.ValidateNetworkMessage(owned);
-            Activate();
-            _core.Step(owned);
+            _core.StepPeerMessage(owned, _activate);
         });
     }
+
+    // The owner already serializes this query. Do not materialize diagnostics.
+    internal bool HasPeerProgress(ulong id) => _core.Tracker.Contains(id);
 
     public bool HasReady()
     {
