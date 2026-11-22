@@ -67,8 +67,7 @@ public sealed partial class RaftClusterHost
                 storage,
                 stateMachine,
                 fixedMembership,
-                options.MaxTransportMessageBytes
-                - TransportEnvelopeReserve);
+                MaximumPayloadBytes);
         var config = new RaftConfig
         {
             Id = options.NodeId,
@@ -78,9 +77,7 @@ public sealed partial class RaftClusterHost
             PreVote = true,
             CheckQuorum = true,
             Applied = recovery.Applied,
-            MaxSizePerMessage = (ulong)(
-                options.MaxTransportMessageBytes
-                - TransportEnvelopeReserve),
+            MaxSizePerMessage = (ulong)MaximumPayloadBytes,
         };
         node = recovery.StartNew
             ? RaftNode.Start(
@@ -98,16 +95,17 @@ public sealed partial class RaftClusterHost
 
     public ulong NodeId => options.NodeId;
 
+    private int MaximumPayloadBytes =>
+        options.MaxTransportMessageBytes - TransportEnvelopeReserve;
+
     public async ValueTask ReceiveAsync(
         Message message,
         CancellationToken cancellationToken)
     {
+        NetworkMessageValidator.Validate(message, options);
         await WaitUntilReadyAsync(
                 cancellationToken)
             .ConfigureAwait(false);
-        NetworkMessageValidator.Validate(
-            message,
-            options);
         await node.StepAsync(
                 message,
                 cancellationToken)
@@ -526,77 +524,56 @@ public sealed partial class RaftClusterHost
         await WaitUntilReadyAsync(
                 cancellationToken)
             .ConfigureAwait(false);
-        KvRequestResolution? resolved =
-            stateMachine.ResolveRequest(command);
-        if (resolved is not null)
+        byte[] payload = DurableKvCommandCodec.Encode(command);
+        ByteString fingerprint = DurableKvCommandCodec.Fingerprint(payload);
+        KvApplyResult? existing = stateMachine.ResolveAppliedRequest(
+            command.RequestId,
+            fingerprint);
+        if (existing is not null)
         {
-            if (resolved.Conflict)
+            return CreateProposalResponse(command, existing);
+        }
+
+        PendingProposalRegistry.PendingProposalRegistration registration;
+        try
+        {
+            registration = pendingProposals.Register(command.RequestId, fingerprint);
+        }
+        catch (KvRequestConflictException)
+        {
+            // A durable result wins over a conflict with another waiter.
+            existing = stateMachine.ResolveAppliedRequest(
+                command.RequestId,
+                fingerprint);
+            if (existing is null)
             {
-                throw new KvRequestConflictException(
-                    command.RequestId);
+                throw;
             }
 
-            return new ProposalResponse(
-                options.NodeId,
-                command.RequestId,
-                command.Type,
-                resolved.ResultIndex,
-                stateMachine.PhysicalApplied,
-                Duplicate: true);
+            return CreateProposalResponse(command, existing);
         }
 
         using PendingProposalRegistry
-            .PendingProposalRegistration registration =
-            pendingProposals.Register(command);
+            .PendingProposalRegistration pending = registration;
         using CancellationTokenSource timeout =
             CreateRequestTimeout(cancellationToken);
         try
         {
-            byte[] payload =
-                DurableKvCommandCodec.Encode(
-                    command);
-            int maximumPayload =
-                options.MaxTransportMessageBytes
-                - TransportEnvelopeReserve;
-            if (payload.Length > maximumPayload)
+            if (pending.IsOwner
+                && pending.BeginSubmission() is { } submission)
             {
-                throw new KvPayloadTooLargeException(
-                    payload.Length,
-                    maximumPayload);
-            }
-
-            if (registration.IsOwner)
-            {
-                PendingProposalRegistry
-                    .PendingProposalSubmission?
-                    submission =
-                        registration
-                            .BeginSubmission();
-                if (submission is not null)
-                {
-                    _ = SubmitProposalAsync(
-                        payload,
-                        submission);
-                }
+                _ = SubmitProposalAsync(
+                    command.RequestId,
+                    fingerprint,
+                    payload,
+                    submission);
             }
 
             KvApplyResult result =
-                await registration.Task.WaitAsync(
+                await pending.Task.WaitAsync(
                         timeout.Token)
                     .ConfigureAwait(false);
-            if (result.Conflict)
-            {
-                throw new KvRequestConflictException(
-                    command.RequestId);
-            }
-
-            return new ProposalResponse(
-                options.NodeId,
-                command.RequestId,
-                command.Type,
-                result.ResultIndex,
-                result.PhysicalApplied,
-                result.Duplicate);
+            return CreateProposalResponse(command, result);
         }
         catch (OperationCanceledException)
             when (!cancellationToken.IsCancellationRequested)
@@ -604,6 +581,24 @@ public sealed partial class RaftClusterHost
             throw new TimeoutException(
                 $"Proposal {command.RequestId} did not apply within {options.RequestTimeout}.");
         }
+    }
+
+    private ProposalResponse CreateProposalResponse(
+        KvCommand command,
+        KvApplyResult result)
+    {
+        if (result.Conflict)
+        {
+            throw new KvRequestConflictException(command.RequestId);
+        }
+
+        return new ProposalResponse(
+            options.NodeId,
+            command.RequestId,
+            command.Type,
+            result.ResultIndex,
+            result.PhysicalApplied,
+            result.Duplicate);
     }
 
     private void MaybeCreateSnapshot()
@@ -650,9 +645,7 @@ public sealed partial class RaftClusterHost
         ByteString snapshotData =
             stateMachine.CreateSnapshotData();
         lastSnapshotAttemptIndex = applied;
-        if (snapshotData.Length
-            > options.MaxTransportMessageBytes
-              - TransportEnvelopeReserve)
+        if (snapshotData.Length > MaximumPayloadBytes)
         {
             return;
         }
@@ -670,12 +663,31 @@ public sealed partial class RaftClusterHost
     }
 
     private async Task SubmitProposalAsync(
+        Guid requestId,
+        ByteString fingerprint,
         byte[] payload,
         PendingProposalRegistry
             .PendingProposalSubmission submission)
     {
         try
         {
+            // An earlier attempt may have completed between the initial
+            // lookup and registration. Check while the waiter is registered.
+            KvApplyResult? applied =
+                stateMachine.ResolveAppliedRequest(requestId, fingerprint);
+            if (applied is not null)
+            {
+                pendingProposals.Complete(applied);
+                return;
+            }
+
+            if (payload.Length > MaximumPayloadBytes)
+            {
+                throw new KvPayloadTooLargeException(
+                    payload.Length,
+                    MaximumPayloadBytes);
+            }
+
             await node.ProposeAsync(
                     payload,
                     submission.CancellationToken)

@@ -120,6 +120,15 @@ methods. Other collaborators never reference the aggregate. Mutable component
 state has one owner; tests use component fixtures or explicit `ForTesting`
 hooks rather than writable forwarding properties.
 
+`RawNode` publishes and acknowledges Ready work. `RaftNode` adds concurrency
+around `RawNode`, not another implementation of consensus or persistence.
+`IStorage` is the core's stable read boundary; its in-memory implementation
+and the optional `DotnetRaft.Sqlite` package supply it without putting SQLite
+in the core package. `examples/DotnetRaft.KvCluster` composes `RaftNode`,
+`SqliteStorage`, transport, and a separate application database. The example
+owns disk publication, application effects, and recovery across both stores.
+See the [host contract](public-api.md) for ordering at these boundaries.
+
 ## Core state
 
 The root `raft` object combines five categories of state:

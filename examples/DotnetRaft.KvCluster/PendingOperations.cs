@@ -68,20 +68,22 @@ public sealed class PendingProposalRegistry
         KvCommand command)
     {
         ArgumentNullException.ThrowIfNull(command);
-        ByteString fingerprint =
-            DurableKvCommandCodec.Fingerprint(
-                command);
+        return Register(command.RequestId, DurableKvCommandCodec.Fingerprint(command));
+    }
+
+    internal PendingProposalRegistration Register(Guid requestId, ByteString fingerprint)
+    {
         lock (gate)
         {
             if (pending.TryGetValue(
-                    command.RequestId,
+                    requestId,
                     out Entry? existing))
             {
                 if (!existing.Fingerprint.Equals(
                         fingerprint))
                 {
                     throw new KvRequestConflictException(
-                        command.RequestId);
+                        requestId);
                 }
 
                 existing.Waiters++;
@@ -92,10 +94,10 @@ public sealed class PendingProposalRegistry
             }
 
             var entry = new Entry(
-                command.RequestId,
+                requestId,
                 fingerprint);
             pending.Add(
-                command.RequestId,
+                requestId,
                 entry);
             return new PendingProposalRegistration(
                 this,
@@ -121,17 +123,8 @@ public sealed class PendingProposalRegistry
         }
 
         entry.SubmissionCancellation.Cancel();
-        KvApplyResult completion =
-            entry.Fingerprint.Equals(
-                result.Fingerprint)
-                ? result
-                : result with
-                {
-                    Duplicate = false,
-                    Conflict = true,
-                };
         return entry.Completion.TrySetResult(
-            completion);
+            result.ForRequest(entry.Fingerprint));
     }
 
     public int CompleteResolved(

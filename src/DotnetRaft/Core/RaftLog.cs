@@ -194,7 +194,10 @@ internal sealed class RaftLog
 
     internal ulong Append(IEnumerable<Entry> entries)
     {
-        Entry[] incomingEntries = MaterializeAndValidateEntries(entries);
+        ArgumentNullException.ThrowIfNull(entries);
+        Entry[] incomingEntries = entries.ToArray();
+        EntrySequence.ValidateContiguous(
+            incomingEntries, static message => new RaftInvariantException(message));
         if (incomingEntries.Length == 0)
         {
             return LastIndex;
@@ -219,8 +222,8 @@ internal sealed class RaftLog
 
     internal ulong FindConflict(IReadOnlyList<Entry> entries)
     {
-        ArgumentNullException.ThrowIfNull(entries);
-        ValidateEntries(entries);
+        EntrySequence.ValidateContiguous(
+            entries, static message => new RaftInvariantException(message));
 
         foreach (Entry entry in entries)
         {
@@ -673,39 +676,6 @@ internal sealed class RaftLog
             _logger,
             RaftLogLevel.Information,
             message);
-    }
-
-    private static Entry[] MaterializeAndValidateEntries(
-        IEnumerable<Entry> entries)
-    {
-        ArgumentNullException.ThrowIfNull(entries);
-        Entry[] result = entries.ToArray();
-        ValidateEntries(result);
-        return result;
-    }
-
-    private static void ValidateEntries(IReadOnlyList<Entry> entries)
-    {
-        ulong? previousIndex = null;
-        foreach (Entry entry in entries)
-        {
-            if (entry is null)
-            {
-                throw new ArgumentException(
-                    "Entries cannot contain null values.",
-                    nameof(entries));
-            }
-
-            if (previousIndex.HasValue
-                && (previousIndex.Value == ulong.MaxValue
-                    || entry.Index != previousIndex.Value + 1))
-            {
-                throw new RaftInvariantException(
-                    $"Entries are not contiguous at indexes {previousIndex.Value} and {entry.Index}.");
-            }
-
-            previousIndex = entry.Index;
-        }
     }
 
     private static Entry[] CloneAndValidateStorageEntries(

@@ -4,6 +4,11 @@ namespace DotnetRaft.Core;
 
 internal static class MessageClassifier
 {
+    internal static bool HasKnownType(Message message)
+    {
+        return message.HasType && Enum.IsDefined(message.Type);
+    }
+
     public static bool IsLocal(MessageType type)
     {
         return type is
@@ -13,9 +18,8 @@ internal static class MessageClassifier
             MessageType.MsgSnapStatus or
             MessageType.MsgCheckQuorum or
             MessageType.MsgStorageAppend or
-            MessageType.MsgStorageAppendResp or
-            MessageType.MsgStorageApply or
-            MessageType.MsgStorageApplyResp;
+            MessageType.MsgStorageApply
+            || IsStorageResponse(type);
     }
 
     public static bool IsResponse(MessageType type)
@@ -26,9 +30,20 @@ internal static class MessageClassifier
             MessageType.MsgHeartbeatResp or
             MessageType.MsgUnreachable or
             MessageType.MsgReadIndexResp or
-            MessageType.MsgPreVoteResp or
-            MessageType.MsgStorageAppendResp or
+            MessageType.MsgPreVoteResp
+            || IsStorageResponse(type);
+    }
+
+    internal static bool IsStorageResponse(MessageType type)
+    {
+        return type is MessageType.MsgStorageAppendResp or
             MessageType.MsgStorageApplyResp;
+    }
+
+    internal static bool IsVoteMessage(MessageType type)
+    {
+        return type is MessageType.MsgVote or MessageType.MsgVoteResp
+            or MessageType.MsgPreVote or MessageType.MsgPreVoteResp;
     }
 
     public static MessageType VoteResponseType(MessageType type)

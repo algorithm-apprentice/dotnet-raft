@@ -25,7 +25,7 @@ internal static class NetworkMessageValidation
 
         ValidateType(message);
 
-        if (IsVoteMessage(message.Type)
+        if (MessageClassifier.IsVoteMessage(message.Type)
             && message.Term == 0)
         {
             throw Invalid(
@@ -99,8 +99,7 @@ internal static class NetworkMessageValidation
         Message message)
     {
         ArgumentNullException.ThrowIfNull(message);
-        if (!message.HasType
-            || !Enum.IsDefined(message.Type))
+        if (!MessageClassifier.HasKnownType(message))
         {
             throw Invalid(
                 "Raft message type must be present and known.");
@@ -209,16 +208,6 @@ internal static class NetworkMessageValidation
                 nameof(entry),
                 exception);
         }
-    }
-
-    private static bool IsVoteMessage(
-        MessageType type)
-    {
-        return type is
-            MessageType.MsgVote or
-            MessageType.MsgVoteResp or
-            MessageType.MsgPreVote or
-            MessageType.MsgPreVoteResp;
     }
 
     private static ArgumentException Invalid(

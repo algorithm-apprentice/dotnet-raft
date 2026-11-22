@@ -90,6 +90,7 @@ public sealed class RaftNodeAsyncStorageTests
 
             foreach (Message response in responses)
             {
+                Assert.Equal(append.From, response.To);
                 await node.StepAsync(response);
             }
 
@@ -183,6 +184,7 @@ public sealed class RaftNodeAsyncStorageTests
         MemoryStorage storage,
         Ready ready)
     {
+        // This helper has no network; only use it for singleton batches.
         foreach (Message message in ready.Messages)
         {
             switch (message.Type)
@@ -193,6 +195,7 @@ public sealed class RaftNodeAsyncStorageTests
                                  storage,
                                  message))
                     {
+                        Assert.Equal(message.From, response.To);
                         await node.StepAsync(response);
                     }
 
@@ -201,6 +204,7 @@ public sealed class RaftNodeAsyncStorageTests
                     foreach (Message response in
                              message.Responses)
                     {
+                        Assert.Equal(message.From, response.To);
                         await node.StepAsync(response);
                     }
 

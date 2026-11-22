@@ -234,7 +234,8 @@ public sealed class MemoryStorage : IStorage
 
     public void Append(IEnumerable<Entry> entries)
     {
-        List<Entry> incomingEntries = CloneAndValidateEntries(entries);
+        List<Entry> incomingEntries = EntrySequence.CloneContiguous(
+            entries, static message => new RaftInvariantException(message));
         if (incomingEntries.Count == 0)
         {
             return;
@@ -285,35 +286,6 @@ public sealed class MemoryStorage : IStorage
     private ulong GetFirstIndexCore()
     {
         return checked(_entries[0].Index + 1);
-    }
-
-    private static List<Entry> CloneAndValidateEntries(IEnumerable<Entry> entries)
-    {
-        ArgumentNullException.ThrowIfNull(entries);
-
-        var result = new List<Entry>();
-        ulong? previousIndex = null;
-
-        foreach (Entry entry in entries)
-        {
-            if (entry is null)
-            {
-                throw new ArgumentException("Entries cannot contain null values.", nameof(entries));
-            }
-
-            if (previousIndex.HasValue
-                && (previousIndex.Value == ulong.MaxValue
-                    || entry.Index != previousIndex.Value + 1))
-            {
-                throw new RaftInvariantException(
-                    $"Entries are not contiguous at indexes {previousIndex.Value} and {entry.Index}.");
-            }
-
-            result.Add(entry.Clone());
-            previousIndex = entry.Index;
-        }
-
-        return result;
     }
 
     private static void EnsureHasRepresentableSuccessor(ulong index, string description)

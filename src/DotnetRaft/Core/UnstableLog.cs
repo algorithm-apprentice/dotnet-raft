@@ -327,31 +327,8 @@ internal sealed class UnstableLog
     private static List<Entry> CloneAndValidateEntries(
         IEnumerable<Entry> entries)
     {
-        ArgumentNullException.ThrowIfNull(entries);
-
-        var result = new List<Entry>();
-        ulong? previousIndex = null;
-        foreach (Entry entry in entries)
-        {
-            if (entry is null)
-            {
-                throw new ArgumentException(
-                    "Entries cannot contain null values.",
-                    nameof(entries));
-            }
-
-            if (previousIndex.HasValue
-                && (previousIndex.Value == ulong.MaxValue
-                    || entry.Index != previousIndex.Value + 1))
-            {
-                throw new RaftInvariantException(
-                    $"Entries are not contiguous at indexes {previousIndex.Value} and {entry.Index}.");
-            }
-
-            result.Add(entry.Clone());
-            previousIndex = entry.Index;
-        }
-
+        List<Entry> result = EntrySequence.CloneContiguous(
+            entries, static message => new RaftInvariantException(message));
         if (result.Count > 0 && result[^1].Index == ulong.MaxValue)
         {
             throw new RaftInvariantException(

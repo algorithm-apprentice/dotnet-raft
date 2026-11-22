@@ -51,17 +51,12 @@ public static class ProtocolDefaults
 
     private static ConfState Normalize(ConfState state)
     {
-        var normalized = state.Clone();
+        ConfState normalized = EnsureConfState(state.Clone());
 
         Sort(normalized.Voters);
         Sort(normalized.Learners);
         Sort(normalized.VotersOutgoing);
         Sort(normalized.LearnersNext);
-
-        if (!normalized.HasAutoLeave)
-        {
-            normalized.AutoLeave = false;
-        }
 
         return normalized;
     }

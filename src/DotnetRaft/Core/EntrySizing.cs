@@ -51,7 +51,7 @@ internal static class EntrySizing
         while (limit < entries.Count)
         {
             var nextSize = (ulong)entries[limit].CalculateSize();
-            if (size > maxSize || nextSize > maxSize - size)
+            if (!FitsWithinBudget(size, nextSize, maxSize))
             {
                 break;
             }
@@ -67,5 +67,10 @@ internal static class EntrySizing
         }
 
         return result;
+    }
+
+    internal static bool FitsWithinBudget(ulong usedSize, ulong nextSize, ulong maxSize)
+    {
+        return usedSize <= maxSize && nextSize <= maxSize - usedSize;
     }
 }

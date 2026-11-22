@@ -1,6 +1,7 @@
 # gRPC Key-Value Cluster Example Design
 
-- **Status:** Implemented
+- **Status:** Historical; describes the original volatile example, not the
+  current [durable host](durable-grpc-kv-host.md).
 - **Date:** 2026-10-04
 - **Scope:** educational runnable example
 - **Related decision:** ADR 0004

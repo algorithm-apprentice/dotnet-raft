@@ -18,6 +18,8 @@
 
   <ItemGroup>
     <Protobuf Include="Protos/transport.proto" GrpcServices="Both" />
+    <!-- Reuse the wire classification without widening the package API. -->
+    <Compile Include="..\..\src\DotnetRaft\Core\MessageClassifier.cs" Link="MessageClassifier.cs" />
   </ItemGroup>
 
   <PropertyGroup>

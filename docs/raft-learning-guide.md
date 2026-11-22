@@ -722,7 +722,7 @@ Read:
 
 1. [Ready](../src/DotnetRaft/Ready.cs)
 2. [RawNode](../src/DotnetRaft/RawNode.cs)
-3. [RawNode and Ready design](design/d21-rawnode-ready.md)
+3. [Synchronous Ready contract](public-api.md#synchronous-ready-loop)
 4. [RawNode Ready tests](../tests/DotnetRaft.Tests/RawNode/RawNodeReadyTests.cs)
 
 `Ready` contains:
@@ -738,27 +738,11 @@ Read:
 | `ReadStates` | Completed linearizable-read barriers |
 | `MustSync` | Whether entries or a term/vote change require a synchronous stable-storage write; snapshot presence is not part of the calculation |
 
-Safe synchronous order:
-
-```text
-Ready
-  -> atomically persist Snapshot + Entries + HardState
-  -> honor MustSync for Entries + HardState
-  -> complete Snapshot persistence under the snapshot store's durability contract
-  -> send Messages
-  -> restore application Snapshot
-  -> apply CommittedEntries in order
-  -> admit ReadStates to the same ordered application path
-  -> Advance(the exact Ready instance)
-```
-
-Never send a vote grant or append acknowledgement before the state it
-acknowledges is durable.
-
-A commit-only `HardState` update may have `MustSync == false`. A snapshot-only
-generation may also have `MustSync == false`. The snapshot must still be
-successfully stored before its dependent acknowledgement is published, but
-`MustSync` does not define an additional generic snapshot flush.
+Trace the [synchronous Ready loop](public-api.md#synchronous-ready-loop) in
+the tests below. Ask what could happen if a follower sent an acknowledgement
+before it could recover the state it acknowledged. For the storage-specific
+case of `MustSync == false` with a snapshot, use the same contract rather than
+inferring snapshot durability from that flag.
 
 Run:
 
@@ -783,8 +767,8 @@ concurrent.
 Read:
 
 1. [RaftNode](../src/DotnetRaft/RaftNode.cs)
-2. [Concurrent Node design](design/d24-concurrent-node.md)
-3. [Asynchronous storage design](design/d25-asynchronous-storage-writes.md)
+2. [RaftNode host contract](public-api.md#raftnode)
+3. [Asynchronous storage contract](public-api.md#asynchronous-storage-writes)
 
 `RaftNode` owns one background loop. Concurrent callers enqueue owned copies
 of commands. Only that loop calls `RawNode`.
@@ -797,17 +781,10 @@ waiting -> claimed      operation runs exactly once
 claimed -> completed    later caller cancellation cannot roll it back
 ```
 
-Proposals remain queued while no leader is known. Ticks, ordinary commands,
-and proposals are scheduled fairly enough that one busy lane cannot
-indefinitely starve another.
-
-With `AsyncStorageWrites = true`:
-
-- do not process the diagnostic Ready persistence/application fields;
-- do not call `Advance`;
-- route `MsgStorageAppend` to a reliable append worker;
-- route `MsgStorageApply` to a reliable application worker; and
-- step their exact response messages back into the same node instance.
+Notice why Ready consumption must run independently of proposals and why an
+async append worker still has to send some responses to *remote* nodes. Trace
+the `To` field of both the local append acknowledgement and the accompanying
+vote or append response using the tests below.
 
 Run:
 
@@ -823,7 +800,7 @@ dotnet test tests/DotnetRaft.Tests/DotnetRaft.Tests.csproj \
 
 Read:
 
-1. [SQLite storage design](design/sqlite-durable-storage.md)
+1. [SQLite package guide](../src/DotnetRaft.Sqlite/README.md)
 2. [SqliteStorage](../src/DotnetRaft.Sqlite/SqliteStorage.cs)
 3. [SQLite storage tests](../tests/DotnetRaft.Sqlite.Tests/SqliteStorageDurabilityTests.cs)
 
@@ -835,10 +812,6 @@ The database stores:
 - pending application-snapshot recovery metadata; and
 - format/schema metadata.
 
-The storage transaction publishes one complete Raft generation. It must never
-recover a hard-state commit beyond the durable log or below the published
-snapshot boundary.
-
 An incoming snapshot creates a cross-database problem:
 
 ```text
@@ -846,9 +819,8 @@ raft.db says snapshot is durable
 application.db may not yet have restored snapshot data
 ```
 
-The package records a pending application-snapshot marker. Startup must
-restore the application snapshot idempotently, repair commit only when safely
-proven, and acknowledge the marker before restarting Raft.
+Use the [SQLite recovery procedure](../src/DotnetRaft.Sqlite/README.md#open-and-restart)
+to trace what happens if the host stops between those two steps.
 
 Run:
 

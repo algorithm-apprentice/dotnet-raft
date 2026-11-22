@@ -26,7 +26,7 @@ internal sealed class RaftOutput
             outbound.From = senderId;
         }
 
-        if (IsVoteMessage(outbound.Type))
+        if (MessageClassifier.IsVoteMessage(outbound.Type))
         {
             if (outbound.Term == 0)
             {
@@ -83,15 +83,6 @@ internal sealed class RaftOutput
     internal Message[] PeekMessagesAfterAppend()
     {
         return CloneMessages(messagesAfterAppend);
-    }
-
-    private static bool IsVoteMessage(MessageType type)
-    {
-        return type is
-            MessageType.MsgVote or
-            MessageType.MsgVoteResp or
-            MessageType.MsgPreVote or
-            MessageType.MsgPreVoteResp;
     }
 
     private static bool RequiresDurableState(MessageType type)

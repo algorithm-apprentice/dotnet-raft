@@ -29,7 +29,20 @@ public sealed record KvApplyResult(
     ulong ResultIndex,
     ulong PhysicalApplied,
     bool Duplicate,
-    bool Conflict);
+    bool Conflict)
+{
+    // Fingerprint always identifies the durable winner. A conflicting
+    // attempt also implies that winner had already been recorded.
+    internal KvApplyResult ForRequest(ByteString expectedFingerprint)
+    {
+        bool matches = Fingerprint.Equals(expectedFingerprint);
+        return this with
+        {
+            Duplicate = matches && (Duplicate || Conflict),
+            Conflict = !matches,
+        };
+    }
+}
 
 public sealed record KvRequestResolution(
     ulong ResultIndex,
@@ -93,9 +106,12 @@ public static class DurableKvCommandCodec
     public static ByteString Fingerprint(
         KvCommand command)
     {
-        return ByteString.CopyFrom(
-            SHA256.HashData(
-                Encode(command)));
+        return Fingerprint(Encode(command));
+    }
+
+    internal static ByteString Fingerprint(ReadOnlySpan<byte> encodedCommand)
+    {
+        return ByteString.CopyFrom(SHA256.HashData(encodedCommand));
     }
 
     private static void Validate(KvCommand command)

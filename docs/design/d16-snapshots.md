@@ -326,9 +326,9 @@ For a received snapshot:
    unstable entries, unstable snapshot, and after-append messages;
 3. the host persists the batch's `HardState`, entries, and snapshot before
    releasing any captured after-append response;
-4. the host logically accepts snapshot application through the D21 lifecycle,
-   which will call the existing `Log.AcknowledgeSnapshot(index)` while
-   preserving ordered physical state-machine application; and
+4. the host acknowledges snapshot application through the
+   [D21 lifecycle](d21-rawnode-ready.md#advance) while preserving ordered
+   physical state-machine application; and
 5. only the responses captured with that durable batch may be delivered.
 
 D16 tests perform these explicit hard-state and log/storage operations

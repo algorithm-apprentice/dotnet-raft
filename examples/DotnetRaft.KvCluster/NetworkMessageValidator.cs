@@ -1,3 +1,4 @@
+using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 
 namespace DotnetRaft.Examples.KvCluster;
@@ -11,8 +12,7 @@ public static class NetworkMessageValidator
         ArgumentNullException.ThrowIfNull(message);
         ArgumentNullException.ThrowIfNull(options);
 
-        if (!message.HasType
-            || !Enum.IsDefined(message.Type))
+        if (!MessageClassifier.HasKnownType(message))
         {
             throw new ArgumentException(
                 "Raft message type must be present and known.",
@@ -45,26 +45,11 @@ public static class NetworkMessageValidator
                 nameof(message));
         }
 
-        if (IsLocal(message.Type))
+        if (MessageClassifier.IsLocal(message.Type))
         {
             throw new ArgumentException(
                 $"{message.Type} is a local control message and cannot cross the network.",
                 nameof(message));
         }
-    }
-
-    private static bool IsLocal(
-        MessageType type)
-    {
-        return type is
-            MessageType.MsgHup or
-            MessageType.MsgBeat or
-            MessageType.MsgUnreachable or
-            MessageType.MsgSnapStatus or
-            MessageType.MsgCheckQuorum or
-            MessageType.MsgStorageAppend or
-            MessageType.MsgStorageAppendResp or
-            MessageType.MsgStorageApply or
-            MessageType.MsgStorageApplyResp;
     }
 }

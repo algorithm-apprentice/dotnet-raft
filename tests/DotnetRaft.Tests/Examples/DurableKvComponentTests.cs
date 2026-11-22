@@ -683,6 +683,63 @@ public sealed class DurableKvComponentTests
     }
 
     [Fact]
+    public async Task LosingLogEntryCompletesARetryWithTheDurableWinner()
+    {
+        using var directory = new TemporaryDirectory();
+        using var state = new SqliteKeyValueStateMachine(directory.ApplicationPath, nodeId: 1);
+        var registry = new PendingProposalRegistry();
+        var winner = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
+        KvCommand loser = winner with { Value = "red" };
+
+        // A retry reads before the original applies, then registers after it.
+        Assert.Null(state.ResolveRequest(winner));
+        KvApplyResult original = state.ApplyCommand(1,
+            ByteString.CopyFrom(DurableKvCommandCodec.Encode(winner)));
+        Assert.False(registry.Complete(original));
+        using PendingProposalRegistry.PendingProposalRegistration retry = registry.Register(winner);
+
+        KvApplyResult rejected = state.ApplyCommand(2,
+            ByteString.CopyFrom(DurableKvCommandCodec.Encode(loser)));
+        Assert.True(rejected.Conflict);
+        Assert.True(registry.Complete(rejected));
+
+        KvApplyResult result = await retry.Task;
+        Assert.False(result.Conflict);
+        Assert.True(result.Duplicate);
+        Assert.Equal(original.ResultIndex, result.ResultIndex);
+        Assert.Equal("blue", state.ReadLocal("color").Value);
+    }
+
+    [Fact]
+    public async Task SnapshotResolutionUsesTheCurrentWaitersFingerprint()
+    {
+        using var directory = new TemporaryDirectory();
+        using var state = new SqliteKeyValueStateMachine(directory.ApplicationPath, nodeId: 1);
+        var registry = new PendingProposalRegistry();
+        var winner = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
+        using PendingProposalRegistry.PendingProposalRegistration previous =
+            registry.Register(winner with { Value = "red" });
+        state.ApplyCommand(1, ByteString.CopyFrom(DurableKvCommandCodec.Encode(winner)));
+
+        PendingProposalRegistry.PendingProposalRegistration? next = null;
+        Assert.Equal(1, registry.CompleteResolved((requestId, expectedFingerprint) =>
+        {
+            KvApplyResult observed = Assert.IsType<KvApplyResult>(
+                state.ResolveAppliedRequest(requestId, expectedFingerprint));
+            Assert.True(observed.Conflict);
+            previous.Dispose();
+            next = registry.Register(winner);
+            return observed;
+        }));
+
+        using var replacement = Assert.IsType<PendingProposalRegistry.PendingProposalRegistration>(next);
+        KvApplyResult result = await replacement.Task;
+        Assert.False(result.Conflict);
+        Assert.True(result.Duplicate);
+        Assert.Equal(1UL, result.ResultIndex);
+    }
+
+    [Fact]
     public void RecoveryCreatesMatchingSnapshotWhenApplicationIsAhead()
     {
         using var directory =

@@ -4,7 +4,8 @@
 sockets, start timers, persist a WAL, execute application commands, or decide
 when application snapshots are safe.
 
-This guide describes the host contract for package version 1.0.0.
+This is the current host contract for package version 1.0.0. For the design
+history and reference-porting milestones, see the [design index](design/README.md).
 
 ## Architecture boundary
 
@@ -35,111 +36,18 @@ storage. It does not persist the application state machine.
 
 ## Durable SQLite storage
 
-Version `1.0.0` is not currently published to NuGet.org. Build both local
-packages from a repository checkout, then add the SQLite package from the
-generated source:
+See the [installation instructions](../README.md#install) and the
+[SQLite package guide](../src/DotnetRaft.Sqlite/README.md) for its atomic write
+APIs, crash recovery with pending application snapshots, and supported backup
+procedure. Restoring Raft state alone cannot recover a separate application
+store.
 
-```bash
-dotnet restore DotnetRaft.sln
-dotnet pack src/DotnetRaft/DotnetRaft.csproj -c Release
-dotnet pack src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj -c Release
-```
+## Storage reads
 
-In the consumer project, create `NuGet.Config` if needed, add the generated
-package directory alongside NuGet.org, and install:
-
-```bash
-dotnet new nugetconfig
-dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
-  --name dotnet-raft-local --configfile NuGet.Config
-dotnet add package DotnetRaft.Sqlite --version 1.0.0
-```
-
-Open one local database:
-
-```csharp
-using DotnetRaft.Storage.Sqlite;
-
-using var storage =
-    new SqliteStorage("data/raft.db");
-```
-
-The storage uses SQLite WAL mode, exclusive locking, and
-`synchronous=FULL`. It atomically persists each synchronous Ready:
-
-```csharp
-storage.PersistReady(ready);
-```
-
-For asynchronous storage writes:
-
-```csharp
-storage.PersistStorageAppend(appendRequest);
-```
-
-Do not deliver `appendRequest.Responses` until persistence succeeds.
-
-### Pending application snapshots
-
-Persisting an incoming snapshot and restoring application state cannot be one
-transaction when application state is stored elsewhere. SQLite storage
-therefore records a durable pending marker.
-
-Before constructing a restarted node:
-
-```csharp
-Snapshot? pending =
-    storage.GetPendingApplicationSnapshot();
-if (pending is not null)
-{
-    RestoreApplicationSnapshotAtomically(
-        pending.Data,
-        pending.Metadata.Index,
-        pending.Metadata.ConfState);
-
-    HardState hardState =
-        storage.GetHardState()
-        ?? throw new InvalidDataException(
-            "A pending non-bootstrap snapshot requires durable HardState.");
-    if (hardState.Term
-        < pending.Metadata.Term)
-    {
-        throw new InvalidDataException(
-            "Recovered HardState term is older than the pending snapshot.");
-    }
-
-    if (hardState.Commit
-        < pending.Metadata.Index)
-    {
-        hardState.Commit =
-            pending.Metadata.Index;
-        storage.SetHardState(hardState);
-    }
-
-    storage.AcknowledgeApplicationSnapshot(
-        pending.Metadata.Index);
-}
-```
-
-`GetInitialState` rejects startup while the marker remains. Snapshot
-acknowledgement also requires durable `HardState.Commit` to cover the snapshot.
-Repeating snapshot restore after a crash must be safe and idempotent.
-Term and vote cannot be synthesized from snapshot metadata; missing or
-regressed durable term is a terminal recovery failure.
-
-The database, `-wal`, and `-shm` files must remain together on one local
-filesystem. Network filesystems, hard-link aliases, multiple owners, and
-copying only the main database file while it is live are unsupported.
-
-SQLite persists only Raft consensus state. Application bytes,
-`physicalApplied`, proposal deduplication, and any application database remain
-the host's responsibility.
-
-When application state is stored separately, treat the Raft and application
-stores as one recovery set. Pending-snapshot reconciliation closes process
-crash windows; it does not prove that independently captured or restored
-database generations belong together. Use a coordinated backup protocol, or
-stop the host and preserve its complete data directory as one unit.
+For `IStorage.GetEntries(lowInclusive, highExclusive, maxSize)`, return a
+detached, contiguous prefix of the requested half-open range within the total
+protobuf encoded-size budget, not the application payload size. A nonempty
+readable range must return at least its first entry, even with a zero budget.
 
 ## Configuration
 
@@ -215,6 +123,16 @@ solely because `Ready.Snapshot` is present.
 Only one Ready can be outstanding. Inputs can continue accumulating while it
 is outstanding; newer work appears after advancement.
 
+An incoming snapshot can be accepted while the host is still applying
+configuration entries from an earlier Ready. Those changes still apply at
+their own log positions and return the membership of that earlier application
+prefix; for example, an earlier joint exit remains valid even when the new
+snapshot has already left joint consensus. The node uses the snapshot's
+membership for consensus and preserves it when confirming the snapshot.
+Confirmation of an older snapshot cannot restore its configuration over a
+newer one. The host still applies the earlier Ready in order; it does not need
+to pause inbound messages around configuration apply.
+
 `Advance` may occur after irrevocable ordered admission rather than slow
 physical completion, but the host must separately maintain `physicalApplied`.
 A linearizable read can execute only when:
@@ -229,25 +147,25 @@ Snapshots and compaction use physical, not logical, progress.
 ## `RaftNode`
 
 `RaftNode` owns a single background loop and is safe for concurrent callers.
+That loop serializes node commands; it does not consume Ready on the host's
+behalf. Start one independently running Ready consumer before awaiting any
+proposal. With no known leader, `ProposeAsync` waits, and the election itself
+may need the consumer to send its outgoing vote requests.
 
-```csharp
-await using RaftNode node = RaftNode.Restart(config);
-
-await node.CampaignAsync(cancellationToken);
-await node.ProposeAsync(commandBytes, cancellationToken);
-
-Ready ready = await node.WaitForReadyAsync(cancellationToken);
-// Host processing.
-await node.AdvanceAsync(cancellationToken);
-```
+In synchronous mode, that consumer repeatedly awaits `WaitForReadyAsync`,
+processes the batch in the [order above](#synchronous-ready-loop), and calls
+`AdvanceAsync`. Campaign, proposal, timers, and network input run independently
+of it. Supervise the Ready consumer alongside `node.Completion` and stop the
+host on a terminal failure. See the runnable example's
+[`RaftClusterHost`](../examples/DotnetRaft.KvCluster/RaftClusterHost.cs) for
+the consumer and shutdown loop.
 
 Cancellation prevents dispatch only while a request is waiting. Once the
 owner loop claims it, the operation runs exactly once and its result wins.
 
-Proposals remain pending while no leader is known. Stop unblocks every waiter.
-`Completion` succeeds after normal stop and faults after a terminal owner-loop
-failure. `TerminalStatus` is diagnostic only and may describe partial
-in-memory state.
+Stop unblocks every waiter. `Completion` succeeds after normal stop and
+faults after a terminal owner-loop failure. `TerminalStatus` is diagnostic
+only and may describe partial in-memory state.
 
 Only one Ready waiter/consumer is supported.
 
@@ -318,12 +236,39 @@ configuration under the same exclusive application-state barrier used by the
 apply worker. Older apply work starting afterward skips entries covered by the
 snapshot but still returns its response to release accounting.
 
+After persistence and any required snapshot restoration or storage-specific
+acknowledgement, deliver the responses in their listed order. An append request
+can contain both a local confirmation and responses to remote peers such as
+`MsgVoteResp` or `MsgAppResp`. Route by each response's `To`, not by the
+request's target or the response's type:
+
+```csharp
+foreach (Message response in appendRequest.Responses)
+{
+    if (response.To == localNodeId)
+    {
+        await node.StepAsync(response, cancellationToken);
+    }
+    else
+    {
+        await transport.SendAsync(response, cancellationToken);
+    }
+}
+```
+
+For `RawNode`, deliver local responses with `Step` on its serialized owner.
+The [SQLite integration test](../tests/DotnetRaft.Sqlite.Tests/SqliteStorageRawNodeTests.cs)
+exercises a durable append with both destinations.
+The [same membership rule as synchronous mode](#synchronous-ready-loop)
+applies when older apply work overlaps an incoming snapshot. A completion for
+a superseded snapshot does not reinstall its configuration.
+
 ### Apply worker
 
 `MsgStorageApply` carries committed entries. Apply them in order, including
 the configuration rules above, then deliver its response.
 
-Do not mutate library-generated response messages. Responses are the
+Do not mutate library-generated response messages. Local responses are the
 acknowledgement protocol and are scoped to the exact node instance that emitted
 them.
 

@@ -49,6 +49,11 @@ Structural Raft message validation does not bind `Message.From` to a transport
 identity. The listeners must not be exposed outside a trusted local teaching
 environment.
 
+The gRPC service checks the listener and decodes the envelope. The host's
+message receiver checks peer routing and rejects local message types before
+waiting for startup or dispatching to `RaftNode`. Both the gRPC and in-memory
+transports use that receiver rather than maintaining separate filters.
+
 ## Projects and dependencies
 
 `examples/DotnetRaft.KvCluster` references:
@@ -170,17 +175,24 @@ and commits the cursor in the same transaction as its effects.
 
 ## Mutation application and deduplication
 
-Before proposing, the host queries `requests`:
+The durable `requests` row owns the winning hash and result index. Before
+proposing, the host queries it:
 
-- absent: register a pending proposal and propose;
+- absent: join or register a pending proposal. The owning registration checks
+  the durable row again before submitting, since another node's proposal or
+  a snapshot can complete between the first lookup and registration;
 - matching hash: return the stored result index as a durable duplicate;
 - different hash: return conflict without proposing.
 
 The pending registry stores `(requestId, expectedHash, completion)`.
 Same-ID/same-hash local callers share one completion. Same-ID/different-hash
-callers fail immediately. Application completion supplies the committed hash;
-a mismatching winner completes the waiter as conflict rather than
-acknowledging another command.
+callers with no durable result can be rejected locally. A pending conflict
+does not override a durable result that became available since the first read.
+Apply and snapshot completions always resolve the current waiter against the
+stored winner, never the hash of a losing log entry or the result computed for
+a previous waiter. A matching waiter receives the original result index; if
+the winner was already durable, it receives a duplicate result even when a
+conflicting entry triggered completion.
 
 The owning registration starts one shared proposal submission. Its cancellation
 token is owned by the registry entry rather than by the first HTTP caller, and

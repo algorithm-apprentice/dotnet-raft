@@ -615,6 +615,40 @@ public sealed class SqliteStorageDurabilityTests
     }
 
     [Fact]
+    public void BoundedReadDoesNotDecodeAnEntryBeyondThePage()
+    {
+        using TemporaryStorageDirectory directory = CreateDirectory();
+        Entry[] entries = Entries((1, 1), (2, 1), (3, 1));
+        using (SqliteStorage storage = CreateStorage(directory))
+        {
+            storage.SetHardState(new HardState { Term = 1 });
+            storage.Append(entries);
+        }
+
+        using (SqliteConnection connection = OpenRaw(directory.DatabasePath))
+        using (SqliteCommand command = connection.CreateCommand())
+        {
+            // Reopen checks the retained bounds; this interior entry is
+            // only checked when its payload is read.
+            command.CommandText =
+                """
+                UPDATE raft_entries
+                SET payload = X'FFFFFFFFFFFFFF'
+                WHERE entry_index = $index;
+                """;
+            command.Parameters.AddWithValue("$index", EncodeIndex(2));
+            Assert.Equal(1, command.ExecuteNonQuery());
+        }
+
+        using SqliteStorage reopened = CreateStorage(directory);
+        ulong budget = (ulong)entries[0].CalculateSize() + 1;
+
+        AssertEntries([entries[0]], reopened.GetEntries(1, 4, budget));
+        AssertStorageError(StorageError.Unknown,
+            () => reopened.GetEntries(2, 4, budget));
+    }
+
+    [Fact]
     public void FailedBatchRollsBackEveryCategory()
     {
         using TemporaryStorageDirectory directory =

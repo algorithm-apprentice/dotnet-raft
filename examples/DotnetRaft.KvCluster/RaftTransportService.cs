@@ -47,18 +47,11 @@ public sealed class RaftTransportService
         {
             message = Message.Parser.ParseFrom(
                 request.Payload);
-            NetworkMessageValidator.Validate(
-                message,
-                options);
         }
         catch (InvalidProtocolBufferException exception)
         {
             throw InvalidArgument(
                 $"Raft payload is malformed: {exception.Message}");
-        }
-        catch (ArgumentException exception)
-        {
-            throw InvalidArgument(exception.Message);
         }
 
         try

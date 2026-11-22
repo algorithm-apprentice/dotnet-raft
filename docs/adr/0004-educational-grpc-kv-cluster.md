@@ -1,6 +1,7 @@
 # ADR 0004: Educational gRPC Key-Value Cluster
 
-- **Status:** Accepted
+- **Status:** Accepted; the volatile storage and application decisions were
+  superseded by [ADR 0007](0007-durable-fixed-membership-kv-host.md).
 - **Date:** 2026-10-04
 - **Decision owners:** dotnet-raft maintainers
 

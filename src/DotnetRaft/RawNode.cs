@@ -211,7 +211,7 @@ public sealed partial class RawNode
             NetworkMessageValidation.ValidateType(
                 owned);
 
-            if (IsStorageResponse(owned.Type)
+            if (MessageClassifier.IsStorageResponse(owned.Type)
                 || RaftMessageTargets.IsLocal(owned.From))
             {
                 ValidateStorageResponse(owned);
@@ -696,7 +696,7 @@ public sealed partial class RawNode
 
             if (acknowledgement.SnapshotIndex.HasValue)
             {
-                _core.Log.AcknowledgeSnapshot(
+                _core.AcknowledgeSnapshot(
                     acknowledgement.SnapshotIndex.Value);
             }
 
@@ -851,14 +851,6 @@ public sealed partial class RawNode
             Fault(exception);
             throw;
         }
-    }
-
-    private static bool IsStorageResponse(
-        MessageType type)
-    {
-        return type is
-            MessageType.MsgStorageAppendResp
-            or MessageType.MsgStorageApplyResp;
     }
 
     private void ValidateStorageResponse(

@@ -99,6 +99,7 @@ internal static class AsyncStorageTestSupport
         MemoryStorage storage,
         Ready ready)
     {
+        // This helper has no network; only use it for singleton batches.
         foreach (Message message in ready.Messages)
         {
             switch (message.Type)
@@ -109,6 +110,7 @@ internal static class AsyncStorageTestSupport
                                  storage,
                                  message))
                     {
+                        Assert.Equal(message.From, response.To);
                         node.Step(response);
                     }
 
@@ -136,6 +138,7 @@ internal static class AsyncStorageTestSupport
                     foreach (Message response in
                              message.Responses)
                     {
+                        Assert.Equal(message.From, response.To);
                         node.Step(response);
                     }
 

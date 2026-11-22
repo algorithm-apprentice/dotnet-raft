@@ -172,7 +172,9 @@ The append worker must:
 3. for a snapshot request, restore the physical application snapshot and its
    `ConfState` under the shared application-state barrier described below;
 4. force durability before responses when `Responses.Count > 0`;
-5. deliver all responses in their listed order; and
+5. deliver all responses in their listed order using each response's `To`:
+   step those addressed to the local node and send the rest to remote peers
+   (see the [host contract](../public-api.md#append-worker)); and
 6. never deliver responses after a failed/partial publication or failed
    application snapshot restore.
 
@@ -260,18 +262,20 @@ with zero entry bytes. A response for an older/nonmatching snapshot can still
 advance to that physically restored snapshot index, but cannot clear a newer
 unstable snapshot.
 
-Before clearing a matching retained snapshot, the core re-installs its exact
-`ConfState` into the tracker at the snapshot index. This closes the race in
-which an older outstanding configuration apply runs after initial
-`MsgSnap` acceptance but before physical snapshot restoration. The completion
-order is:
+The core handles older configuration calls against their own earlier applied
+prefix, as in [D21](d21-rawnode-ready.md#advance). This keeps older work valid
+between `MsgSnap` acceptance and the host's physical restore. Snapshot
+completion is also shared and uses the owned snapshot rather than the
+returned message's `ConfState`. The completion order is:
 
 ```text
-if response snapshot matches retained unstable snapshot:
-    restore tracker/configuration from response Snapshot.ConfState
-    reset votes and local learner state
+if response snapshot index matches retained unstable snapshot:
+    if membership differs from the owned unstable snapshot:
+        restore tracker/configuration from the owned snapshot's ConfState
+        reset votes and local learner state
     clear that unstable snapshot
 advance Applied with max semantics
+release the earlier application prefix once covered
 ```
 
 An older/nonmatching snapshot response never reasserts configuration and

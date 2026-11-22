@@ -44,38 +44,15 @@ native database dependencies.
 ## Choose an integration API
 
 - `RawNode` is synchronous and thread-unsafe. The host owns one serialized
-  event loop and passes every returned `Ready` back to `Advance`.
+  event loop.
 - `RaftNode` is a concurrent asynchronous facade. One background owner loop
-  serializes commands and exposes cancellable `ValueTask` operations.
-- `AsyncStorageWrites` replaces `Advance` with reliable local
-  `MsgStorageAppend` and `MsgStorageApply` request/response queues.
+  serializes commands around `RawNode` and exposes cancellable `ValueTask`
+  operations. The host still runs the Ready consumer.
 
-```csharp
-using DotnetRaft;
-using DotnetRaft.Storage;
-
-var storage = new MemoryStorage();
-var config = new RaftConfig
-{
-    Id = 1,
-    ElectionTick = 10,
-    HeartbeatTick = 1,
-    Storage = storage,
-};
-
-await using RaftNode node = RaftNode.Start(
-    config,
-    [new Peer(1)]);
-
-Ready ready = await node.WaitForReadyAsync();
-// Persist ready.Snapshot, ready.Entries, and ready.HardState;
-// apply ready.CommittedEntries in order; send ready.Messages.
-await node.AdvanceAsync();
-```
-
-The abbreviated sample does not replace the durability, configuration,
-physical-application, and recovery rules in the
-[public integration guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md).
+Either facade can use synchronous Ready/Advance or opt into asynchronous
+storage writes. Follow the [host integration contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
+for the required ordering. To see the complete synchronous loop running with
+three nodes, start the [gRPC KV example](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/examples/DotnetRaft.KvCluster).
 
 ## Documentation
 
@@ -85,7 +62,7 @@ physical-application, and recovery rules in the
 - [Durable SQLite storage package](https://github.com/algorithm-apprentice/dotnet-raft/tree/main/src/DotnetRaft.Sqlite)
 - [Behavioral parity matrix](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/parity-matrix.md)
 - [Reference architecture](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/reference-architecture.md)
-- [Implementation DAG](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/implementation-dag.md)
+- [Design records and completed porting plan](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/design/README.md)
 - [Performance methodology and baseline](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/performance.md)
 - [Release and compatibility ADR](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/adr/0002-release-and-compatibility-contract.md)
 - [Apache-2.0 license](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/LICENSE)

@@ -266,15 +266,19 @@ LastIndex  = lastIndex
 Validate the same half-open range rules as `MemoryStorage`, then:
 
 ```sql
-SELECT entry_index, entry_term, payload
+SELECT entry_index, entry_term, length(payload), payload
 FROM raft_entries
 WHERE entry_index >= $low
   AND entry_index < $high
 ORDER BY entry_index;
 ```
 
-Every returned row is parsed and checked for continuity. The encoded protobuf
-size budget returns at least the first entry for a nonempty range.
+Read in index order and apply the protobuf encoded-size budget as rows are
+read. Always return the first entry for a nonempty readable range, even if it
+exceeds the budget. Stop at the first row that cannot be included; a small
+budget must not materialize or decode the rest of the suffix. Validate index
+continuity and payload/term consistency in the inspected prefix. Corrupt
+payloads beyond the requested page remain detectable when subsequently read.
 
 ### Snapshot
 
@@ -419,9 +423,9 @@ Validation also requires:
 The method reconstructs a `HardState` only when all hard-state fields are
 present, then atomically persists snapshot, entries, and hard state.
 
-`request.Responses` are not sent or mutated. The append worker may deliver
-them only after this method succeeds and, for a snapshot request, after the
-host restores the application snapshot under the D25 application barrier.
+`request.Responses` are not sent or mutated. After persistence and application
+snapshot acknowledgement, the host follows the
+[append-worker routing contract](../public-api.md#append-worker).
 
 ### Application snapshot acknowledgement
 

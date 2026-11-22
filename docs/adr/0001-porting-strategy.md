@@ -67,8 +67,10 @@ boundary and an implementation order that exposes the protocol incrementally.
   reference.
 - The first useful milestone is intentionally smaller than full feature
   parity, but no temporary architecture is introduced for it.
-- The DAG and its acceptance gates become part of the project contract; scope
-  changes require updating this ADR or adding a superseding ADR.
+- The DAG and its acceptance gates governed the reference port. With D00–D26
+  complete, the [DAG](../implementation-dag.md) records that milestone scope,
+  and the [public integration guide](../public-api.md) describes the current
+  host contract.
 
 ## Alternatives rejected
 

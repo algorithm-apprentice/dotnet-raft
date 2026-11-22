@@ -521,8 +521,8 @@ For a valid batch it performs the pinned synchronous completion order:
 
 1. step retained self-directed after-append messages;
 2. stabilize the exact final emitted entry through `Log.StableTo`;
-3. acknowledge the exact emitted snapshot through
-   `Log.AcknowledgeSnapshot`;
+3. acknowledge the exact emitted snapshot through the core's snapshot
+   completion path, shared with [D25](d25-asynchronous-storage-writes.md);
 4. acknowledge the exact final committed entry through `RaftCore.AppliedTo`;
 5. reduce the uncommitted payload budget by the applied entries' payload
    bytes; and
@@ -534,6 +534,17 @@ acknowledgement to commit its no-op before that entry leaves the unstable log.
 
 Messages or entries created after `Ready()` was accepted are not cleared or
 acknowledged by advancing the older batch.
+
+Snapshot acceptance can be interleaved with application of older committed
+configuration entries. While an earlier application prefix is outstanding,
+retain its configuration for ordered `ApplyConfChange` calls independently
+of the tracker installed for consensus by the newer snapshot. This also keeps
+an earlier joint transition valid at its original position. Release the old
+configuration once all delivered entries are acknowledged or covered by a
+snapshot. Confirming the current snapshot preserves its configuration.
+Completion uses the owned unstable snapshot, not the mutable Ready value. An
+acknowledgement for a superseded snapshot advances the applied cursor with max
+semantics but cannot clear or replace a newer snapshot or its membership.
 
 `Advance` is therefore an acknowledgement of:
 
@@ -617,7 +628,8 @@ the applied cursor advances beyond the entries actually delivered.
 ## Failure behavior
 
 - Invalid configuration still fails during `RaftCore` construction.
-- Async storage configuration fails explicitly in `RawNode`.
+- With the later D25 asynchronous mode enabled, `Advance` is not supported;
+  hosts acknowledge storage work with local responses instead.
 - Local network messages and unknown-peer responses fail before core term
   handling.
 - Proposal drops remain explicit.
@@ -749,6 +761,6 @@ D21 is complete when:
 5. ownership tests prove public input and output detachment;
 6. restart, snapshot, pagination, configuration, read-index, and bounded-log
    integration tests pass;
-7. async storage use fails explicitly pending D25;
+7. the synchronous `Advance` API is not available in D25 mode;
 8. all existing tests remain green; and
 9. an independent review finds no unresolved correctness issue.

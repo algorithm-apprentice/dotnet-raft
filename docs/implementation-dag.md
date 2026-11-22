@@ -1,16 +1,21 @@
 # Implementation DAG
 
-## Execution rule
+**Historical scope:** D00–D26 are complete. This document records the order,
+scope, and acceptance gates of the reference port. It is not the current
+architecture or a backlog for post-parity work; see the
+[design index](design/README.md) and [parity matrix](parity-matrix.md).
 
-The table in this document is authoritative. A work package may start only
-after all listed dependencies are complete. "Complete" means:
+## Original execution rule
+
+During the port the table governed sequencing. A work package could start
+only after all listed dependencies were complete. "Complete" meant:
 
 1. production code for the package is implemented;
 2. focused translated tests pass;
 3. public or cross-component behavior is documented;
 4. no placeholder behavior is left for a listed acceptance gate.
 
-Although several nodes become ready at the same time, implementation remains
+Although several nodes became ready at the same time, implementation was
 sequential. The selected stable topological order is ascending node ID.
 
 ## Dependency graph
@@ -166,11 +171,8 @@ D00 -> D01 -> D02 -> D03 -> D04 -> D05 -> D06 -> D07 -> D08
 The first learning milestone that demonstrates the Raft algorithm is **M4**.
 The first host-consumable library milestone is **M6**.
 
-## Change control
+## After the port
 
-- Adding an implementation feature requires adding or extending a DAG node and
-  its acceptance gate before coding.
-- If a new dependency points backward in the selected order, the graph must be
-  revalidated and this document updated.
-- A node may be split when its acceptance gate becomes too broad, but completed
-  predecessors must not be reopened without a documented defect or ADR.
+Keep the completed DAG as a record. For post-parity changes, update the current
+contract and the tests that own the behavior. Record intentional reference
+deviations in the parity matrix and architectural decisions in an ADR.

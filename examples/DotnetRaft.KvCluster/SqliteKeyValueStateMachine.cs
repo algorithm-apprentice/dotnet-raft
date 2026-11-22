@@ -170,9 +170,6 @@ public sealed class SqliteKeyValueStateMachine
                 ReadRequest(
                     command.RequestId,
                     transaction);
-            bool duplicate = false;
-            bool conflict = false;
-            ulong resultIndex;
             if (existing is null)
             {
                 ApplyMutation(
@@ -183,20 +180,6 @@ public sealed class SqliteKeyValueStateMachine
                     fingerprint,
                     index,
                     transaction);
-                resultIndex = index;
-            }
-            else
-            {
-                resultIndex = existing.ResultIndex;
-                if (existing.Fingerprint.Equals(
-                        fingerprint))
-                {
-                    duplicate = true;
-                }
-                else
-                {
-                    conflict = true;
-                }
             }
 
             UpdateMetadata(
@@ -207,11 +190,11 @@ public sealed class SqliteKeyValueStateMachine
             physicalApplied = index;
             return new KvApplyResult(
                 command.RequestId,
-                fingerprint,
-                resultIndex,
+                existing?.Fingerprint ?? fingerprint,
+                existing?.ResultIndex ?? index,
                 index,
-                duplicate,
-                conflict);
+                Duplicate: existing is not null,
+                Conflict: false).ForRequest(fingerprint);
         }
     }
 
@@ -299,9 +282,7 @@ public sealed class SqliteKeyValueStateMachine
                 existing.ResultIndex,
                 physicalApplied,
                 Duplicate: true,
-                Conflict:
-                    !existing.Fingerprint.Equals(
-                        expectedFingerprint));
+                Conflict: false).ForRequest(expectedFingerprint);
         }
     }
 
@@ -1133,13 +1114,7 @@ public sealed class SqliteKeyValueStateMachine
     private static ConfState NormalizeConfState(
         ConfState state)
     {
-        ConfState result = state.Clone();
-        if (!result.HasAutoLeave)
-        {
-            result.AutoLeave = false;
-        }
-
-        return result;
+        return ProtocolDefaults.EnsureConfState(state.Clone());
     }
 
     private static byte[] EncodeUInt64(

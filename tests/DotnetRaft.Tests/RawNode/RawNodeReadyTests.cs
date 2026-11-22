@@ -1,9 +1,12 @@
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
+using DotnetRaft.Tests.AsyncStorage;
 
 using Google.Protobuf;
 
 using static DotnetRaft.Tests.RawNode.RawNodeTestSupport;
+
+using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Tests.RawNode;
 
@@ -201,6 +204,104 @@ public sealed class RawNodeReadyTests
         Assert.Equal(5UL, node.Core.Log.Applied);
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public void SnapshotAndEarlierApplicationKeepTheirOwnConfigurations(
+        bool asyncStorageWrites,
+        bool earlierEntryLeavesJoint)
+    {
+        var storage = new MemoryStorage();
+        var initial = new ConfState { Voters = { 1, 2 } };
+        if (earlierEntryLeavesJoint)
+        {
+            initial.VotersOutgoing.Add([1UL, 2UL, 3UL]);
+        }
+        else
+        {
+            initial.Voters.Add(3);
+        }
+
+        storage.ApplySnapshot(new Snapshot
+        {
+            Metadata = new SnapshotMetadata { ConfState = initial },
+        });
+        var change = new Entry { Index = 1, Term = 1 };
+        if (earlierEntryLeavesJoint)
+        {
+            change.Type = EntryType.EntryConfChangeV2;
+        }
+        else
+        {
+            change.Type = EntryType.EntryConfChange;
+            change.Data = new ProtocolConfChange
+            {
+                Type = ConfChangeType.ConfChangeAddNode,
+                NodeId = 4,
+            }.ToByteString();
+        }
+
+        storage.Append([change]);
+        storage.SetHardState(new HardState { Term = 1, Commit = 1 });
+        var node = CreateNode(storage, asyncStorageWrites: asyncStorageWrites);
+        Ready earlier = node.Ready();
+        Message? apply = asyncStorageWrites
+            ? Assert.Single(earlier.Messages, message =>
+                message.Type == MessageType.MsgStorageApply)
+            : null;
+        Entry entry = Assert.Single(apply is null
+            ? earlier.CommittedEntries
+            : apply.Entries);
+
+        // The newer snapshot includes the earlier change and a later change.
+        // It is already non-joint in the joint-exit case.
+        ulong[] snapshotVoters = earlierEntryLeavesJoint ? [1, 2, 4] : [1, 2, 3];
+        ReceiveSnapshot(node, 2, snapshotVoters);
+        ConfState applied = earlierEntryLeavesJoint
+            ? node.ApplyConfChange(ConfChangeV2.Parser.ParseFrom(entry.Data))
+            : node.ApplyConfChange(ProtocolConfChange.Parser.ParseFrom(entry.Data));
+        ulong[] earlierVoters = earlierEntryLeavesJoint ? [1, 2] : [1, 2, 3, 4];
+        Assert.Equal(earlierVoters, applied.Voters);
+        Assert.Empty(applied.VotersOutgoing);
+        Assert.Equal(snapshotVoters, node.GetStatus().Configuration.Voters);
+        if (apply is null)
+        {
+            node.Advance(earlier);
+        }
+        else
+        {
+            node.Step(Assert.Single(apply.Responses));
+        }
+
+        Ready snapshot = node.Ready();
+        CompleteSnapshot(node, storage, snapshot);
+
+        Assert.Equal(2UL, node.GetBasicStatus().Applied);
+        Assert.Equal(snapshotVoters, node.GetStatus().Configuration.Voters);
+        Assert.False(node.Core.Log.HasUnstableSnapshot);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CompletingOlderSnapshotDoesNotReplaceNewerMembership(
+        bool asyncStorageWrites)
+    {
+        MemoryStorage storage = CreateStorage(voters: [1, 2]);
+        var node = CreateNode(storage, asyncStorageWrites: asyncStorageWrites);
+        ReceiveSnapshot(node, 4, [1, 2]);
+        Ready older = node.Ready();
+        ReceiveSnapshot(node, 5, [1, 2, 3]);
+
+        CompleteSnapshot(node, storage, older);
+
+        Assert.Equal(4UL, node.GetBasicStatus().Applied);
+        Assert.Equal([1UL, 2UL, 3UL], node.GetStatus().Configuration.Voters);
+        Assert.Equal(5UL, node.Ready().Snapshot?.Metadata.Index);
+    }
+
     [Fact]
     public void AppliedCommittedEntriesReleaseUncommittedPayload()
     {
@@ -221,5 +322,47 @@ public sealed class RawNodeReadyTests
         node.Advance(apply);
 
         Assert.Equal(0UL, node.Core.UncommittedSize);
+    }
+
+    private static void ReceiveSnapshot(
+        DotnetRaft.RawNode node,
+        ulong index,
+        ulong[] voters)
+    {
+        var configuration = new ConfState();
+        configuration.Voters.Add(voters);
+        node.Step(new Message
+        {
+            From = 2,
+            To = 1,
+            Term = 1,
+            Type = MessageType.MsgSnap,
+            Snapshot = new Snapshot
+            {
+                Metadata = new SnapshotMetadata
+                {
+                    Index = index,
+                    Term = 1,
+                    ConfState = configuration,
+                },
+            },
+        });
+    }
+
+    private static void CompleteSnapshot(
+        DotnetRaft.RawNode node,
+        MemoryStorage storage,
+        Ready ready)
+    {
+        if (!node.AsyncStorageWrites)
+        {
+            PersistAndAdvance(node, storage, ready);
+            return;
+        }
+
+        Message append = AsyncStorageTestSupport.StorageMessage(
+            ready, MessageType.MsgStorageAppend);
+        Message[] responses = AsyncStorageTestSupport.PersistAppend(storage, append);
+        node.Step(Assert.Single(responses, response => response.To == 1));
     }
 }

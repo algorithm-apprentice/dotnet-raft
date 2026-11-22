@@ -13,34 +13,17 @@ It persists:
 
 ## Install
 
-Version `1.0.0` is not currently published to NuGet.org. Build both packages
-from a repository checkout so the SQLite package can resolve its core
-dependency:
-
-```bash
-dotnet restore DotnetRaft.sln
-dotnet pack src/DotnetRaft/DotnetRaft.csproj -c Release
-dotnet pack src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj -c Release
-```
-
-In the consumer project, create `NuGet.Config` if needed, add the generated
-package directory alongside NuGet.org, and install:
-
-```bash
-dotnet new nugetconfig
-dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
-  --name dotnet-raft-local --configfile NuGet.Config
-dotnet add package DotnetRaft.Sqlite --version 1.0.0
-```
-
-The package targets `net10.0` and uses `Microsoft.Data.Sqlite`.
+Follow the [repository installation instructions](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/README.md#install)
+to build both local packages and install `DotnetRaft.Sqlite`. The package
+targets `net10.0` and uses `Microsoft.Data.Sqlite`.
 
 ## Open and restart
 
+Run the pending-snapshot reconciliation before constructing a restarted node.
+`RestoreApplicationSnapshot` below is supplied by the host.
+
 ```csharp
-using DotnetRaft;
 using DotnetRaft.Protocol;
-using DotnetRaft.Storage;
 using DotnetRaft.Storage.Sqlite;
 
 using var storage = new SqliteStorage("data/raft.db");
@@ -75,80 +58,36 @@ if (pending is not null)
     storage.AcknowledgeApplicationSnapshot(
         pending.Metadata.Index);
 }
-
-StorageState state = storage.GetInitialState();
-var config = new RaftConfig
-{
-    Id = 1,
-    ElectionTick = 10,
-    HeartbeatTick = 1,
-    Storage = storage,
-    Applied = physicalApplied,
-};
-
-await using RaftNode node =
-    RaftNode.Restart(config);
 ```
 
-Commit may be repaired only from trusted durable/application recovery
-evidence. Term and vote must never be guessed from snapshot metadata. Before
-constructing the node, the host must enforce:
+`GetInitialState` rejects startup while a pending snapshot remains.
+Acknowledgement requires the exact pending index and durable commit covering
+it. Repair commit only from trusted recovery evidence; never infer term and
+vote from snapshot metadata. Restoring the same snapshot after a crash must be
+safe and idempotent. Then follow the
+[host restart contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#rawnode)
+to supply the recovered physical application cursor and its configuration.
 
-```text
-HardState.Commit >= physicalApplied
-snapshot/application ConfState = membership at physicalApplied
-```
+## Persisting Ready and local append work
 
-See the
-[`DotnetRaft` integration guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md)
-for the complete recovery contract.
+Call `storage.PersistReady(ready)` at the persistence step of the
+[synchronous Ready loop](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#synchronous-ready-loop).
+Call `storage.PersistStorageAppend(request)` in the
+[asynchronous append worker](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/public-api.md#append-worker)
+instead when using asynchronous storage writes. Both methods publish snapshot,
+entries, and hard state in one `synchronous=FULL` transaction. Neither sends
+messages nor applies application state.
 
-## Synchronous Ready
+For an incoming snapshot, restore the application, then acknowledge its exact
+index with `storage.AcknowledgeApplicationSnapshot(index)`. Do this before
+`Advance` in synchronous mode or before delivering the append responses in
+asynchronous mode, under the host's application barrier. In asynchronous mode,
+follow the linked worker protocol: step only responses addressed to the local
+node and send responses addressed to remote peers over the network.
 
-```csharp
-Ready ready = await node.WaitForReadyAsync();
-
-storage.PersistReady(ready);
-
-foreach (Message message in ready.Messages)
-{
-    await transport.SendAsync(message);
-}
-
-if (ready.Snapshot is not null)
-{
-    RestoreApplicationSnapshot(ready.Snapshot);
-    storage.AcknowledgeApplicationSnapshot(
-        ready.Snapshot.Metadata.Index);
-}
-
-ApplyCommittedEntries(ready.CommittedEntries);
-await node.AdvanceAsync();
-```
-
-`PersistReady` publishes snapshot, entries, and hard state in one
-`synchronous=FULL` SQLite transaction.
-
-## Asynchronous append worker
-
-```csharp
-storage.PersistStorageAppend(request);
-
-if (request.Snapshot is not null)
-{
-    RestoreApplicationSnapshot(request.Snapshot);
-    storage.AcknowledgeApplicationSnapshot(
-        request.Snapshot.Metadata.Index);
-}
-
-foreach (Message response in request.Responses)
-{
-    await node.StepAsync(response);
-}
-```
-
-Append requests must remain FIFO and reliable. Never deliver responses after
-a failed persistence or application-snapshot restore.
+`GetEntries` reads a bounded prefix. It includes a first entry even if it
+exceeds `maxSize` and stops at the budget boundary without decoding the rest
+of the requested range.
 
 ## Operational constraints
 
@@ -161,4 +100,8 @@ a failed persistence or application-snapshot restore.
 
 The package stores Raft consensus state only. It does not implement an
 application state machine, MVCC, lease/watch/auth, or cross-database
-transactions.
+transactions. If application state is stored separately, treat the Raft and
+application databases as one recovery set. The pending marker handles process
+crashes, not mismatched backups. Stop the host and preserve its complete data
+directory together, or use a coordinated backup protocol; backing up one live
+SQLite database is not a coordinated backup of both.

@@ -25,6 +25,7 @@ internal sealed class RaftCore
     private readonly RaftRoleState roleState = new();
     private readonly IRaftTraceSink? traceSink;
     private readonly bool suppressTransitionTrace = true;
+    private ProgressTracker? configurationForOutstandingApplication;
 
     internal RaftCore(RaftConfig config)
         : this(
@@ -367,7 +368,7 @@ internal sealed class RaftCore
         ArgumentNullException.ThrowIfNull(message);
 
         if (message.Term == 0
-            && IsVoteMessage(message.Type))
+            && MessageClassifier.IsVoteMessage(message.Type))
         {
             throw new RaftInvariantException(
                 $"{message.Type} must carry a nonzero term.");
@@ -468,14 +469,7 @@ internal sealed class RaftCore
 
         try
         {
-            var scratch = new ProgressTracker(
-                Tracker.MaxInflightMessages,
-                Tracker.MaxInflightBytes);
-            _ = ConfigurationRestore.Restore(
-                new ConfigurationChanger(
-                    scratch,
-                    snapshotIndex),
-                state);
+            _ = BuildSnapshotConfiguration(normalized.Metadata);
         }
         catch (ConfigurationChangeException exception)
         {
@@ -790,9 +784,10 @@ internal sealed class RaftCore
     {
         ArgumentNullException.ThrowIfNull(change);
         ConfChangeV2 owned = change.Clone();
+        ProgressTracker? earlier = configurationForOutstandingApplication;
         var changer = new ConfigurationChanger(
-            Tracker,
-            Log.LastIndex);
+            earlier ?? Tracker,
+            earlier is null ? Log.LastIndex : Log.Applying);
         ConfigurationChangeResult result;
         if (owned.IsLeaveJoint())
         {
@@ -808,6 +803,17 @@ internal sealed class RaftCore
         else
         {
             result = changer.Simple(owned.Changes);
+        }
+
+        if (earlier is not null)
+        {
+            // This entry was handed to the host before the newer snapshot.
+            // Return the configuration at its application position without
+            // changing the live consensus tracker installed by the snapshot.
+            earlier.Install(result.Config, result.Progress);
+            ConfState applied = earlier.ToConfState();
+            TraceConfigurationApplied(applied);
+            return applied;
         }
 
         return SwitchToConfiguration(
@@ -844,6 +850,24 @@ internal sealed class RaftCore
             progress.Inflights.MaxBytes);
     }
 
+    internal void AcknowledgeSnapshot(ulong index)
+    {
+        if (Log.HasUnstableSnapshotAt(index))
+        {
+            // Only the matching owned snapshot can restore membership at
+            // completion. Do not rely on the detached Ready or reply.
+            SnapshotMetadata metadata = Log.GetSnapshot().Metadata;
+            if (!metadata.ConfState.IsEquivalentTo(Tracker.ToConfState()))
+            {
+                InstallSnapshotConfiguration(
+                    BuildSnapshotConfiguration(metadata));
+            }
+        }
+
+        Log.AcknowledgeSnapshot(index);
+        AfterApplicationAdvanced();
+    }
+
     internal void AppliedTo(
         ulong index,
         ulong encodedSize)
@@ -852,6 +876,16 @@ internal sealed class RaftCore
             index,
             Log.Applied);
         Log.AppliedTo(applied, encodedSize);
+        AfterApplicationAdvanced();
+    }
+
+    private void AfterApplicationAdvanced()
+    {
+        if (Log.Applying == Log.Applied)
+        {
+            configurationForOutstandingApplication = null;
+        }
+
         MaybeAutoLeave();
     }
 
@@ -870,15 +904,6 @@ internal sealed class RaftCore
             || (state.Term == 0
                 && state.Vote == 0
                 && state.Commit == 0);
-    }
-
-    private static bool IsVoteMessage(MessageType type)
-    {
-        return type is
-            MessageType.MsgVote or
-            MessageType.MsgVoteResp or
-            MessageType.MsgPreVote or
-            MessageType.MsgPreVoteResp;
     }
 
     private static bool IsLeaderMessage(MessageType type)
@@ -1966,24 +1991,25 @@ internal sealed class RaftCore
             return false;
         }
 
-        var scratch = new ProgressTracker(
-            Tracker.MaxInflightMessages,
-            Tracker.MaxInflightBytes);
         ConfigurationChangeResult restored =
-            ConfigurationRestore.Restore(
-                new ConfigurationChanger(
-                    scratch,
-                    snapshotIndex),
-                state);
+            BuildSnapshotConfiguration(snapshot.Metadata);
 
         ulong restoredFromCommit = Log.Committed;
         Log.RestoreUncommitted(snapshot);
-        Tracker.Install(
-            restored.Config,
-            restored.Progress);
-        Tracker.ResetVotes();
-        TraceConfigurationApplied(
-            Tracker.ToConfState());
+        if (Log.Applying > Log.Applied
+            && configurationForOutstandingApplication is null)
+        {
+            // No new committed entries are emitted while the snapshot is
+            // unstable. Retain the old tracker state only to apply the
+            // already delivered prefix, including joint transitions.
+            var earlier = new ProgressTracker(
+                Tracker.MaxInflightMessages,
+                Tracker.MaxInflightBytes);
+            earlier.Install(Tracker.Config, Tracker.Progress);
+            configurationForOutstandingApplication = earlier;
+        }
+
+        InstallSnapshotConfiguration(restored);
         Log.CommitTo(snapshotIndex);
         TraceCommitAdvanced(restoredFromCommit);
         return true;
@@ -2156,22 +2182,10 @@ internal sealed class RaftCore
                     message.Index));
         }
 
-        if (message.Snapshot is null)
+        if (message.Snapshot?.Metadata is SnapshotMetadata metadata)
         {
-            return;
+            AcknowledgeSnapshot(metadata.Index);
         }
-
-        Snapshot snapshot =
-            ProtocolDefaults.EnsureSnapshot(
-                message.Snapshot.Clone());
-        ulong index = snapshot.Metadata.Index;
-        if (Log.HasUnstableSnapshotAt(index))
-        {
-            ReassertSnapshotConfiguration(snapshot);
-        }
-
-        Log.StableSnapshotTo(index);
-        AppliedTo(index, 0);
     }
 
     private void HandleStorageApplyResponse(
@@ -2194,19 +2208,19 @@ internal sealed class RaftCore
             EntrySizing.PayloadSize(entries));
     }
 
-    private void ReassertSnapshotConfiguration(
-        Snapshot snapshot)
+    private ConfigurationChangeResult BuildSnapshotConfiguration(
+        SnapshotMetadata metadata)
     {
-        ulong index = snapshot.Metadata.Index;
         var scratch = new ProgressTracker(
             Tracker.MaxInflightMessages,
             Tracker.MaxInflightBytes);
-        ConfigurationChangeResult restored =
-            ConfigurationRestore.Restore(
-                new ConfigurationChanger(
-                    scratch,
-                    index),
-                snapshot.Metadata.ConfState);
+        return ConfigurationRestore.Restore(
+            new ConfigurationChanger(scratch, metadata.Index),
+            metadata.ConfState);
+    }
+
+    private void InstallSnapshotConfiguration(ConfigurationChangeResult restored)
+    {
         Tracker.Install(
             restored.Config,
             restored.Progress);

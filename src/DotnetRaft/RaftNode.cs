@@ -193,9 +193,7 @@ public sealed class RaftNode : IRaftNode
         NetworkMessageValidation.ValidateType(
             owned);
 
-        if (owned.Type is
-            MessageType.MsgStorageAppendResp
-            or MessageType.MsgStorageApplyResp)
+        if (MessageClassifier.IsStorageResponse(owned.Type))
         {
             if (!_asyncStorageWrites
                 && RaftMessageTargets.IsLocal(

@@ -2,6 +2,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DotnetRaft\DotnetRaft.csproj" />
+    <!-- Share the rules without adding a binary dependency on core internals. -->
+    <Compile Include="..\DotnetRaft\Core\EntrySequence.cs" Link="EntrySequence.cs" />
+    <Compile Include="..\DotnetRaft\Core\EntrySizing.cs" Link="EntrySizing.cs" />
   </ItemGroup>
 
   <ItemGroup>

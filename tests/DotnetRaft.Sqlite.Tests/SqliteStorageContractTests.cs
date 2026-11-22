@@ -88,7 +88,38 @@ public sealed class SqliteStorageContractTests
             () => storage.GetEntries(
                 4,
                 8,
-                ulong.MaxValue));
+                    ulong.MaxValue));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void BothBackendsUseTheSameEncodedPageBudget(bool useSqlite)
+    {
+        Entry[] entries = Entries((1, 1), (2, 1), (3, 1));
+        entries[0].Data = ByteString.CopyFromUtf8("first");
+        entries[1].Data = ByteString.CopyFromUtf8("second");
+        using TemporaryStorageDirectory directory = CreateDirectory();
+        using SqliteStorage? sqlite = useSqlite ? CreateStorage(directory) : null;
+        IStorage storage;
+        if (sqlite is not null)
+        {
+            sqlite.SetHardState(new HardState { Term = 1 });
+            sqlite.Append(entries);
+            storage = sqlite;
+        }
+        else
+        {
+            var memory = new MemoryStorage();
+            memory.Append(entries);
+            storage = memory;
+        }
+
+        ulong twoEntries = (ulong)(entries[0].CalculateSize() + entries[1].CalculateSize());
+        AssertEntries(entries[..1], storage.GetEntries(1, 4, 0));
+        AssertEntries(entries[..1], storage.GetEntries(1, 4, twoEntries - 1));
+        AssertEntries(entries[..2], storage.GetEntries(1, 4, twoEntries));
+        AssertEntries(entries, storage.GetEntries(1, 4, ulong.MaxValue));
     }
 
     [Fact]

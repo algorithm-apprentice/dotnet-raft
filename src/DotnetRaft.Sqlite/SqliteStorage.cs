@@ -1,3 +1,4 @@
+using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
@@ -140,7 +141,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                 using SqliteCommand command =
                     CreateCommand(
                         """
-                        SELECT entry_index, entry_term, payload
+                        SELECT entry_index, entry_term, length(payload), payload
                         FROM raft_entries
                         WHERE entry_index >= $low
                           AND entry_index < $high
@@ -160,28 +161,39 @@ public sealed class SqliteStorage : IStorage, IDisposable
                     command.ExecuteReader();
                 var entries = new List<Entry>();
                 ulong expected = lowInclusive;
+                ulong size = 0;
                 while (reader.Read())
                 {
                     ulong index =
                         SqliteStorageCodec.DecodeUInt64(
                             reader.GetFieldValue<byte[]>(0),
                             "Entry index");
-                    ulong term =
-                        SqliteStorageCodec.DecodeUInt64(
-                            reader.GetFieldValue<byte[]>(1),
-                            "Entry term");
                     if (index != expected)
                     {
                         throw SqliteStorageCodec.Unknown(
                             $"Entry range is discontinuous at index {expected}; found {index}.");
                     }
 
+                    // Payloads are written as the protobuf encoding. Check
+                    // their byte length before materializing the next BLOB.
+                    ulong nextSize = checked((ulong)reader.GetInt64(2));
+                    if (entries.Count != 0
+                        && !EntrySizing.FitsWithinBudget(size, nextSize, maxSize))
+                    {
+                        return entries;
+                    }
+
+                    ulong term =
+                        SqliteStorageCodec.DecodeUInt64(
+                            reader.GetFieldValue<byte[]>(1),
+                            "Entry term");
                     entries.Add(
                         SqliteStorageCodec.ParseEntry(
-                            reader.GetFieldValue<byte[]>(2),
+                            reader.GetFieldValue<byte[]>(3),
                             index,
                             term,
                             $"Entry {index}"));
+                    size += nextSize;
                     expected++;
                 }
 
@@ -191,9 +203,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                         $"Entry range [{lowInclusive}, {highExclusive}) ended at {expected}.");
                 }
 
-                return SqliteStorageCodec.LimitSize(
-                    entries,
-                    maxSize);
+                return entries;
             });
     }
 
