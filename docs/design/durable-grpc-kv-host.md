@@ -299,9 +299,7 @@ For one Ready:
 raftStorage.PersistReady
 send Ready.Messages in order
 if Ready.Snapshot:
-    applicationStore.Restore
-    repair HardState.Commit if required
-    raftStorage.AcknowledgeApplicationSnapshot
+    resolve the pending application snapshot
 apply every Ready.CommittedEntry transactionally
 complete or defer Ready.ReadStates until physicalApplied reaches their index
 AdvanceAsync
@@ -309,6 +307,17 @@ maybe create application snapshot and compact
 ```
 
 No application effect occurs before Raft persistence.
+
+### Pending application snapshot
+
+Live Ready processing and startup use the same completion sequence: restore
+the snapshot transactionally in the application store, require durable
+`HardState`, repair its commit upward only if needed, and acknowledge the
+exact snapshot index. A failed application restore leaves the marker in place
+and cannot complete a pending proposal. On startup, also verify that the
+durable term covers the snapshot and the retained last-entry term before any
+commit repair or acknowledgement. The live path has already validated those
+terms when persisting the Ready.
 
 ## Transport size boundary
 
@@ -329,11 +338,7 @@ The default maximum serialized Raft envelope is 64 MiB.
 ## Startup and recovery
 
 1. open `raft.db` and `application.db`, validating immutable local node ID;
-2. if Raft has a pending application snapshot:
-   - restore it transactionally;
-   - require trusted hard-state term;
-   - repair commit upward only when needed;
-   - acknowledge the exact snapshot;
+2. resolve any [pending application snapshot](#pending-application-snapshot);
 3. read the retained Raft snapshot;
 4. when application physical-applied is below that snapshot index, restore the
    retained snapshot transactionally even if it has no pending marker;

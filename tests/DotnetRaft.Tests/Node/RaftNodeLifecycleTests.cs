@@ -54,6 +54,37 @@ public sealed class RaftNodeLifecycleTests
                 .AsTask());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AlreadyCanceledRequestsStillReportAnUnavailableNode(bool asyncStorageWrites)
+    {
+        var token = new CancellationToken(canceled: true);
+        (RaftNode stopped, _) = RestartNode(asyncStorageWrites: asyncStorageWrites);
+        await stopped.StopAsync().AsTask().WaitAsync(DeadlockGuardTimeout);
+        foreach (var (name, queue) in RequestPaths(stopped))
+        {
+            Task task = queue(token);
+            Assert.True(task.IsFaulted, name);
+            await Assert.ThrowsAsync<RaftNodeStoppedException>(async () => await task);
+        }
+
+        var trace = new CallbackTraceSink();
+        (RaftNode faulted, _) = RestartNode(traceSink: trace, asyncStorageWrites: asyncStorageWrites);
+        trace.OnTrace = _ => throw new InvalidOperationException("injected owner fault");
+        var trigger = await Assert.ThrowsAsync<RaftTracingException>(async () =>
+            await faulted.CampaignAsync().AsTask().WaitAsync(DeadlockGuardTimeout));
+        await Assert.ThrowsAsync<RaftNodeFaultedException>(async () =>
+            await faulted.Completion.WaitAsync(DeadlockGuardTimeout));
+        foreach (var (name, queue) in RequestPaths(faulted))
+        {
+            Task task = queue(token);
+            Assert.True(task.IsFaulted, name);
+            var failure = await Assert.ThrowsAsync<RaftNodeFaultedException>(async () => await task);
+            Assert.Same(trigger, failure.InnerException);
+        }
+    }
+
     [Fact]
     public async Task StopTransitionWinsOverLaterCancellation()
     {
@@ -271,12 +302,15 @@ public sealed class RaftNodeLifecycleTests
                 .AsTask());
     }
 
-    [Fact]
-    public async Task SameNodeCallbackReentryIsRejected()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SameNodeCallbackReentryIsRejected(bool asyncStorageWrites)
     {
         var trace = new CallbackTraceSink();
         (RaftNode node, _) = RestartNode(
-            traceSink: trace);
+            traceSink: trace,
+            asyncStorageWrites: asyncStorageWrites);
         var rejections = new List<Exception>();
         trace.OnTrace = traceEvent =>
         {
@@ -304,45 +338,17 @@ public sealed class RaftNodeLifecycleTests
                 rejections.Add(exception);
             }
 
-            try
+            var token = new CancellationToken(canceled: true);
+            foreach (var (_, queue) in RequestPaths(node))
             {
-                _ = node.WaitForReadyAsync().AsTask();
-            }
-            catch (Exception exception)
-            {
-                rejections.Add(exception);
-            }
-
-            try
-            {
-                _ = node.AdvanceAsync().AsTask();
-            }
-            catch (Exception exception)
-            {
-                rejections.Add(exception);
-            }
-
-            try
-            {
-                _ = node.ProposeAsync(
-                        "reentrant"u8.ToArray())
-                    .AsTask();
-            }
-            catch (Exception exception)
-            {
-                rejections.Add(exception);
-            }
-
-            try
-            {
-                node.GetStatusAsync()
-                    .AsTask()
-                    .GetAwaiter()
-                    .GetResult();
-            }
-            catch (Exception exception)
-            {
-                rejections.Add(exception);
+                try
+                {
+                    _ = queue(token);
+                }
+                catch (Exception exception)
+                {
+                    rejections.Add(exception);
+                }
             }
 
             try
@@ -367,7 +373,7 @@ public sealed class RaftNodeLifecycleTests
         {
             await node.CampaignAsync();
 
-            Assert.Equal(8, rejections.Count);
+            Assert.Equal(9, rejections.Count);
             Assert.All(
                 rejections,
                 rejection =>

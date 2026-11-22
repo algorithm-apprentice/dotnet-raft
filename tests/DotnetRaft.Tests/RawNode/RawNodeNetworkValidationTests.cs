@@ -159,6 +159,42 @@ public sealed class RawNodeNetworkValidationTests
             node.Core.TakeMessages());
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    public void InvalidReadPositionDoesNotConfirmOrFaultAPendingRead(int invalidPosition)
+    {
+        MemoryStorage storage = CreateStorage(voters: [1, 2]);
+        var node = CreateNode(storage);
+        BecomeTwoVoterLeader(node, storage);
+        node.ReadIndex("read"u8);
+        Ready request = node.Ready();
+        Message heartbeat = Assert.Single(request.Messages, message => message.Type == MessageType.MsgHeartbeat);
+        Assert.Empty(request.ReadStates);
+        PersistAndAdvance(node, storage, request);
+        var invalid = new byte[sizeof(ulong)];
+        invalid[0] = (byte)invalidPosition;
+        var response = new Message
+        {
+            Type = MessageType.MsgHeartbeatResp,
+            From = 2,
+            To = 1,
+            Term = heartbeat.Term,
+            Context = ByteString.CopyFrom(invalid),
+        };
+
+        BasicStatus before = node.GetBasicStatus();
+        Assert.Throws<ArgumentException>("context", () => node.Step(response));
+        Assert.Equal(before, node.GetBasicStatus());
+        Assert.False(node.HasReady());
+
+        response.Context = heartbeat.Context;
+        node.Step(response);
+        ReadState read = Assert.Single(node.Ready().ReadStates);
+        Assert.Equal(ByteString.CopyFromUtf8("read"), read.RequestContext);
+        Assert.Equal(before.Commit, read.Index);
+    }
+
     [Fact]
     public void LowerTermLeaderResponsesRemainIgnorable()
     {

@@ -100,11 +100,12 @@ public sealed class ReadOnlyTrackerTests
     }
 
     [Fact]
-    public void EmptyAcknowledgementIsIgnored()
+    public void EmptyAcknowledgementIsValidAndIgnored()
     {
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         tracker.AddRequest(10, Request("first"));
 
+        tracker.ValidateAcknowledgementContext(ByteString.Empty);
         tracker.ReceiveAcknowledgement(1, ByteString.Empty);
 
         Assert.Empty(tracker.Advance(Voters(1)));
@@ -122,24 +123,31 @@ public sealed class ReadOnlyTrackerTests
         tracker.AddRequest(10, Request("first"));
         ByteString malformed = ByteString.CopyFrom(new byte[length]);
 
-        Assert.Throws<RaftInvariantException>(
+        ArgumentException input = Assert.Throws<ArgumentException>("context",
+            () => tracker.ValidateAcknowledgementContext(malformed));
+        RaftInvariantException invariant = Assert.Throws<RaftInvariantException>(
             () => tracker.ReceiveAcknowledgement(1, malformed));
 
+        Assert.StartsWith(invariant.Message, input.Message, StringComparison.Ordinal);
         Assert.Equal(1, tracker.PendingCount);
         Assert.Equal(0UL, tracker.ConfirmedCount);
     }
 
-    [Fact]
-    public void ZeroAndFutureAcknowledgementPositionsAreRejected()
+    [Theory]
+    [InlineData(0UL)]
+    [InlineData(2UL)]
+    public void ZeroAndFutureAcknowledgementPositionsAreRejected(ulong position)
     {
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         tracker.AddRequest(10, Request("first"));
 
-        Assert.Throws<RaftInvariantException>(
-            () => tracker.ReceiveAcknowledgement(1, Encode(0)));
-        Assert.Throws<RaftInvariantException>(
-            () => tracker.ReceiveAcknowledgement(1, Encode(2)));
+        ByteString invalid = Encode(position);
+        ArgumentException input = Assert.Throws<ArgumentException>("context",
+            () => tracker.ValidateAcknowledgementContext(invalid));
+        RaftInvariantException invariant = Assert.Throws<RaftInvariantException>(
+            () => tracker.ReceiveAcknowledgement(1, invalid));
 
+        Assert.StartsWith(invariant.Message, input.Message, StringComparison.Ordinal);
         Assert.Empty(tracker.Advance(Voters(1)));
         Assert.Equal(1, tracker.PendingCount);
         Assert.Equal(0UL, tracker.ConfirmedCount);
@@ -324,6 +332,8 @@ public sealed class ReadOnlyTrackerTests
             () => tracker.AddRequest(0, null!));
         Assert.Throws<ArgumentNullException>(
             () => tracker.ReceiveAcknowledgement(1, null!));
+        Assert.Throws<ArgumentNullException>("context",
+            () => tracker.ValidateAcknowledgementContext(null!));
         Assert.Throws<ArgumentNullException>(
             () => tracker.Advance(null!));
     }

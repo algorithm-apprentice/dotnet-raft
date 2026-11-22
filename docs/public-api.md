@@ -162,6 +162,8 @@ the consumer and shutdown loop.
 
 Cancellation prevents dispatch only while a request is waiting. Once the
 owner loop claims it, the operation runs exactly once and its result wins.
+On submission, an already stopping, stopped, or faulted node reports that
+state before honoring an already-canceled token.
 
 Stop unblocks every waiter. `Completion` succeeds after normal stop and
 faults after a terminal owner-loop failure. `TerminalStatus` is diagnostic

@@ -308,19 +308,11 @@ public sealed class RaftNode : IRaftNode
     public ValueTask<Ready> WaitForReadyAsync(
         CancellationToken cancellationToken = default)
     {
-        EnsureNotReentrant();
-        Exception? unavailable =
-            GetUnavailableException();
-        if (unavailable is not null)
+        if (!CanQueueRequest(cancellationToken, out Exception? unavailable))
         {
-            return ValueTask.FromException<Ready>(
-                unavailable);
-        }
-
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return ValueTask.FromCanceled<Ready>(
-                cancellationToken);
+            return unavailable is null
+                ? ValueTask.FromCanceled<Ready>(cancellationToken)
+                : ValueTask.FromException<Ready>(unavailable);
         }
 
         var request = new ReadyRequest(
@@ -341,19 +333,11 @@ public sealed class RaftNode : IRaftNode
                 cancellationToken);
         }
 
-        EnsureNotReentrant();
-        Exception? unavailable =
-            GetUnavailableException();
-        if (unavailable is not null)
+        if (!CanQueueRequest(cancellationToken, out Exception? unavailable))
         {
-            return ValueTask.FromException(
-                unavailable);
-        }
-
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return ValueTask.FromCanceled(
-                cancellationToken);
+            return unavailable is null
+                ? ValueTask.FromCanceled(cancellationToken)
+                : ValueTask.FromException(unavailable);
         }
 
         var request = new AdvanceRequest(
@@ -688,8 +672,7 @@ public sealed class RaftNode : IRaftNode
         {
             if (_state != Running)
             {
-                failure =
-                    GetUnavailableExceptionLocked();
+                failure = CreateUnavailableException(_state);
             }
             else if (!request.IsWaiting)
             {
@@ -940,19 +923,11 @@ public sealed class RaftNode : IRaftNode
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        EnsureNotReentrant();
-        Exception? unavailable =
-            GetUnavailableException();
-        if (unavailable is not null)
+        if (!CanQueueRequest(cancellationToken, out Exception? unavailable))
         {
-            return ValueTask.FromException(
-                unavailable);
-        }
-
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return ValueTask.FromCanceled(
-                cancellationToken);
+            return unavailable is null
+                ? ValueTask.FromCanceled(cancellationToken)
+                : ValueTask.FromException(unavailable);
         }
 
         var request = new OperationRequest(
@@ -968,19 +943,11 @@ public sealed class RaftNode : IRaftNode
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        EnsureNotReentrant();
-        Exception? unavailable =
-            GetUnavailableException();
-        if (unavailable is not null)
+        if (!CanQueueRequest(cancellationToken, out Exception? unavailable))
         {
-            return ValueTask.FromException<T>(
-                unavailable);
-        }
-
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return ValueTask.FromCanceled<T>(
-                cancellationToken);
+            return unavailable is null
+                ? ValueTask.FromCanceled<T>(cancellationToken)
+                : ValueTask.FromException<T>(unavailable);
         }
 
         var request = new OperationRequest<T>(
@@ -996,19 +963,11 @@ public sealed class RaftNode : IRaftNode
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(operation);
-        EnsureNotReentrant();
-        Exception? unavailable =
-            GetUnavailableException();
-        if (unavailable is not null)
+        if (!CanQueueRequest(cancellationToken, out Exception? unavailable))
         {
-            return ValueTask.FromException(
-                unavailable);
-        }
-
-        if (cancellationToken.IsCancellationRequested)
-        {
-            return ValueTask.FromCanceled(
-                cancellationToken);
+            return unavailable is null
+                ? ValueTask.FromCanceled(cancellationToken)
+                : ValueTask.FromException(unavailable);
         }
 
         var request = new ProposalRequest(
@@ -1028,8 +987,7 @@ public sealed class RaftNode : IRaftNode
         {
             if (_state != Running)
             {
-                failure =
-                    GetUnavailableExceptionLocked();
+                failure = CreateUnavailableException(_state);
             }
             else if (request.IsWaiting)
             {
@@ -1102,23 +1060,24 @@ public sealed class RaftNode : IRaftNode
         _wake.Writer.TryWrite(true);
     }
 
+    private bool CanQueueRequest(CancellationToken cancellationToken, out Exception? unavailable)
+    {
+        EnsureNotReentrant();
+        // Node unavailability takes precedence over pre-cancellation. The
+        // enqueue and owner-claim paths still arbitrate later races.
+        unavailable = GetUnavailableException();
+        return unavailable is null && !cancellationToken.IsCancellationRequested;
+    }
+
     private Exception? GetUnavailableException()
     {
         int state = Volatile.Read(ref _state);
-        return state switch
-        {
-            Running => null,
-            Faulted => new RaftNodeFaultedException(
-                _terminalCause
-                ?? new InvalidOperationException(
-                    "The Raft node faulted.")),
-            _ => new RaftNodeStoppedException(),
-        };
+        return state == Running ? null : CreateUnavailableException(state);
     }
 
-    private Exception GetUnavailableExceptionLocked()
+    private Exception CreateUnavailableException(int state)
     {
-        return _state == Faulted
+        return state == Faulted
             ? new RaftNodeFaultedException(
                 _terminalCause
                 ?? new InvalidOperationException(

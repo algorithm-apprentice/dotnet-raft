@@ -5,6 +5,8 @@ using DotnetRaft.Examples.KvCluster;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage.Sqlite;
 
+using Google.Protobuf;
+
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -578,6 +580,90 @@ public sealed class KvClusterIntegrationTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IncomingSnapshotIsAcknowledgedOnlyAfterSuccessfulApplicationRestore(bool validPayload)
+    {
+        const ulong snapshotIndex = 5;
+        const ulong snapshotTerm = 2;
+        using var directory = new TemporaryNodeDirectory();
+        using var donorDirectory = new TemporaryNodeDirectory();
+        using var donor = new SqliteKeyValueStateMachine(donorDirectory.ApplicationPath, nodeId: 2);
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var membership = new FixedMembershipConfiguration([1UL, 2UL, 3UL]);
+        for (ulong index = 1; index <= 3; index++)
+        {
+            donor.ApplyConfiguration(index, membership.ExpectedConfState(index));
+        }
+
+        donor.AdvanceNoOp(4);
+        var command = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
+        donor.ApplyCommand(snapshotIndex, ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)));
+        var transport = new GatedSnapshotTransport();
+        var proposals = new PendingProposalRegistry();
+        NodeHarness target = CreateNode(1, new InMemoryNetwork(), directory: directory,
+            transportOverride: transport, proposalRegistry: proposals);
+        using var pending = proposals.Register(command);
+        try
+        {
+            await target.Host.StartAsync(guard.Token);
+            await target.Host.GetStatusAsync(guard.Token);
+            await target.Host.ReceiveAsync(new Message
+            {
+                Type = MessageType.MsgSnap,
+                From = 2,
+                To = 1,
+                Term = snapshotTerm,
+                Snapshot = new Snapshot
+                {
+                    Metadata = new SnapshotMetadata
+                    {
+                        Index = snapshotIndex,
+                        Term = snapshotTerm,
+                        ConfState = donor.ConfState,
+                    },
+                    Data = validPayload ? donor.CreateSnapshotData() : ByteString.CopyFromUtf8("not JSON"),
+                },
+            }, guard.Token);
+
+            Message response = await transport.Entered.WaitAsync(guard.Token);
+            Assert.Equal(MessageType.MsgAppResp, response.Type);
+            Assert.Equal(2UL, response.To);
+            Assert.Equal(snapshotIndex, response.Index);
+            Assert.Equal(snapshotIndex, target.Storage.GetPendingApplicationSnapshot()?.Metadata.Index);
+            Assert.Equal(snapshotIndex, target.Storage.GetHardState()?.Commit);
+            Assert.Equal(3UL, target.State.PhysicalApplied);
+            Assert.False(pending.Task.IsCompleted);
+
+            transport.Release();
+            if (validPayload)
+            {
+                KvApplyResult result = await pending.Task.WaitAsync(guard.Token);
+                Assert.True(result.Duplicate);
+                Assert.False(result.Conflict);
+                Assert.Equal(snapshotIndex, result.ResultIndex);
+                Assert.Null(target.Storage.GetPendingApplicationSnapshot());
+                Assert.Equal(snapshotIndex, target.State.PhysicalApplied);
+                Assert.Equal("blue", target.State.ReadLocal("color").Value);
+            }
+            else
+            {
+                await Assert.ThrowsAsync<InvalidDataException>(async () =>
+                    await target.Host.ExecuteTask!.WaitAsync(guard.Token));
+                Assert.True(target.Lifetime.ApplicationStopping.IsCancellationRequested);
+                Assert.Equal(snapshotIndex, target.Storage.GetPendingApplicationSnapshot()?.Metadata.Index);
+                Assert.Equal(3UL, target.State.PhysicalApplied);
+                Assert.False(pending.Task.IsCompleted);
+            }
+        }
+        finally
+        {
+            transport.Release();
+            await StopAndDisposeNodesAsync([target], disposeDirectories: false);
+        }
+    }
+
     private static async Task StartAndElectAsync(InMemoryNetwork network, NodeHarness[] nodes)
     {
         foreach (NodeHarness node in nodes)
@@ -603,7 +689,9 @@ public sealed class KvClusterIntegrationTests
         TemporaryNodeDirectory? directory = null,
         int maxTransportMessageBytes =
             64 * 1024 * 1024,
-        int snapshotThresholdEntries = 10)
+        int snapshotThresholdEntries = 10,
+        IRaftMessageTransport? transportOverride = null,
+        PendingProposalRegistry? proposalRegistry = null)
     {
         TemporaryNodeDirectory actualDirectory =
             directory
@@ -628,11 +716,11 @@ public sealed class KvClusterIntegrationTests
                 actualDirectory.ApplicationPath,
                 id);
         var proposals =
-            new PendingProposalRegistry();
+            proposalRegistry ?? new PendingProposalRegistry();
         var reads = new PendingReadRegistry();
         var ticks = new ManualTickSource();
-        InMemoryTransport transport =
-            network.CreateTransport(id);
+        IRaftMessageTransport transport =
+            transportOverride ?? network.CreateTransport(id);
         var lifetime =
             new TestApplicationLifetime();
         var host = new RaftClusterHost(
@@ -735,7 +823,7 @@ public sealed class KvClusterIntegrationTests
     private sealed record NodeHarness(
     RaftClusterHost Host,
     SqliteKeyValueStateMachine State,
-    InMemoryTransport Transport,
+    IRaftMessageTransport Transport,
     ManualTickSource TickSource,
     TestApplicationLifetime Lifetime,
     SqliteStorage Storage,
@@ -841,6 +929,25 @@ public sealed class KvClusterIntegrationTests
         {
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class GatedSnapshotTransport : IRaftMessageTransport
+    {
+        private readonly TaskCompletionSource<Message> entered = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource released = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        internal Task<Message> Entered => entered.Task;
+
+        internal void Release() => released.TrySetResult();
+
+        public async ValueTask<RaftSendResult> SendAsync(Message message, CancellationToken cancellationToken)
+        {
+            entered.TrySetResult(message.Clone());
+            await released.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return RaftSendResult.Delivered;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private sealed class FaultingTransport

@@ -24,7 +24,8 @@ internal static class RaftNodeTestSupport
         ulong maxCommittedSizePerReady = 0,
         ulong maxUncommittedEntriesSize = 0,
         IRaftTraceSink? traceSink = null,
-        IRaftLogger? logger = null)
+        IRaftLogger? logger = null,
+        bool asyncStorageWrites = false)
     {
         MemoryStorage storage = CreateStorage(
             voters ?? [1UL],
@@ -36,6 +37,7 @@ internal static class RaftNodeTestSupport
             HeartbeatTick = 1,
             Storage = storage,
             Applied = 2,
+            AsyncStorageWrites = asyncStorageWrites,
             MaxSizePerMessage = ulong.MaxValue,
             MaxCommittedSizePerReady =
                 maxCommittedSizePerReady,
@@ -81,6 +83,18 @@ internal static class RaftNodeTestSupport
         return await node.WaitForReadyAsync()
             .AsTask()
             .WaitAsync(DeadlockGuardTimeout);
+    }
+
+    internal static (string Name, Func<CancellationToken, Task> Queue)[] RequestPaths(RaftNode node)
+    {
+        return
+        [
+            (nameof(node.CampaignAsync), token => node.CampaignAsync(token).AsTask()),
+            (nameof(node.GetStatusAsync), token => node.GetStatusAsync(token).AsTask()),
+            (nameof(node.ProposeAsync), token => node.ProposeAsync("value"u8.ToArray(), token).AsTask()),
+            (nameof(node.WaitForReadyAsync), token => node.WaitForReadyAsync(token).AsTask()),
+            (nameof(node.AdvanceAsync), token => node.AdvanceAsync(token).AsTask()),
+        ];
     }
 
     internal static async Task PersistAndAdvanceAsync(

@@ -405,25 +405,8 @@ public sealed partial class RaftClusterHost
 
         if (ready.Snapshot is not null)
         {
-            stateMachine.Restore(
-                ready.Snapshot.Metadata.Index,
-                ready.Snapshot.Data,
-                ready.Snapshot.Metadata
-                    .ConfState);
-            HardState hardState =
-                storage.GetHardState()
-                ?? throw new InvalidDataException(
-                    "Persisted snapshot has no HardState.");
-            if (hardState.Commit
-                < ready.Snapshot.Metadata.Index)
-            {
-                hardState.Commit =
-                    ready.Snapshot.Metadata.Index;
-                storage.SetHardState(hardState);
-            }
-
-            storage.AcknowledgeApplicationSnapshot(
-                ready.Snapshot.Metadata.Index);
+            DurableHostRecovery.CompletePendingSnapshot(
+                storage, stateMachine, ready.Snapshot, recovering: false);
             CompletePendingProposalsFromDurableState();
         }
 

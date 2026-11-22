@@ -95,10 +95,11 @@ public static class DurableHostRecovery
                     "Pending Raft snapshot cannot restore a recreated application database.");
             }
 
-            RestoreAndAcknowledge(
+            CompletePendingSnapshot(
                 raftStorage,
                 application,
-                pending);
+                pending,
+                recovering: true);
             retained = raftStorage.GetSnapshot();
             hardState = raftStorage.GetHardState();
         }
@@ -210,41 +211,43 @@ public static class DurableHostRecovery
             Applied: applied);
     }
 
-    private static void RestoreAndAcknowledge(
+    internal static void CompletePendingSnapshot(
         SqliteStorage raftStorage,
         SqliteKeyValueStateMachine application,
-        Snapshot snapshot)
+        Snapshot snapshot,
+        bool recovering)
     {
+        SnapshotMetadata metadata = snapshot.Metadata;
         application.Restore(
-            snapshot.Metadata.Index,
+            metadata.Index,
             snapshot.Data,
-            snapshot.Metadata.ConfState);
+            metadata.ConfState);
         HardState hardState =
             raftStorage.GetHardState()
             ?? throw new InvalidDataException(
-                "Pending Raft snapshot has no durable HardState.");
-        ulong lastTerm =
-            raftStorage.GetTerm(
-                raftStorage.GetLastIndex());
-        ulong requiredTerm = Math.Max(
-            snapshot.Metadata.Term,
-            lastTerm);
-        if (hardState.Term < requiredTerm)
+                recovering
+                    ? "Pending Raft snapshot has no durable HardState."
+                    : "Persisted snapshot has no HardState.");
+        // PersistReady has already validated the live batch. Recovery must
+        // verify the retained terms before using the physical snapshot to
+        // repair commit; snapshot metadata cannot supply term or vote.
+        if (recovering)
         {
-            throw new InvalidDataException(
-                $"HardState term {hardState.Term} is below retained term {requiredTerm}.");
+            ulong lastTerm = raftStorage.GetTerm(raftStorage.GetLastIndex());
+            ulong requiredTerm = Math.Max(metadata.Term, lastTerm);
+            if (hardState.Term < requiredTerm)
+            {
+                throw new InvalidDataException(
+                    $"HardState term {hardState.Term} is below retained term {requiredTerm}.");
+            }
         }
 
-        if (hardState.Commit
-            < snapshot.Metadata.Index)
+        if (hardState.Commit < metadata.Index)
         {
-            hardState.Commit =
-                snapshot.Metadata.Index;
-            raftStorage.SetHardState(
-                hardState);
+            hardState.Commit = metadata.Index;
+            raftStorage.SetHardState(hardState);
         }
 
-        raftStorage.AcknowledgeApplicationSnapshot(
-            snapshot.Metadata.Index);
+        raftStorage.AcknowledgeApplicationSnapshot(metadata.Index);
     }
 }

@@ -355,36 +355,23 @@ public sealed class RaftNodeCommandTests
         }
     }
 
-    [Fact]
-    public async Task PreCanceledRequestsNeverEnterAnyLane()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PreCanceledRequestsNeverEnterAnyLane(bool asyncStorageWrites)
     {
-        (RaftNode node, _) = RestartNode();
-        using var cancellation =
-            new CancellationTokenSource();
-        cancellation.Cancel();
+        (RaftNode node, _) = RestartNode(asyncStorageWrites: asyncStorageWrites);
+        var token = new CancellationToken(canceled: true);
         try
         {
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await node.CampaignAsync(
-                        cancellation.Token)
-                    .AsTask());
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await node.ProposeAsync(
-                        "value"u8.ToArray(),
-                        cancellation.Token)
-                    .AsTask());
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await node.WaitForReadyAsync(
-                        cancellation.Token)
-                    .AsTask());
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await node.AdvanceAsync(
-                        cancellation.Token)
-                    .AsTask());
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await node.GetStatusAsync(
-                        cancellation.Token)
-                    .AsTask());
+            foreach (var (name, queue) in RequestPaths(node))
+            {
+                Task task = queue(token);
+                Assert.True(task.IsCanceled, name);
+                var canceled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    async () => await task);
+                Assert.Equal(token, canceled.CancellationToken);
+            }
 
             Status status = await node.GetStatusAsync();
             Assert.Equal(
