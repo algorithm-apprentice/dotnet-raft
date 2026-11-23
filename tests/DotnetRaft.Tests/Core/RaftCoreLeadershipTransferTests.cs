@@ -222,7 +222,7 @@ public sealed class RaftCoreLeadershipTransferTests
             term: 5).Core;
         EnterRole(core, role);
         SoftState before = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(Transfer(2));
 

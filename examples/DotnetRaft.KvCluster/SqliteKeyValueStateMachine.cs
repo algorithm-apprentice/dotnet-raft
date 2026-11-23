@@ -116,7 +116,7 @@ public sealed partial class SqliteKeyValueStateMachine
     public KvRequestResolution? ResolveRequest(
         KvCommand command)
     {
-        ByteString fingerprint =
+        KvCommandFingerprint fingerprint =
             DurableKvCommandCodec.Fingerprint(
                 command);
         KvApplyResult? applied =
@@ -132,7 +132,7 @@ public sealed partial class SqliteKeyValueStateMachine
 
     public KvApplyResult? ResolveAppliedRequest(
         Guid requestId,
-        ByteString expectedFingerprint)
+        KvCommandFingerprint expectedFingerprint)
     {
         ArgumentNullException.ThrowIfNull(
             expectedFingerprint);
@@ -280,7 +280,7 @@ public sealed partial class SqliteKeyValueStateMachine
         }
 
         return new RequestRecord(
-            ByteString.CopyFrom(
+            KvCommandFingerprint.Read(
                 reader.GetFieldValue<byte[]>(0)),
             DecodeUInt64(
                 reader.GetFieldValue<byte[]>(1),
@@ -289,7 +289,7 @@ public sealed partial class SqliteKeyValueStateMachine
 
     private void InsertRequest(
         Guid requestId,
-        ByteString fingerprint,
+        KvCommandFingerprint fingerprint,
         ulong resultIndex,
         SqliteTransaction transaction)
     {
@@ -514,7 +514,7 @@ public sealed partial class SqliteKeyValueStateMachine
     }
 
     private sealed record RequestRecord(
-        ByteString Fingerprint,
+        KvCommandFingerprint Fingerprint,
         ulong ResultIndex);
 
 }

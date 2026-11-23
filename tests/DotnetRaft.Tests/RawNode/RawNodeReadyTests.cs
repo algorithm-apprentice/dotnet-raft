@@ -96,9 +96,7 @@ public sealed class RawNodeReadyTests
         var node = CreateNode(storage);
         node.Campaign();
         Ready election = node.Ready();
-        HardState persistedState =
-            election.HardState!.Clone();
-        election.HardState.Term = 99;
+        RaftHardState persistedState = Assert.IsType<RaftHardState>(election.HardState);
         storage.SetHardState(persistedState);
         node.Advance(election);
         Ready ready = node.Ready();
@@ -264,7 +262,7 @@ public sealed class RawNodeReadyTests
         }
 
         storage.Append([change]);
-        storage.SetHardState(new HardState { Term = 1, Commit = 1 });
+        storage.SetHardState(new RaftHardState { Term = 1, Commit = 1 });
         var node = CreateNode(storage, asyncStorageWrites: asyncStorageWrites);
         Ready earlier = node.Ready();
         Message? apply = asyncStorageWrites

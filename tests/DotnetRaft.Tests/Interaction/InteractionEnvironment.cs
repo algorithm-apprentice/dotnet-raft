@@ -182,23 +182,22 @@ internal sealed class InteractionEnvironment
         // Keep only what the mock storage and application published. A new
         // instance has no in-flight storage work, responses, or unstable log.
         Snapshot application = node.GetApplicationSnapshot();
-        HardState? persisted = node.Storage.GetInitialState().HardState;
+        RaftHardState? persisted = node.Storage.GetInitialState().HardState;
         ulong commit = persisted?.Commit ?? node.Storage.GetFirstIndex() - 1;
         if (commit < application.Metadata.Index)
         {
             // Independent apply can publish a stable, committed entry
             // before a commit-only append request runs. Repair only commit,
             // and only from the retained physical application boundary.
-            if (persisted is null
-                || persisted.Term < application.Metadata.Term
+            if (persisted is not { } state
+                || state.Term < application.Metadata.Term
                 || application.Metadata.Index > node.Storage.GetLastIndex()
                 || node.Storage.GetTerm(application.Metadata.Index) != application.Metadata.Term)
             {
                 throw new InvalidOperationException("The recovered application is not covered by durable Raft state.");
             }
 
-            persisted.Commit = application.Metadata.Index;
-            node.Storage.SetHardState(persisted);
+            node.Storage.SetHardState(state with { Commit = application.Metadata.Index });
         }
 
         _nodes[nodeIndex] = CreateNode(id, node.Storage, node.Options, application);
@@ -329,10 +328,10 @@ internal sealed class InteractionEnvironment
         }
 
         node.Storage.Append(ready.Entries);
-        if (ready.HardState is not null)
+        if (ready.HardState is { } hardState)
         {
             node.Storage.SetHardState(
-                ready.HardState);
+                hardState);
         }
 
         if (applicationSnapshot is not null)
@@ -404,7 +403,7 @@ internal sealed class InteractionEnvironment
             }
 
             node.Storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = request.Term,
                     Vote = request.Vote,

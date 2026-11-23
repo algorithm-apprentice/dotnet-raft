@@ -31,7 +31,7 @@ public sealed class RawNodeBootstrapTests
 
         Ready ready = node.Ready();
         Assert.Equal(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 2,
@@ -247,7 +247,7 @@ public sealed class RawNodeBootstrapTests
     public void ExistingHardStateFaultsBootstrapFacade()
     {
         MemoryStorage storage = CreateEmptyStorage();
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
         });
@@ -320,7 +320,7 @@ public sealed class RawNodeBootstrapTests
             EntryAt(2, 1, "two"),
             EntryAt(3, 1, "three"),
         ]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Vote = 1,

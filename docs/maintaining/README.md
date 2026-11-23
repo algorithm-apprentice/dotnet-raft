@@ -22,6 +22,8 @@ The [readability roadmap](readability-roadmap.md) records the scope and
 verification gates for organizing the core and tracing a write.
 The [input boundary design](input-boundary-design.md) covers parsing peer
 input once and keeping diagnostic snapshots out of node scheduling.
+The [serialization-boundary audit](serialization-boundary-audit.md) tracks
+which domain paths still depend on generated messages.
 
 ## Verify and package
 

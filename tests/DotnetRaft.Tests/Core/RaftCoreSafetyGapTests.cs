@@ -238,7 +238,7 @@ public sealed class RaftCoreSafetyGapTests
                 },
             });
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 2,

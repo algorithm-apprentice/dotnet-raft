@@ -24,7 +24,7 @@ public sealed class RaftCoreUncommittedQuotaTests
         core.TakeMessagesAfterAppend();
         Assert.Equal(10UL, core.UncommittedSize);
         ulong lastIndex = core.Log.LastIndex;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         Assert.Throws<ProposalDroppedException>(
             () => core.Step(Proposal("x")));

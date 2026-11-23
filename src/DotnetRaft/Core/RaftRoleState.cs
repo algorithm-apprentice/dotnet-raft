@@ -1,5 +1,3 @@
-using DotnetRaft.Protocol;
-
 namespace DotnetRaft.Core;
 
 internal sealed class RaftRoleState
@@ -86,13 +84,5 @@ internal sealed class RaftRoleState
         return new SoftState(LeaderId, Role);
     }
 
-    internal HardState GetHardState(ulong commit)
-    {
-        return new HardState
-        {
-            Term = Term,
-            Vote = Vote,
-            Commit = commit,
-        };
-    }
+    internal RaftHardState GetHardState(ulong commit) => new(Term, Vote, commit);
 }

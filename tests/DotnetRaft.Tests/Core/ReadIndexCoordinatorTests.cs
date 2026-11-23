@@ -1,3 +1,5 @@
+using System.Text;
+
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 using DotnetRaft.Quorum;
@@ -44,9 +46,7 @@ public sealed class ReadIndexCoordinatorTests
         Assert.Equal(gated, released);
         Assert.Equal(
             "done",
-            Assert.Single(
-                coordinator.TakeReadStates())
-                .RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(Assert.Single(coordinator.TakeReadStates()).RequestContext.Span));
     }
 
     [Fact]
@@ -129,7 +129,7 @@ public sealed class ReadIndexCoordinatorTests
         Assert.Equal(9UL, state.Index);
         Assert.Equal(
             "local",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
 
         Message remote = ReadRequest(
             from: 2,
@@ -180,9 +180,7 @@ public sealed class ReadIndexCoordinatorTests
 
         Assert.Equal(
             "response",
-            Assert.Single(
-                coordinator.TakeReadStates())
-                .RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(Assert.Single(coordinator.TakeReadStates()).RequestContext.Span));
     }
 
     [Fact]

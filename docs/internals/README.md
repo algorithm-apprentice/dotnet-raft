@@ -19,7 +19,7 @@ step. It does not run the host's storage workers. Stable log **reads** via
 
 | Concern | Code owner | Reason for the boundary |
 |---|---|---|
-| Message and entry representation | [Messages and records](messages.md), backed by [`raft.proto`](../../src/DotnetRaft/Protocol/raft.proto) | One protobuf model supplies optional fields, cloning, and the encoded sizes used by log and queue limits. The example's transport wraps message bytes; it does not define a competing Raft schema. |
+| Message and entry representation | [Messages and records](messages.md), backed by [`raft.proto`](../../src/DotnetRaft/Protocol/raft.proto) | The wire schema stays fixed. Domain values are being separated from it as tracked in the [serialization-boundary audit](../maintaining/serialization-boundary-audit.md). |
 | Roles, log matching, commitment, membership | [`RaftCore`](../../src/DotnetRaft/Core/RaftCore.cs) and [consensus internals](consensus.md) | The core owns transitions that touch multiple components. It chooses effects without doing network or disk I/O itself, apart from stable reads. |
 | Ready and acknowledgement | [`RawNode`](../../src/DotnetRaft/RawNode.cs), with the concurrent [`RaftNode`](../../src/DotnetRaft/RaftNode.cs) facade; see [node internals](node.md) | One implementation binds persistence and application completions to the work delivered. Concurrency cannot create a separate consensus or persistence path. |
 | Stable view | [`IStorage`](../../src/DotnetRaft/Storage/IStorage.cs), [`MemoryStorage`](../../src/DotnetRaft/Storage/MemoryStorage.cs), optional [`SqliteStorage`](../../src/DotnetRaft.Sqlite/SqliteStorage.cs) | The backend owns publication, read consistency, and durability. Neither storage implementation decides what the quorum committed. |

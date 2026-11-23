@@ -104,7 +104,7 @@ public sealed class SqliteStorageContractTests
         IStorage storage;
         if (sqlite is not null)
         {
-            sqlite.SetHardState(new HardState { Term = 1 });
+            sqlite.SetHardState(new RaftHardState { Term = 1 });
             sqlite.Append(entries);
             storage = sqlite;
         }
@@ -132,7 +132,7 @@ public sealed class SqliteStorageContractTests
                 directory,
                 Entries((3, 3), (4, 4), (5, 5)));
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 6,
             });
@@ -171,7 +171,7 @@ public sealed class SqliteStorageContractTests
         Entry[] replacement =
             Entries((2, 3), (3, 3), (4, 8));
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 8,
             });
@@ -259,7 +259,7 @@ public sealed class SqliteStorageContractTests
         var confState = new ConfState();
         confState.Voters.Add([1, 2, 3]);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 5,
                 Commit = 4,
@@ -287,7 +287,7 @@ public sealed class SqliteStorageContractTests
             incomingConf,
             "remote");
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 6,
                 Commit = 4,
@@ -311,7 +311,7 @@ public sealed class SqliteStorageContractTests
             6UL,
             storage.GetHardState()?.Term);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 6,
                 Vote = 4,
@@ -350,14 +350,14 @@ public sealed class SqliteStorageContractTests
                 .ConfState.Voters);
 
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 3,
             });
         storage.Append(
             Entries((1, 1), (2, 1), (3, 2)));
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 3,
                 Commit = 3,
@@ -403,7 +403,7 @@ public sealed class SqliteStorageContractTests
         using SqliteStorage storage =
             CreateStorage(directory);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 2,
             });
@@ -418,13 +418,13 @@ public sealed class SqliteStorageContractTests
                 .AcknowledgeApplicationSnapshot(4));
         Assert.Throws<InvalidOperationException>(
             () => storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Commit = 3,
                 }));
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 2,
                 Vote = 1,
@@ -446,22 +446,13 @@ public sealed class SqliteStorageContractTests
             CreateDirectory();
         using SqliteStorage storage =
             CreateStorage(directory);
-        var hardState = new HardState
-        {
-            Term = 2,
-            Vote = 1,
-        };
+        var hardState = new RaftHardState(Term: 2, Vote: 1, Commit: 0);
         storage.SetHardState(hardState);
-        hardState.Term = 9;
-
-        HardState first =
-            Assert.IsType<HardState>(
-                storage.GetHardState());
-        Assert.Equal(2UL, first.Term);
-        first.Term = 10;
-        Assert.Equal(
-            2UL,
-            storage.GetHardState()?.Term);
+        RaftHardState? first = storage.GetHardState();
+        var next = new RaftHardState(Term: 3, Vote: 0, Commit: 0);
+        storage.SetHardState(next);
+        Assert.Equal(hardState, first);
+        Assert.Equal(next, storage.GetHardState());
 
         Snapshot snapshot = storage.GetSnapshot();
         snapshot.Metadata.Index = 10;
@@ -495,7 +486,7 @@ public sealed class SqliteStorageContractTests
         ulong snapshotIndex =
             ulong.MaxValue - 3;
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 7,
             });
@@ -504,7 +495,7 @@ public sealed class SqliteStorageContractTests
                 snapshotIndex,
                 7));
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 7,
                 Commit = snapshotIndex,
@@ -512,7 +503,7 @@ public sealed class SqliteStorageContractTests
         storage.AcknowledgeApplicationSnapshot(
             snapshotIndex);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 9,
                 Commit = snapshotIndex,
@@ -549,7 +540,7 @@ public sealed class SqliteStorageContractTests
         using SqliteStorage storage =
             CreateStorage(directory);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 101,
             });
@@ -601,7 +592,7 @@ public sealed class SqliteStorageContractTests
 
         initial.AddRange(retained);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = retained.Max(
                     entry => entry.Term),

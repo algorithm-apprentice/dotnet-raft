@@ -9,7 +9,7 @@ public sealed class MemoryStorage : IStorage
 {
     private readonly object _gate = new();
     private readonly List<Entry> _entries = [new Entry()];
-    private HardState? _hardState;
+    private RaftHardState? _hardState;
     private Snapshot _snapshot = ProtocolDefaults.EnsureSnapshot(new Snapshot());
 
     public StorageState GetInitialState()
@@ -18,7 +18,7 @@ public sealed class MemoryStorage : IStorage
         {
             _snapshot = ProtocolDefaults.EnsureSnapshot(_snapshot);
             return new StorageState(
-                _hardState?.Clone(),
+                _hardState,
                 _snapshot.Metadata.ConfState.Clone());
         }
     }
@@ -120,14 +120,11 @@ public sealed class MemoryStorage : IStorage
         }
     }
 
-    public void SetHardState(HardState state)
+    public void SetHardState(RaftHardState state)
     {
-        ArgumentNullException.ThrowIfNull(state);
-        HardState storedState = state.Clone();
-
         lock (_gate)
         {
-            _hardState = storedState;
+            _hardState = state;
         }
     }
 

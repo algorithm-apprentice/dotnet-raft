@@ -92,7 +92,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                 }
 
                 return new StorageState(
-                    metadata.HardState?.Clone(),
+                    metadata.HardState,
                     metadata.Snapshot.Metadata
                         .ConfState.Clone());
             });
@@ -255,11 +255,11 @@ public sealed class SqliteStorage : IStorage, IDisposable
             () => _metadata.Snapshot.Clone());
     }
 
-    public HardState? GetHardState()
+    public RaftHardState? GetHardState()
     {
         return Execute(
             "read hard state",
-            () => _metadata.HardState?.Clone());
+            () => _metadata.HardState);
     }
 
     public Snapshot? GetPendingApplicationSnapshot()
@@ -290,8 +290,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
             SqliteStorageCodec
                 .CloneAndValidateEntries(
                     ready.Entries);
-        HardState? hardState =
-            ready.HardState?.Clone();
+        RaftHardState? hardState = ready.HardState;
         if (snapshot is null
             && entries.Count == 0
             && hardState is null)
@@ -316,7 +315,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
     {
         ArgumentNullException.ThrowIfNull(request);
         Message owned = request.Clone();
-        ValidateStorageAppend(owned);
+        RaftHardState? hardState = ValidateStorageAppend(owned);
         Snapshot? snapshot =
             owned.Snapshot is null
                 ? null
@@ -327,15 +326,6 @@ public sealed class SqliteStorage : IStorage, IDisposable
             SqliteStorageCodec
                 .CloneAndValidateEntries(
                     owned.Entries);
-        HardState? hardState =
-            owned.HasTerm
-                ? new HardState
-                {
-                    Term = owned.Term,
-                    Vote = owned.Vote,
-                    Commit = owned.Commit,
-                }
-                : null;
         ExecuteWrite(
             "persist storage append",
             metadata =>
@@ -369,10 +359,10 @@ public sealed class SqliteStorage : IStorage, IDisposable
                         $"Pending application snapshot index is {metadata.PendingSnapshotIndex.Value}, not {index}.");
                 }
 
-                if (metadata.HardState is null
-                    || metadata.HardState.Commit
+                if (metadata.HardState is not { } state
+                    || state.Commit
                         < index
-                    || metadata.HardState.Commit
+                    || state.Commit
                         > metadata.LastIndex)
                 {
                     throw new InvalidOperationException(
@@ -387,35 +377,33 @@ public sealed class SqliteStorage : IStorage, IDisposable
             allowPending: true);
     }
 
-    public void SetHardState(HardState state)
+    public void SetHardState(RaftHardState state)
     {
-        ArgumentNullException.ThrowIfNull(state);
-        HardState owned = state.Clone();
         ExecuteWrite(
             "set hard state",
             metadata =>
             {
                 ValidateHardStateTransition(
                     metadata.HardState,
-                    owned);
-                if (owned.Commit
+                    state);
+                if (state.Commit
                     > metadata.LastIndex)
                 {
                     throw new InvalidOperationException(
-                        $"HardState commit {owned.Commit} exceeds last index {metadata.LastIndex}.");
+                        $"HardState commit {state.Commit} exceeds last index {metadata.LastIndex}.");
                 }
 
                 if (metadata.PendingSnapshotIndex
                         is ulong pending
-                    && owned.Commit < pending)
+                    && state.Commit < pending)
                 {
                     throw new InvalidOperationException(
-                        $"HardState commit {owned.Commit} does not cover pending snapshot {pending}.");
+                        $"HardState commit {state.Commit} does not cover pending snapshot {pending}.");
                 }
 
                 return metadata with
                 {
-                    HardState = owned,
+                    HardState = state,
                 };
             },
             allowPending: true);
@@ -434,8 +422,8 @@ public sealed class SqliteStorage : IStorage, IDisposable
             metadata =>
             {
                 if (!IsBootstrapSnapshot(owned)
-                    && (metadata.HardState is null
-                        || metadata.HardState.Term
+                    && (metadata.HardState is not { } state
+                        || state.Term
                             < owned.Metadata.Term))
                 {
                     throw new InvalidOperationException(
@@ -446,12 +434,12 @@ public sealed class SqliteStorage : IStorage, IDisposable
                     ApplySnapshotCore(
                         metadata,
                         owned);
-                if (updated.HardState is not null
-                    && updated.HardState.Commit
+                if (updated.HardState is { } updatedState
+                    && updatedState.Commit
                         > updated.LastIndex)
                 {
                     throw new InvalidOperationException(
-                        $"HardState commit {updated.HardState.Commit} exceeds applied snapshot index {updated.LastIndex}.");
+                        $"HardState commit {updatedState.Commit} exceeds applied snapshot index {updated.LastIndex}.");
                 }
 
                 return updated;
@@ -965,7 +953,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
 
         string format = reader.GetString(0);
         long schemaVersion = reader.GetInt64(1);
-        HardState? hardState =
+        RaftHardState? hardState =
             reader.IsDBNull(2)
                 ? null
                 : SqliteStorageCodec
@@ -1110,7 +1098,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
         Metadata metadata,
         Snapshot? snapshot,
         List<Entry> entries,
-        HardState? hardState,
+        RaftHardState? hardState,
         bool requireNoPending,
         bool validateCommitBounds)
     {
@@ -1119,18 +1107,11 @@ public sealed class SqliteStorage : IStorage, IDisposable
             EnsureNoPending(metadata);
         }
 
-        Metadata result =
-            hardState is null
-                ? metadata
-                : metadata with
-                {
-                    HardState = hardState.Clone(),
-                };
-        if (hardState is not null)
+        Metadata result = metadata;
+        if (hardState is { } state)
         {
-            ValidateHardStateTransition(
-                metadata.HardState,
-                hardState);
+            ValidateHardStateTransition(metadata.HardState, state);
+            result = metadata with { HardState = state };
         }
         if (snapshot is not null)
         {
@@ -1153,15 +1134,15 @@ public sealed class SqliteStorage : IStorage, IDisposable
         }
 
         if (validateCommitBounds
-            && result.HardState is not null
-            && (result.HardState.Commit
+            && result.HardState is { } resultingState
+            && (resultingState.Commit
                     > result.LastIndex
-                || result.HardState.Commit
+                || resultingState.Commit
                     < result.Snapshot
                         .Metadata.Index))
         {
             throw new InvalidOperationException(
-                $"HardState commit {result.HardState.Commit} does not cover retained indexes [{result.Snapshot.Metadata.Index}, {result.LastIndex}].");
+                $"HardState commit {resultingState.Commit} does not cover retained indexes [{result.Snapshot.Metadata.Index}, {result.LastIndex}].");
         }
 
         return result;
@@ -1357,21 +1338,10 @@ public sealed class SqliteStorage : IStorage, IDisposable
         command.ExecuteNonQuery();
     }
 
-    private static void ValidateStorageAppend(
+    private static RaftHardState? ValidateStorageAppend(
         Message request)
     {
-        if (!request.HasType
-            || request.Type
-                != MessageType.MsgStorageAppend
-            || !request.HasTo
-            || request.To
-                != RaftLocalMessageTargets
-                    .AppendThread)
-        {
-            throw new ArgumentException(
-                "Message is not a local storage-append request.",
-                nameof(request));
-        }
+        RaftHardState? hardState = StorageAppendHardState.Read(request);
 
         if (!request.HasFrom
             || request.From == 0
@@ -1391,21 +1361,6 @@ public sealed class SqliteStorage : IStorage, IDisposable
         {
             throw new ArgumentException(
                 "Storage-append request contains forbidden fields.",
-                nameof(request));
-        }
-
-        bool anyHard =
-            request.HasTerm
-            || request.HasVote
-            || request.HasCommit;
-        bool allHard =
-            request.HasTerm
-            && request.HasVote
-            && request.HasCommit;
-        if (anyHard != allHard)
-        {
-            throw new ArgumentException(
-                "Storage-append hard-state fields must be all present or all absent.",
                 nameof(request));
         }
 
@@ -1433,7 +1388,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
             }
         }
 
-        if (!anyHard
+        if (hardState is null
             && request.Snapshot is null
             && request.Entries.Count == 0
             && request.Responses.Count == 0)
@@ -1442,6 +1397,8 @@ public sealed class SqliteStorage : IStorage, IDisposable
                 "Storage-append request contains no work.",
                 nameof(request));
         }
+
+        return hardState;
     }
 
     private void ExecuteWrite(
@@ -1498,7 +1455,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
                     ? """
                       UPDATE raft_metadata
                       SET
-                          hard_state = $hardState,
+                          hard_state = CASE WHEN $hardStateChanged THEN $hardState ELSE hard_state END,
                           snapshot = $snapshot,
                           compacted_index = $compacted,
                           last_index = $last,
@@ -1508,17 +1465,22 @@ public sealed class SqliteStorage : IStorage, IDisposable
                     : """
                       UPDATE raft_metadata
                       SET
-                          hard_state = $hardState,
+                          hard_state = CASE WHEN $hardStateChanged THEN $hardState ELSE hard_state END,
                           compacted_index = $compacted,
                           last_index = $last,
                           pending_snapshot_index = $pending
                       WHERE singleton = 1;
                       """,
                 CurrentTransaction);
+        // Keep the original protobuf bytes when no state value changed.
+        bool hardStateChanged = previous.HardState != metadata.HardState;
+        command.Parameters.AddWithValue("$hardStateChanged", hardStateChanged);
         AddNullableBlob(
             command,
             "$hardState",
-            metadata.HardState?.ToByteArray());
+            hardStateChanged && metadata.HardState is { } state
+                ? SqliteStorageCodec.EncodeHardState(state)
+                : null);
         if (snapshotChanged)
         {
             AddBlob(
@@ -1569,7 +1531,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
         ulong requiredTerm = Math.Max(
             metadata.Snapshot.Metadata.Term,
             lastTerm);
-        if (metadata.HardState is null)
+        if (metadata.HardState is not { } hardState)
         {
             if (requiredTerm != 0
                 || metadata.Snapshot.Metadata.Index
@@ -1583,35 +1545,35 @@ public sealed class SqliteStorage : IStorage, IDisposable
             return;
         }
 
-        if (metadata.HardState.Term
+        if (hardState.Term
             < requiredTerm)
         {
             throw new InvalidOperationException(
-                $"HardState term {metadata.HardState.Term} is below retained term {requiredTerm}.");
+                $"HardState term {hardState.Term} is below retained term {requiredTerm}.");
         }
 
-        if (metadata.HardState.Commit
+        if (hardState.Commit
             > metadata.LastIndex)
         {
             throw new InvalidOperationException(
-                $"HardState commit {metadata.HardState.Commit} exceeds last index {metadata.LastIndex}.");
+                $"HardState commit {hardState.Commit} exceeds last index {metadata.LastIndex}.");
         }
 
         if (metadata.PendingSnapshotIndex
                 is null
-            && metadata.HardState.Commit
+            && hardState.Commit
                 < metadata.Snapshot.Metadata.Index)
         {
             throw new InvalidOperationException(
-                $"HardState commit {metadata.HardState.Commit} does not cover snapshot index {metadata.Snapshot.Metadata.Index}.");
+                $"HardState commit {hardState.Commit} does not cover snapshot index {metadata.Snapshot.Metadata.Index}.");
         }
     }
 
     private static void ValidateHardStateTransition(
-        HardState? previous,
-        HardState next)
+        RaftHardState? priorState,
+        RaftHardState next)
     {
-        if (previous is null)
+        if (priorState is not { } previous)
         {
             return;
         }
@@ -1803,7 +1765,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
     }
 
     private sealed record Metadata(
-    HardState? HardState,
+    RaftHardState? HardState,
     Snapshot Snapshot,
     ulong CompactedIndex,
     ulong LastIndex,

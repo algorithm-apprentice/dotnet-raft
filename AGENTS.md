@@ -13,6 +13,16 @@
   request identity, and recovery across its two databases. The gRPC envelope
   carries the generated Raft message; it is not a second protocol model.
 
+## Keep serialization at the boundaries
+
+- Use ordinary C# domain values for consensus and application decisions.
+  Generated messages, field presence, and encoded size belong to transport,
+  storage, or host protocol adapters. Keep existing wire and on-disk formats
+  readable when a managed API changes.
+- Do not add a new domain dependency on a generated type. Existing dependencies
+  are listed in the [serialization-boundary audit](docs/maintaining/serialization-boundary-audit.md);
+  migrate one end-to-end path rather than adding a second implementation.
+
 ## Decompose by responsibility, then share identical rules
 
 - Make orchestration read as named steps at one abstraction level. Recursively

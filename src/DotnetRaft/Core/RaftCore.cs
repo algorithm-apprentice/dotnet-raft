@@ -80,8 +80,6 @@ internal sealed partial class RaftCore
                 "Storage returned a null configuration state.");
         }
 
-        HardState? persistedHardState =
-            storageState.HardState?.Clone();
         ConfState persistedConfState =
             storageState.ConfState.Clone();
 
@@ -101,9 +99,9 @@ internal sealed partial class RaftCore
             restored.Config,
             restored.Progress);
 
-        if (!IsEmpty(persistedHardState))
+        if (storageState.HardState is { } persisted && persisted != default)
         {
-            LoadHardState(persistedHardState!);
+            LoadHardState(persisted);
         }
 
         if (validated.Applied > 0)
@@ -178,7 +176,7 @@ internal sealed partial class RaftCore
     internal SoftState SoftState =>
         roleState.GetSoftState();
 
-    internal HardState HardState =>
+    internal RaftHardState HardState =>
         roleState.GetHardState(Log.Committed);
 
     internal bool HasMessages =>
@@ -471,14 +469,6 @@ internal sealed partial class RaftCore
         AfterApplicationAdvanced();
     }
 
-    private static bool IsEmpty(HardState? state)
-    {
-        return state is null
-            || (state.Term == 0
-                && state.Vote == 0
-                && state.Commit == 0);
-    }
-
     private static bool IsLeaderMessage(MessageType type)
     {
         return type is
@@ -737,7 +727,7 @@ internal sealed partial class RaftCore
         reads.Reset();
     }
 
-    private void LoadHardState(HardState state)
+    private void LoadHardState(RaftHardState state)
     {
         ulong commit = state.Commit;
         if (commit < Log.Committed || commit > Log.LastIndex)

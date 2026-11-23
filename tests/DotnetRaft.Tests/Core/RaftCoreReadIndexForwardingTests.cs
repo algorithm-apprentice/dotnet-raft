@@ -1,3 +1,5 @@
+using System.Text;
+
 using DotnetRaft.Core;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
@@ -139,7 +141,7 @@ public sealed class RaftCoreReadIndexForwardingTests
         Assert.Equal(7UL, state.Index);
         Assert.Equal(
             "response",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
     }
 
     [Theory]

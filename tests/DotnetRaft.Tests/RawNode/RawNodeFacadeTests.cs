@@ -28,7 +28,7 @@ public sealed class RawNodeFacadeTests
     {
         MemoryStorage storage = CreateStorage();
         storage.Append([EntryAt(1, 1)]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Vote = 1,
@@ -58,13 +58,13 @@ public sealed class RawNodeFacadeTests
         bool expected)
     {
         bool actual = DotnetRaft.RawNode.MustSync(
-            new HardState
+            new RaftHardState
             {
                 Term = term,
                 Vote = vote,
                 Commit = commit,
             },
-            new HardState
+            new RaftHardState
             {
                 Term = previousTerm,
                 Vote = previousVote,
@@ -80,8 +80,8 @@ public sealed class RawNodeFacadeTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(
             () => DotnetRaft.RawNode.MustSync(
-                new HardState(),
-                new HardState(),
+                default,
+                default,
                 -1));
     }
 
@@ -197,7 +197,7 @@ public sealed class RawNodeFacadeTests
         ulong sender)
     {
         MemoryStorage storage = CreateStorage(voters: [1, 2]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
         });
@@ -277,9 +277,7 @@ public sealed class RawNodeFacadeTests
         Ready ready = node.Ready();
         ReadState result = Assert.Single(ready.ReadStates);
         Assert.Equal(1UL, result.Index);
-        Assert.Equal(
-            ByteString.CopyFromUtf8("read"),
-            result.RequestContext);
+        Assert.True(result.RequestContext.Span.SequenceEqual("read"u8));
         node.Advance(ready);
         Assert.False(node.HasReady());
     }

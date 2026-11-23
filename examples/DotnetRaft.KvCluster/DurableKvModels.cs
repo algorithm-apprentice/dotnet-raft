@@ -1,5 +1,3 @@
-using Google.Protobuf;
-
 namespace DotnetRaft.Examples.KvCluster;
 
 public sealed record KeyValueReadResult(
@@ -21,7 +19,7 @@ public sealed record KvCommand(
 
 public sealed record KvApplyResult(
     Guid RequestId,
-    ByteString Fingerprint,
+    KvCommandFingerprint Fingerprint,
     ulong ResultIndex,
     ulong PhysicalApplied,
     bool Duplicate,
@@ -29,7 +27,7 @@ public sealed record KvApplyResult(
 {
     // Fingerprint always identifies the durable winner. A conflicting
     // attempt also implies that winner had already been recorded.
-    internal KvApplyResult ForRequest(ByteString expectedFingerprint)
+    internal KvApplyResult ForRequest(KvCommandFingerprint expectedFingerprint)
     {
         bool matches = Fingerprint.Equals(expectedFingerprint);
         return this with

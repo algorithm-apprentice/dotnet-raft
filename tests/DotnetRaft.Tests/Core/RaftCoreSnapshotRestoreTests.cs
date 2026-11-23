@@ -118,7 +118,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         Assert.Equal(2UL, response.Index);
 
         fixture.Storage.InitialState = new StorageState(
-            core.HardState.Clone(),
+            core.HardState,
             core.Tracker.ToConfState());
         var restarted = new RaftCore(
             new RaftConfig
@@ -165,7 +165,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         Assert.Equal(2UL, response.Index);
 
         fixture.Storage.InitialState = new StorageState(
-            core.HardState.Clone(),
+            core.HardState,
             core.Tracker.ToConfState());
         var restarted = new RaftCore(
             new RaftConfig
@@ -497,7 +497,7 @@ public sealed class RaftCoreSnapshotRestoreTests
         core.Log.AcceptUnstable();
         storage.LogStorage.ApplySnapshot(snapshot);
         storage.InitialState = new StorageState(
-            core.HardState.Clone(),
+            core.HardState,
             snapshot.Metadata.ConfState.Clone());
         core.Log.AcknowledgeSnapshot(snapshot.Metadata.Index);
 

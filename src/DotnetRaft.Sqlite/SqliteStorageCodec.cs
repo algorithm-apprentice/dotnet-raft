@@ -6,6 +6,8 @@ using DotnetRaft.Storage;
 
 using Google.Protobuf;
 
+using ProtocolHardState = DotnetRaft.Protocol.HardState;
+
 namespace DotnetRaft.Storage.Sqlite;
 
 internal static class SqliteStorageCodec
@@ -57,14 +59,14 @@ internal static class SqliteStorageCodec
         }
     }
 
-    internal static HardState ParseHardState(
+    internal static RaftHardState ParseHardState(
         byte[] payload,
         string description)
     {
         try
         {
-            return HardState.Parser.ParseFrom(
-                payload);
+            ProtocolHardState state = ProtocolHardState.Parser.ParseFrom(payload);
+            return new RaftHardState(state.Term, state.Vote, state.Commit);
         }
         catch (InvalidProtocolBufferException exception)
         {
@@ -72,6 +74,16 @@ internal static class SqliteStorageCodec
                 $"{description} is not a valid hard state.",
                 exception);
         }
+    }
+
+    internal static byte[] EncodeHardState(RaftHardState state)
+    {
+        return new ProtocolHardState
+        {
+            Term = state.Term,
+            Vote = state.Vote,
+            Commit = state.Commit,
+        }.ToByteArray();
     }
 
     internal static Entry ParseEntry(

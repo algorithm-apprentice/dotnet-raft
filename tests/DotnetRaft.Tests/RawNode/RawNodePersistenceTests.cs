@@ -19,7 +19,7 @@ public sealed class RawNodePersistenceTests
             EntryAt(1, 1),
             EntryAt(2, 1, "later"),
         ]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Vote = 1,
@@ -52,7 +52,7 @@ public sealed class RawNodePersistenceTests
             },
         });
         storage.Append([EntryAt(3, 1, "later")]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Commit = 3,
@@ -98,7 +98,7 @@ public sealed class RawNodePersistenceTests
             EntryAt(1, 1),
             EntryAt(2, 1, "applied"),
         ]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Vote = 1,
@@ -108,7 +108,7 @@ public sealed class RawNodePersistenceTests
         Assert.Throws<RaftInvariantException>(
             () => CreateNode(storage, applied: 2));
 
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Vote = 1,
@@ -130,7 +130,7 @@ public sealed class RawNodePersistenceTests
             EntryAt(3, 1, "c"),
         ];
         storage.Append(entries);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Commit = 3,
@@ -162,7 +162,7 @@ public sealed class RawNodePersistenceTests
             EntryAt(1, 1),
             EntryAt(2, 1),
         ]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Commit = 2,
@@ -193,7 +193,7 @@ public sealed class RawNodePersistenceTests
     public void SameTermSnapshotDoesNotSetMustSync()
     {
         MemoryStorage storage = CreateStorage(voters: [1, 2]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
         });

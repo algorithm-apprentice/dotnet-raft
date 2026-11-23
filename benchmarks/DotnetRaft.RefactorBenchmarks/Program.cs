@@ -401,7 +401,7 @@ static MemoryStorage CreateStorage(
             },
         });
     storage.SetHardState(
-        new HardState
+        new RaftHardState
         {
             Term = 1,
             Commit = 2,
@@ -419,9 +419,9 @@ static void Persist(
     }
 
     storage.Append(ready.Entries);
-    if (ready.HardState is not null)
+    if (ready.HardState is { } hardState)
     {
-        storage.SetHardState(ready.HardState);
+        storage.SetHardState(hardState);
     }
 }
 

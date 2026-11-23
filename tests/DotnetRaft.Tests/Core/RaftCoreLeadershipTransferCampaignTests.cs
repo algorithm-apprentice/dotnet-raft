@@ -54,7 +54,7 @@ public sealed class RaftCoreLeadershipTransferCampaignTests
         core.TakeMessages();
         core.TakeMessagesAfterAppend();
         SoftState softState = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(TimeoutNow(core, from: 2));
 

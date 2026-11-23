@@ -1,5 +1,3 @@
-using Google.Protobuf;
-
 namespace DotnetRaft.Examples.KvCluster;
 
 public sealed partial class RaftClusterHost
@@ -80,7 +78,7 @@ public sealed partial class RaftClusterHost
     {
         await WaitUntilReadyAsync(cancellationToken).ConfigureAwait(false);
         byte[] payload = DurableKvCommandCodec.Encode(command);
-        ByteString fingerprint = DurableKvCommandCodec.Fingerprint(payload);
+        KvCommandFingerprint fingerprint = DurableKvCommandCodec.Fingerprint(payload);
         KvApplyResult? existing = stateMachine.ResolveAppliedRequest(command.RequestId, fingerprint);
         if (existing is not null)
         {
@@ -109,7 +107,7 @@ public sealed partial class RaftClusterHost
 
     private async Task<ProposalResponse> WaitForApplicationAsync(
         KvCommand command,
-        ByteString fingerprint,
+        KvCommandFingerprint fingerprint,
         byte[] payload,
         PendingProposalRegistry.PendingProposalRegistration registration,
         CancellationToken cancellationToken)
@@ -130,7 +128,7 @@ public sealed partial class RaftClusterHost
 
     private void SubmitIfOwner(
         Guid requestId,
-        ByteString fingerprint,
+        KvCommandFingerprint fingerprint,
         byte[] payload,
         PendingProposalRegistry.PendingProposalRegistration pending)
     {
@@ -142,7 +140,7 @@ public sealed partial class RaftClusterHost
 
     private async Task SubmitProposalAsync(
         Guid requestId,
-        ByteString fingerprint,
+        KvCommandFingerprint fingerprint,
         byte[] payload,
         PendingProposalRegistry.PendingProposalSubmission submission)
     {
@@ -166,7 +164,7 @@ public sealed partial class RaftClusterHost
         }
     }
 
-    private bool TryCompleteAppliedProposal(Guid requestId, ByteString fingerprint)
+    private bool TryCompleteAppliedProposal(Guid requestId, KvCommandFingerprint fingerprint)
     {
         KvApplyResult? applied = stateMachine.ResolveAppliedRequest(requestId, fingerprint);
         if (applied is null)

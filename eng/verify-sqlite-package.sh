@@ -64,12 +64,13 @@ cat > "$consumer/Consumer.csproj" <<'EOF'
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="DotnetRaft.Sqlite" Version="1.0.0" />
+    <PackageReference Include="DotnetRaft.Sqlite" Version="2.0.0" />
   </ItemGroup>
 </Project>
 EOF
 
 cat > "$consumer/Program.cs" <<'EOF'
+using DotnetRaft;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage.Sqlite;
 
@@ -84,7 +85,7 @@ try
     using (var storage = new SqliteStorage(database))
     {
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Vote = 1,
@@ -98,7 +99,7 @@ try
             },
         ]);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Vote = 1,
@@ -128,7 +129,7 @@ dotnet restore "$consumer/Consumer.csproj" \
   --no-cache
 
 for package in dotnetraft dotnetraft.sqlite; do
-  metadata="$packages/$package/1.0.0/.nupkg.metadata"
+  metadata="$packages/$package/2.0.0/.nupkg.metadata"
   test -f "$metadata"
   resolved_source="$(
     sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$metadata"
@@ -143,4 +144,4 @@ dotnet run --project "$consumer/Consumer.csproj" \
   -c Release \
   --no-restore
 
-echo "consumer verified DotnetRaft.Sqlite 1.0.0"
+echo "consumer verified DotnetRaft.Sqlite 2.0.0"

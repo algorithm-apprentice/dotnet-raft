@@ -1,3 +1,5 @@
+using System.Text;
+
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 
@@ -29,7 +31,7 @@ public sealed class RaftCoreReadIndexTests
         Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "local",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
         Assert.Empty(core.TakeMessages());
     }
 
@@ -92,7 +94,7 @@ public sealed class RaftCoreReadIndexTests
         Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "gated",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
         Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
@@ -126,7 +128,7 @@ public sealed class RaftCoreReadIndexTests
         Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "stable",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
     }
 
     [Fact]
@@ -154,8 +156,7 @@ public sealed class RaftCoreReadIndexTests
 
         Assert.Equal(
             "owned",
-            Assert.Single(core.TakeReadStates())
-                .RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(Assert.Single(core.TakeReadStates()).RequestContext.Span));
     }
 
     [Theory]
@@ -211,7 +212,7 @@ public sealed class RaftCoreReadIndexTests
                 Assert.Equal(1UL, state.Index);
                 Assert.Equal(
                     "duplicate",
-                    state.RequestContext.ToStringUtf8());
+                    Encoding.UTF8.GetString(state.RequestContext.Span));
             });
         Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
@@ -229,12 +230,10 @@ public sealed class RaftCoreReadIndexTests
 
         Assert.Equal(
             "first",
-            Assert.Single(first)
-                .RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(Assert.Single(first).RequestContext.Span));
         Assert.Equal(
             "second",
-            Assert.Single(second)
-                .RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(Assert.Single(second).RequestContext.Span));
     }
 
     private static Message Proposal(string context)

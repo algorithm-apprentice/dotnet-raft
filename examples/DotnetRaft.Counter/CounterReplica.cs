@@ -32,7 +32,7 @@ internal sealed class CounterReplica
     internal Queue<Message> AppendWork { get; } = new();
     internal Queue<Message> ApplyWork { get; } = new();
 
-    internal void Persist(Snapshot? snapshot, IReadOnlyList<Entry> entries, HardState? hardState)
+    internal void Persist(Snapshot? snapshot, IReadOnlyList<Entry> entries, RaftHardState? hardState)
     {
         if (snapshot is not null)
         {
@@ -42,9 +42,9 @@ internal sealed class CounterReplica
         // These writes are only a simulation. A durable host must publish
         // the batch atomically and honor the required durability barrier.
         _storage.Append(entries);
-        if (hardState is not null)
+        if (hardState is { } state)
         {
-            _storage.SetHardState(hardState);
+            _storage.SetHardState(state);
         }
     }
 

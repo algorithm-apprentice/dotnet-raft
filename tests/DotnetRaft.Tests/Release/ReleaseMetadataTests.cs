@@ -21,7 +21,7 @@ public sealed partial class ReleaseMetadataTests
 
         Assert.Equal("true", Value(document, "IsPackable"));
         Assert.Equal("DotnetRaft", Value(document, "PackageId"));
-        Assert.Equal("1.0.0", Value(document, "Version"));
+        Assert.Equal("2.0.0", Value(document, "Version"));
         Assert.Equal(
             "algorithm-apprentice",
             Value(document, "Authors"));
@@ -86,7 +86,7 @@ public sealed partial class ReleaseMetadataTests
         Assert.Equal(
             "DotnetRaft.Sqlite",
             Value(document, "PackageId"));
-        Assert.Equal("1.0.0", Value(document, "Version"));
+        Assert.Equal("2.0.0", Value(document, "Version"));
         Assert.Equal(
             "algorithm-apprentice",
             Value(document, "Authors"));
@@ -281,7 +281,7 @@ public sealed partial class ReleaseMetadataTests
     }
 
     [Fact]
-    public void PerformanceCommitContainsExactBenchmarkWorkload()
+    public void PerformanceCommitContainsTheRecordedBenchmarkBlob()
     {
         string performance = File.ReadAllText(
             Path.Combine(
@@ -297,11 +297,13 @@ public sealed partial class ReleaseMetadataTests
         Assert.True(
             match.Success,
             "Performance document has no commit provenance.");
+        Match blob = Regex.Match(performance, @"^workloadBlob: (?<blob>[0-9a-f]{40})$", RegexOptions.Multiline);
+        Assert.True(blob.Success, "Performance document has no workload provenance.");
         string relative =
             "benchmarks/DotnetRaft.Benchmarks/Program.cs";
         var startInfo = new ProcessStartInfo(
             "git",
-            $"-C \"{ReleaseTestPaths.RepositoryRoot}\" show \"{match.Groups["commit"].Value}:{relative}\"")
+            $"-C \"{ReleaseTestPaths.RepositoryRoot}\" rev-parse --verify \"{match.Groups["commit"].Value}:{relative}\"")
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -319,19 +321,7 @@ public sealed partial class ReleaseMetadataTests
         Assert.True(
             process.ExitCode == 0,
             error);
-        Assert.Equal(
-            File.ReadAllText(
-                    Path.Combine(
-                        ReleaseTestPaths.RepositoryRoot,
-                        relative))
-                .Replace(
-                    "\r\n",
-                    "\n",
-                    StringComparison.Ordinal),
-            committed.Replace(
-                "\r\n",
-                "\n",
-                StringComparison.Ordinal));
+        Assert.Equal(blob.Groups["blob"].Value, committed.Trim());
     }
 
     private static IEnumerable<string> DocumentationPaths(string root)

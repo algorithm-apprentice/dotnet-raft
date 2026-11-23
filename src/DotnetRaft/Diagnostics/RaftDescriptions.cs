@@ -16,9 +16,8 @@ public delegate string EntryFormatter(
 public static class RaftDescriptions
 {
     public static string DescribeHardState(
-        HardState state)
+        RaftHardState state)
     {
-        ArgumentNullException.ThrowIfNull(state);
         var builder = new StringBuilder();
         builder.Append("Term:");
         AppendDecimal(builder, state.Term);
@@ -91,11 +90,11 @@ public static class RaftDescriptions
             body.Append('\n');
         }
 
-        if (ready.HardState is not null)
+        if (ready.HardState is { } hardState)
         {
             body.Append("HardState ");
             body.Append(
-                DescribeHardState(ready.HardState));
+                DescribeHardState(hardState));
             body.Append('\n');
         }
 

@@ -6,7 +6,7 @@
     <IsPackable>true</IsPackable>
     <Nullable>enable</Nullable>
     <PackageId>DotnetRaft</PackageId>
-    <Version>1.0.0</Version>
+    <Version>2.0.0</Version>
     <Authors>algorithm-apprentice</Authors>
     <Title>dotnet-raft</Title>
     <Description>A deterministic Raft consensus library for building replicated state machines in .NET.</Description>

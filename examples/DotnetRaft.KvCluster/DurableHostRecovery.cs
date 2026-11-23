@@ -66,7 +66,7 @@ public static class DurableHostRecovery
 
         Snapshot retained =
             raftStorage.GetSnapshot();
-        HardState? hardState =
+        RaftHardState? hardState =
             raftStorage.GetHardState();
         bool raftFresh =
             IsRaftFresh(raftStorage);
@@ -176,9 +176,9 @@ public static class DurableHostRecovery
 
     }
 
-    private static HardState RepairCommitFromApplication(SqliteStorage raftStorage, ulong applied, ulong lastIndex)
+    private static RaftHardState RepairCommitFromApplication(SqliteStorage raftStorage, ulong applied, ulong lastIndex)
     {
-        HardState hardState = raftStorage.GetHardState()
+        RaftHardState hardState = raftStorage.GetHardState()
             ?? throw new InvalidDataException("Nonempty Raft storage has no HardState.");
         if (hardState.Commit < applied)
         {
@@ -188,7 +188,7 @@ public static class DurableHostRecovery
                 throw new InvalidDataException($"Raft storage does not cover application index {applied}.");
             }
 
-            hardState.Commit = applied;
+            hardState = hardState with { Commit = applied };
             raftStorage.SetHardState(hardState);
         }
 
@@ -199,11 +199,11 @@ public static class DurableHostRecovery
         SqliteStorage raftStorage,
         SqliteKeyValueStateMachine application,
         Snapshot retained,
-        HardState? hardState,
+        RaftHardState? hardState,
         ulong applied,
         int maximumSnapshotBytes)
     {
-        if (hardState is null || hardState.Commit < applied)
+        if (hardState is not { } state || state.Commit < applied)
         {
             throw new InvalidDataException($"HardState does not cover application index {applied}.");
         }
@@ -263,7 +263,7 @@ public static class DurableHostRecovery
             metadata.Index,
             snapshot.Data,
             metadata.ConfState);
-        HardState hardState =
+        RaftHardState hardState =
             raftStorage.GetHardState()
             ?? throw new InvalidDataException(
                 recovering
@@ -281,7 +281,7 @@ public static class DurableHostRecovery
         raftStorage.AcknowledgeApplicationSnapshot(metadata.Index);
     }
 
-    private static void ValidateSnapshotTermCoverage(SqliteStorage raftStorage, SnapshotMetadata metadata, HardState hardState)
+    private static void ValidateSnapshotTermCoverage(SqliteStorage raftStorage, SnapshotMetadata metadata, RaftHardState hardState)
     {
         ulong lastTerm = raftStorage.GetTerm(raftStorage.GetLastIndex());
         ulong requiredTerm = Math.Max(metadata.Term, lastTerm);
@@ -291,12 +291,11 @@ public static class DurableHostRecovery
         }
     }
 
-    private static void RepairSnapshotCommit(SqliteStorage raftStorage, SnapshotMetadata metadata, HardState hardState)
+    private static void RepairSnapshotCommit(SqliteStorage raftStorage, SnapshotMetadata metadata, RaftHardState hardState)
     {
         if (hardState.Commit < metadata.Index)
         {
-            hardState.Commit = metadata.Index;
-            raftStorage.SetHardState(hardState);
+            raftStorage.SetHardState(hardState with { Commit = metadata.Index });
         }
 
     }

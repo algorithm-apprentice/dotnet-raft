@@ -28,11 +28,11 @@ to verify against Git, use a clean committed checkout. From its root:
 commit=$(git rev-parse HEAD)
 ./eng/pack-release.sh "$PWD" "$commit"
 ./eng/verify-package.sh \
-  artifacts/package/DotnetRaft.1.0.0.nupkg \
-  artifacts/package/DotnetRaft.1.0.0.snupkg "$PWD" "$commit"
+  artifacts/package/DotnetRaft.2.0.0.nupkg \
+  artifacts/package/DotnetRaft.2.0.0.snupkg "$PWD" "$commit"
 ./eng/verify-sqlite-package.sh \
-  artifacts/package/DotnetRaft.Sqlite.1.0.0.nupkg \
-  artifacts/package/DotnetRaft.Sqlite.1.0.0.snupkg "$PWD" "$commit"
+  artifacts/package/DotnetRaft.Sqlite.2.0.0.nupkg \
+  artifacts/package/DotnetRaft.Sqlite.2.0.0.snupkg "$PWD" "$commit"
 ./eng/verify-reproducible-pack.sh "$PWD" "$commit"
 ```
 

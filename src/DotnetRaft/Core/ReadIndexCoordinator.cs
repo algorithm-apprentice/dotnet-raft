@@ -111,7 +111,7 @@ internal sealed class ReadIndexCoordinator
         {
             readStates.Add(new ReadState(
                 index,
-                request.Entries[0].Data));
+                request.Entries[0].Data.Span));
             return null;
         }
 
@@ -138,7 +138,7 @@ internal sealed class ReadIndexCoordinator
 
         readStates.Add(new ReadState(
             message.Index,
-            message.Entries[0].Data));
+            message.Entries[0].Data.Span));
         return true;
     }
 
@@ -176,14 +176,5 @@ internal sealed class ReadIndexCoordinator
 
     internal void ClearReadStates() => readStates.Clear();
 
-    internal ReadState[] PeekReadStates()
-    {
-        return
-        [
-            .. readStates.Select(
-                state => new ReadState(
-                    state.Index,
-                    state.RequestContext)),
-        ];
-    }
+    internal ReadState[] PeekReadStates() => [.. readStates];
 }

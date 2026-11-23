@@ -368,7 +368,7 @@ public sealed class RaftCoreMutationSafetyTests
             });
         storage.LogStorage.Append([EntryAt(6, 1)]);
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 5,
@@ -532,7 +532,7 @@ public sealed class RaftCoreMutationSafetyTests
         {
             InitialState =
                 new StorageState(
-                    new HardState
+                    new RaftHardState
                     {
                         Term = term,
                         Commit = commit,

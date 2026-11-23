@@ -162,10 +162,7 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
 
     private void ProcessAppend(CounterReplica replica, Message request)
     {
-        // Library-generated append requests carry all three HardState fields or none.
-        HardState? hardState = request.HasTerm
-            ? new HardState { Term = request.Term, Vote = request.Vote, Commit = request.Commit }
-            : null;
+        RaftHardState? hardState = StorageAppendHardState.Read(request);
         replica.Persist(request.Snapshot, request.Entries, hardState);
         trace?.Stored(replica.Id, request.Entries, hardState, nameof(MessageType.MsgStorageAppend));
         // The same FIFO simulates local acknowledgements and remote replies.

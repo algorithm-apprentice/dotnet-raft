@@ -129,7 +129,7 @@ public sealed class RaftCoreReplicationTests
             },
         });
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = ulong.MaxValue - 1,
@@ -148,7 +148,7 @@ public sealed class RaftCoreReplicationTests
             _ => 0);
         core.BecomeCandidate();
         SoftState beforeSoftState = core.SoftState;
-        HardState beforeHardState = core.HardState;
+        RaftHardState beforeHardState = core.HardState;
         Progress beforeProgress = core.Tracker.Progress[1];
 
         Assert.Throws<RaftInvariantException>(
@@ -232,7 +232,7 @@ public sealed class RaftCoreReplicationTests
     {
         RaftCore core = NewLeader(voters: [1, 2, 3]);
         ulong lastIndex = core.Log.LastIndex;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         Assert.Throws<RaftInvariantException>(
             () => core.Step(new Message
@@ -647,7 +647,7 @@ public sealed class RaftCoreReplicationTests
             EntryAt(7, 1),
         ]);
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 5,

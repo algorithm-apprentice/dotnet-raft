@@ -1,8 +1,5 @@
-using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-
-using Google.Protobuf;
 
 namespace DotnetRaft.Examples.KvCluster;
 
@@ -50,13 +47,13 @@ public static class DurableKvCommandCodec
         return command;
     }
 
-    public static ByteString Fingerprint(
+    public static KvCommandFingerprint Fingerprint(
         KvCommand command)
     {
         return Fingerprint(Encode(command));
     }
 
-    internal static (KvCommand Command, ByteString Fingerprint) ParseForApplication(ReadOnlySpan<byte> data)
+    internal static (KvCommand Command, KvCommandFingerprint Fingerprint) ParseForApplication(ReadOnlySpan<byte> data)
     {
         KvCommand command = Decode(data);
         // Persist the existing canonical identity, not the spelling of the
@@ -64,10 +61,8 @@ public static class DurableKvCommandCodec
         return (command, Fingerprint(JsonSerializer.SerializeToUtf8Bytes(command, Options)));
     }
 
-    internal static ByteString Fingerprint(ReadOnlySpan<byte> encodedCommand)
-    {
-        return ByteString.CopyFrom(SHA256.HashData(encodedCommand));
-    }
+    internal static KvCommandFingerprint Fingerprint(ReadOnlySpan<byte> encodedCommand) =>
+        KvCommandFingerprint.Compute(encodedCommand);
 
     private static void Validate(KvCommand command)
     {

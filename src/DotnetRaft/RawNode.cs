@@ -17,7 +17,7 @@ public sealed partial class RawNode
     private readonly RaftCore _core;
     private readonly Action _activate;
     private SoftState _previousSoftState;
-    private HardState _previousHardState;
+    private RaftHardState _previousHardState;
     private Ready? _outstanding;
     private ReadyAcknowledgement? _acknowledgement;
     private Exception? _fault;
@@ -373,12 +373,10 @@ public sealed partial class RawNode
     }
 
     public static bool MustSync(
-        HardState state,
-        HardState previousState,
+        RaftHardState state,
+        RaftHardState previousState,
         int entryCount)
     {
-        ArgumentNullException.ThrowIfNull(state);
-        ArgumentNullException.ThrowIfNull(previousState);
         ArgumentOutOfRangeException.ThrowIfNegative(
             entryCount);
 
@@ -416,7 +414,6 @@ public sealed partial class RawNode
                 "Bootstrap requires a never-used RawNode.");
         }
 
-        HardState hardState = _core.HardState;
         ConfigurationStatus configuration =
             _core.GetConfigurationStatus();
         if (_core.Log.LastIndex != 0)
@@ -425,7 +422,7 @@ public sealed partial class RawNode
                 "Bootstrap requires an empty log.");
         }
 
-        if (!IsEmpty(hardState))
+        if (_core.HardState != default)
         {
             ThrowBootstrapPrecondition(
                 "Bootstrap requires empty hard state.");
@@ -466,10 +463,7 @@ public sealed partial class RawNode
             return true;
         }
 
-        HardState hardState = _core.HardState;
-        if (!HardStateEquals(
-                hardState,
-                _previousHardState))
+        if (_core.HardState != _previousHardState)
         {
             return true;
         }
@@ -497,15 +491,13 @@ public sealed partial class RawNode
 
         Activate();
         SoftState currentSoftState = _core.SoftState;
-        HardState currentHardState = _core.HardState;
+        RaftHardState currentHardState = _core.HardState;
         SoftState? emittedSoftState =
             currentSoftState == _previousSoftState
                 ? null
                 : currentSoftState;
-        HardState? emittedHardState =
-            HardStateEquals(
-                currentHardState,
-                _previousHardState)
+        RaftHardState? emittedHardState =
+            currentHardState == _previousHardState
                 ? null
                 : currentHardState;
 
@@ -615,8 +607,7 @@ public sealed partial class RawNode
 
         if (emittedHardState is not null)
         {
-            _previousHardState =
-                currentHardState.Clone();
+            _previousHardState = currentHardState;
         }
 
         _core.ClearReadyOutputs();
@@ -713,7 +704,7 @@ public sealed partial class RawNode
     }
 
     private static bool NeedsStorageAppendMessage(
-        HardState? hardState,
+        RaftHardState? hardState,
         Entry[] entries,
         Snapshot? snapshot,
         Message[] afterAppendMessages)
@@ -725,7 +716,7 @@ public sealed partial class RawNode
     }
 
     private Message CreateStorageAppendMessage(
-        HardState? hardState,
+        RaftHardState? hardState,
         Entry[] entries,
         Snapshot? snapshot,
         Message[] afterAppendMessages)
@@ -739,11 +730,9 @@ public sealed partial class RawNode
         };
         request.Entries.Add(
             entries.Select(entry => entry.Clone()));
-        if (hardState is not null)
+        if (hardState is { } state)
         {
-            request.Term = hardState.Term;
-            request.Vote = hardState.Vote;
-            request.Commit = hardState.Commit;
+            StorageAppendHardState.Write(request, state);
         }
 
         if (snapshot is not null)
@@ -1139,22 +1128,6 @@ public sealed partial class RawNode
         }
 
         return [.. materialized];
-    }
-
-    private static bool IsEmpty(HardState state)
-    {
-        return state.Term == 0
-            && state.Vote == 0
-            && state.Commit == 0;
-    }
-
-    private static bool HardStateEquals(
-        HardState left,
-        HardState right)
-    {
-        return left.Term == right.Term
-            && left.Vote == right.Vote
-            && left.Commit == right.Commit;
     }
 
     private static ReadyAcknowledgement

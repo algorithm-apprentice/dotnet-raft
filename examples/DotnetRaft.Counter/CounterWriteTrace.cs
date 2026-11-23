@@ -49,7 +49,7 @@ internal sealed class CounterWriteTrace : IRaftTraceSink
         }
     }
 
-    internal void Stored(ulong id, IReadOnlyList<Entry> entries, HardState? hardState, string source)
+    internal void Stored(ulong id, IReadOnlyList<Entry> entries, RaftHardState? hardState, string source)
     {
         if (IncludesWrite(entries))
         {

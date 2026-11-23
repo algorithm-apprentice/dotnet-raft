@@ -182,7 +182,7 @@ public sealed class RaftCoreVoteTests
         core.TakeMessagesAfterAppend();
         core.SetClockElapsedForTesting(3);
         SoftState beforeSoftState = core.SoftState;
-        HardState beforeHardState = core.HardState;
+        RaftHardState beforeHardState = core.HardState;
         ulong beforeLastIndex = core.Log.LastIndex;
 
         core.Step(new Message
@@ -279,7 +279,7 @@ public sealed class RaftCoreVoteTests
             term: 4).Core;
         core.BecomeCandidate();
         SoftState candidate = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(new Message
         {
@@ -459,7 +459,7 @@ public sealed class RaftCoreVoteTests
             voters: [1, 2, 3],
             term: 5).Core;
         SoftState followerSoftState = follower.SoftState;
-        HardState followerHardState = follower.HardState;
+        RaftHardState followerHardState = follower.HardState;
 
         Assert.Throws<RaftInvariantException>(
             () => follower.Step(new Message
@@ -479,7 +479,7 @@ public sealed class RaftCoreVoteTests
             term: 4).Core;
         candidate.BecomeCandidate();
         SoftState candidateSoftState = candidate.SoftState;
-        HardState candidateHardState = candidate.HardState;
+        RaftHardState candidateHardState = candidate.HardState;
 
         Assert.Throws<RaftInvariantException>(
             () => candidate.Step(new Message

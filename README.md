@@ -31,7 +31,7 @@ to see which acknowledgement advances the commit index.
 
 ## Install
 
-The packages target `net10.0`. Version `1.0.0` is built and verified by CI but
+The packages target `net10.0`. Version `2.0.0` is built and verified by CI but
 is not published on NuGet.org. Follow the
 [local package installation guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/install.md)
 to use it in another project. Add the optional

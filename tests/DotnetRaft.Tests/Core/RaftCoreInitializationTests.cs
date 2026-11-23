@@ -41,7 +41,7 @@ public sealed class RaftCoreInitializationTests
             2,
             voters: [1]));
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 0,
                 Vote = 0,
@@ -73,7 +73,7 @@ public sealed class RaftCoreInitializationTests
             EntryAt(4, 3),
         ]);
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 4,
                 Vote = 2,
@@ -128,7 +128,7 @@ public sealed class RaftCoreInitializationTests
             2,
             voters: [1]));
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 3,
                 Commit = 4,
@@ -145,7 +145,7 @@ public sealed class RaftCoreInitializationTests
         var storage = new CoreTestStorage();
         storage.LogStorage.Append([EntryAt(1, 1)]);
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 2,
                 Commit = 2,
@@ -170,7 +170,7 @@ public sealed class RaftCoreInitializationTests
             voters: [1]));
         storage.LogStorage.Append([EntryAt(6, 3)]);
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 3,
                 Commit = commit,
@@ -221,14 +221,9 @@ public sealed class RaftCoreInitializationTests
     }
 
     [Fact]
-    public void PersistedAndReturnedProtocolStateIsDefensivelyOwned()
+    public void RecoveredStateDoesNotAliasStorageOrLaterState()
     {
-        var hardState = new HardState
-        {
-            Term = 2,
-            Vote = 1,
-            Commit = 1,
-        };
+        var hardState = new RaftHardState(Term: 2, Vote: 1, Commit: 1);
         ConfState confState = ConfState(voters: [1]);
         var storage = new CoreTestStorage
         {
@@ -238,9 +233,7 @@ public sealed class RaftCoreInitializationTests
 
         RaftCore core = NewCore(storage);
 
-        hardState.Term = 99;
-        hardState.Vote = 99;
-        hardState.Commit = 0;
+        storage.InitialState = new StorageState(new RaftHardState(99, 99, 0), confState);
         confState.Voters.Clear();
         confState.Voters.Add(2);
 
@@ -249,15 +242,10 @@ public sealed class RaftCoreInitializationTests
         Assert.Equal(1UL, core.Log.Committed);
         Assert.True(core.Tracker.Config.Voters.Incoming.SetEquals([1UL]));
 
-        HardState returned = core.HardState;
-        returned.Term = 77;
-        returned.Vote = 77;
-        returned.Commit = 0;
-
-        HardState second = core.HardState;
-        Assert.Equal(2UL, second.Term);
-        Assert.Equal(1UL, second.Vote);
-        Assert.Equal(1UL, second.Commit);
+        RaftHardState recovered = core.HardState;
+        core.BecomeCandidate();
+        Assert.Equal(hardState, recovered);
+        Assert.Equal(new RaftHardState(3, 1, 1), core.HardState);
     }
 
     private static RaftCore NewCore(

@@ -309,7 +309,7 @@ public sealed class RaftCoreMembershipProposalTests
             },
         });
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = ulong.MaxValue - 2,

@@ -25,6 +25,7 @@ transactionally restore the snapshot's application bytes, applied index,
 and `ConfState`. It must be safe to repeat after a crash.
 
 ```csharp
+using DotnetRaft;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage.Sqlite;
 
@@ -34,7 +35,7 @@ Snapshot? pending =
     storage.GetPendingApplicationSnapshot();
 if (pending is not null)
 {
-    HardState hardState = storage.GetHardState()
+    RaftHardState hardState = storage.GetHardState()
         ?? throw new InvalidDataException(
             "A pending non-bootstrap snapshot requires durable HardState.");
     ulong lastTerm = storage.GetTerm(storage.GetLastIndex());
@@ -47,8 +48,7 @@ if (pending is not null)
     RestoreApplicationSnapshot(pending);
     if (hardState.Commit < pending.Metadata.Index)
     {
-        hardState.Commit = pending.Metadata.Index;
-        storage.SetHardState(hardState);
+        storage.SetHardState(hardState with { Commit = pending.Metadata.Index });
     }
 
     storage.AcknowledgeApplicationSnapshot(pending.Metadata.Index);

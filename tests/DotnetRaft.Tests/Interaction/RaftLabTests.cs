@@ -1,3 +1,5 @@
+using System.Text;
+
 using DotnetRaft.Protocol;
 using DotnetRaft.Tests.RawNode;
 
@@ -72,7 +74,7 @@ public sealed class RaftLabTests
         (ulong id, ReadState read) = Assert.Single(reads);
         Assert.Equal(1UL, id);
         Assert.Equal(before, read.Index);
-        Assert.Equal("healthy", read.RequestContext.ToStringUtf8());
+        Assert.Equal("healthy", Encoding.UTF8.GetString(read.RequestContext.Span));
 
         cluster.NetworkLinkIsOpen = message => message.From != 1 && message.To != 1;
         cluster.Campaign(1);
@@ -102,7 +104,7 @@ public sealed class RaftLabTests
         reads.Clear();
         cluster.Nodes[0].RawNode.ReadIndex("after-heal"u8);
         cluster.Stabilize();
-        (id, read) = Assert.Single(reads, item => item.State.RequestContext.ToStringUtf8() == "after-heal");
+        (id, read) = Assert.Single(reads, item => item.State.RequestContext.Span.SequenceEqual("after-heal"u8));
         Assert.Equal(1UL, id);
         Assert.Equal(majority, read.Index);
     }

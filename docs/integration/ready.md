@@ -24,6 +24,10 @@ For `AsyncStorageWrites == false`, use this order:
 6. Call `Advance(ready)` with the exact `Ready` returned by `RawNode`, or
    `AdvanceAsync()` on `RaftNode`, which retains the exact batch for you.
 
+`Ready.HardState` is a `RaftHardState?`. A non-null value replaces the entire
+term, vote, and commit tuple; `null` leaves the persisted state untouched.
+The persistence adapter owns its encoding.
+
 New entries or a term or vote change set `MustSync`. A commit-only update or
 snapshot presence does not set it by itself. The flag does not waive the
 backend's durability requirements for a snapshot. Do not advance a batch
@@ -83,9 +87,9 @@ foreach (Message message in ready.Messages)
 ### Append worker
 
 `MsgStorageAppend` carries entries, an optional snapshot, and optional hard
-state. A hard-state update sets all three `Term`, `Vote`, and `Commit` fields,
-including present zero values. Check presence, not numeric values. If they
-are absent, leave stored hard state unchanged.
+state. `StorageAppendHardState.Read` converts the request to a `RaftHardState?`.
+It requires all three `Term`, `Vote`, and `Commit` fields or none, including
+present zero values. A null result leaves stored hard state unchanged.
 
 Atomically publish the [batch](storage.md#publishing-a-storage-batch). A
 nonempty `Responses` list requires a forced durable write before any listed

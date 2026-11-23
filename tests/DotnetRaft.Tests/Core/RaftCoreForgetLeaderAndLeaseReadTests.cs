@@ -1,3 +1,5 @@
+using System.Text;
+
 using DotnetRaft.Core;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
@@ -26,7 +28,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
             preVote: true).Core;
         core.BecomeFollower(5, leaderId: 1);
         core.SetClockElapsedForTesting(4);
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
         RaftRole role = core.Role;
         int timeout = core.GetClockStateForTesting().RandomizedElectionTimeout;
         Progress progress = core.Tracker.Progress[2];
@@ -150,7 +152,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
         core.TakeMessages();
         core.TakeMessagesAfterAppend();
         SoftState softState = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(new Message
         {
@@ -178,7 +180,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
         Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "lease",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
         Assert.DoesNotContain(
             core.TakeMessages(),
             message =>
@@ -235,7 +237,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
             ["first", "second"],
             states.Select(
                 state =>
-                    state.RequestContext.ToStringUtf8()));
+                    Encoding.UTF8.GetString(state.RequestContext.Span)));
         Assert.All(
             states,
             state => Assert.Equal(1UL, state.Index));
@@ -324,7 +326,7 @@ public sealed class RaftCoreForgetLeaderAndLeaseReadTests
             core.TakeReadStates());
         Assert.Equal(
             "outgoing",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
         Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
         Assert.DoesNotContain(
             core.TakeMessages(),

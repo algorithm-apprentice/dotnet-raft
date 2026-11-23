@@ -241,7 +241,7 @@ public sealed class RawNodeNetworkValidationTests
     public void MalformedAppendIsRejectedEvenWhenRoleOrTermWouldIgnoreIt(ulong term)
     {
         MemoryStorage storage = CreateStorage(voters: [1, 2]);
-        storage.SetHardState(new HardState { Term = 1 });
+        storage.SetHardState(new RaftHardState { Term = 1 });
         var node = CreateNode(storage);
         BecomeTwoVoterLeader(node, storage);
         BasicStatus before = node.GetBasicStatus();
@@ -352,7 +352,7 @@ public sealed class RawNodeNetworkValidationTests
         response.Context = heartbeat.Context;
         node.Step(response);
         ReadState read = Assert.Single(node.Ready().ReadStates);
-        Assert.Equal(ByteString.CopyFromUtf8("read"), read.RequestContext);
+        Assert.True(read.RequestContext.Span.SequenceEqual("read"u8));
         Assert.Equal(before.Commit, read.Index);
     }
 
@@ -362,7 +362,7 @@ public sealed class RawNodeNetworkValidationTests
         MemoryStorage storage =
             CreateStorage(voters: [1, 2]);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
             });
@@ -457,7 +457,7 @@ public sealed class RawNodeNetworkValidationTests
         });
 
         ReadState read = Assert.Single(node.Ready().ReadStates);
-        Assert.Equal(ByteString.CopyFromUtf8("read"), read.RequestContext);
+        Assert.True(read.RequestContext.Span.SequenceEqual("read"u8));
         Assert.Equal(node.GetBasicStatus().Commit, read.Index);
     }
 
@@ -503,7 +503,7 @@ public sealed class RawNodeNetworkValidationTests
         MemoryStorage storage =
             CreateStorage(voters: [1, 2]);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 2,
             });
@@ -562,7 +562,7 @@ public sealed class RawNodeNetworkValidationTests
                 },
             ]);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
             });
@@ -591,7 +591,7 @@ public sealed class RawNodeNetworkValidationTests
         var state = new ConfState { Voters = { 1, 2 } };
         var storage = new CoreTestStorage
         {
-            InitialState = new StorageState(new HardState { Term = 2 }, state),
+            InitialState = new StorageState(new RaftHardState { Term = 2 }, state),
         };
         storage.LogStorage.Append([EntryAt(1, matches ? 1UL : 2UL)]);
         var node = CreateNode(storage);

@@ -65,8 +65,8 @@ change on possibly partially mutated state.
    `ReadIndex` or `ReadIndexAsync`. For example, encode a new `Guid` as bytes.
    Never reuse the context after a timeout, completion, or restart, because
    an old response could then match a different request.
-2. Correlate `ReadState.RequestContext` from `Ready.ReadStates` to the
-   pending attempt. Wait for any required snapshot restoration and for
+2. Correlate the owned `ReadOnlyMemory<byte>` in `ReadState.RequestContext`
+   from `Ready.ReadStates` to the pending attempt. Wait for any required snapshot restoration and for
    `physicalApplied >= ReadState.Index`. Defer this wait away from the Ready
    consumer or worker that has to advance application to the barrier.
 3. Check the application index and read the value under the same application

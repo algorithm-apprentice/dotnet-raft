@@ -37,7 +37,7 @@ public sealed class RawNodeReadIndexTests
         // removal. This replica applied the removal and saved the write, but
         // only learned the commit index through the removal (etcd-io/raft#535).
         storage.Append([EntryAt(writeIndex, oldTerm, "x")]);
-        storage.SetHardState(new HardState { Term = oldTerm, Commit = removalIndex });
+        storage.SetHardState(new RaftHardState { Term = oldTerm, Commit = removalIndex });
         var node = DotnetRaft.RawNode.Restart(CreateConfig(
             storage,
             applied: removalIndex,
@@ -64,7 +64,7 @@ public sealed class RawNodeReadIndexTests
         Ready committed = node.Ready();
         ReadState read = Assert.Single(committed.ReadStates);
         Assert.Equal(currentTerm.Index, read.Index);
-        Assert.Equal(ByteString.CopyFromUtf8("read-x"), read.RequestContext);
+        Assert.True(read.RequestContext.Span.SequenceEqual("read-x"u8));
         Assert.Contains(committed.CommittedEntries, entry =>
             entry.Index == writeIndex && entry.Data.ToStringUtf8() == "x");
         Assert.DoesNotContain(committed.Messages, message => message.Type == MessageType.MsgHeartbeat);

@@ -22,7 +22,7 @@ public sealed class RaftCoreAvailabilityTermTests
             checkQuorum: true).Core;
         core.BecomeFollower(5, leaderId: 2);
         SoftState softState = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(ElectionRequest(
             core,
@@ -45,7 +45,7 @@ public sealed class RaftCoreAvailabilityTermTests
     {
         RaftCore core = NewLeader();
         SoftState softState = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(ElectionRequest(
             core,

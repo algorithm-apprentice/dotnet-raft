@@ -287,7 +287,7 @@ public sealed class RaftCoreSnapshotSendingTests
             EntryAt(7, 1),
         ]);
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 5,
@@ -328,7 +328,7 @@ public sealed class RaftCoreSnapshotSendingTests
             Voters = { 1, 2 },
         };
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 5,

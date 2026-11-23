@@ -20,7 +20,7 @@ public sealed class Ready
 
     internal static Ready FromDetachedWork(
         SoftState? softState,
-        HardState? hardState,
+        RaftHardState? hardState,
         ReadState[] readStates,
         Entry[] entries,
         Snapshot? snapshot,
@@ -30,7 +30,7 @@ public sealed class Ready
 
     private Ready(
         SoftState? softState,
-        HardState? hardState,
+        RaftHardState? hardState,
         ReadState[] readStates,
         Entry[] entries,
         Snapshot? snapshot,
@@ -53,7 +53,8 @@ public sealed class Ready
 
     public SoftState? SoftState { get; }
 
-    public HardState? HardState { get; }
+    /// <summary>The complete state to publish, or null if this batch has no hard-state update.</summary>
+    public RaftHardState? HardState { get; }
 
     public IReadOnlyList<ReadState> ReadStates =>
         _readStates;

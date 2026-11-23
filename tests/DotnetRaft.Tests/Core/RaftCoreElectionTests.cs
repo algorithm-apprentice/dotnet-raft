@@ -387,7 +387,7 @@ public sealed class RaftCoreElectionTests
     private static void AssertHupIgnored(RaftCore core)
     {
         SoftState beforeSoftState = core.SoftState;
-        HardState beforeHardState = core.HardState;
+        RaftHardState beforeHardState = core.HardState;
         ulong beforeLastIndex = core.Log.LastIndex;
 
         core.Step(Hup(core.Id));

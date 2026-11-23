@@ -21,6 +21,9 @@ or substituting a type for a decision about current consensus state.
 Preserve the public API, protobuf presence and bytes, diagnostics, SQLite
 schema, and synchronous and asynchronous Ready contracts. Do not add a
 second representation of every wire message or a second consensus path.
+Those API constraints describe the original refactor. The intentional 2.0
+domain-model migration in [ADR 0010](../adr/0010-separate-state-from-serialization.md)
+changes managed signatures without changing the existing wire and storage formats.
 
 ## Ownership and lifetime
 

@@ -195,7 +195,7 @@ public sealed class RawNodeStatusTests
         MemoryStorage storage =
             CreateStorage(voters: [1]);
         storage.Append([EntryAt(1, 1, "value")]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 1,
             Commit = 1,
@@ -232,7 +232,7 @@ public sealed class RawNodeStatusTests
     {
         MemoryStorage storage =
             CreateStorage(voters: [10]);
-        storage.SetHardState(new HardState
+        storage.SetHardState(new RaftHardState
         {
             Term = 2,
             Vote = 10,

@@ -30,7 +30,7 @@ public sealed class SqliteStorageDurabilityTests
                CreateStorage(directory))
         {
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Vote = 1,
@@ -38,7 +38,7 @@ public sealed class SqliteStorageDurabilityTests
             storage.Append(
                 Entries((1, 1), (2, 1), (3, 2)));
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Vote = 1,
@@ -261,7 +261,7 @@ public sealed class SqliteStorageDurabilityTests
                CreateStorage(first))
         {
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 4,
                 });
@@ -272,7 +272,7 @@ public sealed class SqliteStorageDurabilityTests
                     (3, 3),
                     (4, 4)));
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 4,
                     Commit = 1,
@@ -289,7 +289,7 @@ public sealed class SqliteStorageDurabilityTests
                     .Metadata.Index);
 
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 4,
                     Commit = 4,
@@ -300,7 +300,7 @@ public sealed class SqliteStorageDurabilityTests
                 ByteString.Empty);
             Assert.Throws<InvalidOperationException>(
                 () => storage.SetHardState(
-                    new HardState
+                    new RaftHardState
                     {
                         Term = 4,
                         Commit = 3,
@@ -312,7 +312,7 @@ public sealed class SqliteStorageDurabilityTests
         using SqliteStorage suffix =
             CreateStorage(second);
         suffix.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 5,
             });
@@ -324,7 +324,7 @@ public sealed class SqliteStorageDurabilityTests
                 (4, 4),
                 (5, 5)));
         suffix.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 5,
                 Commit = 5,
@@ -553,7 +553,7 @@ public sealed class SqliteStorageDurabilityTests
                CreateStorage(gap))
         {
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                 });
@@ -584,7 +584,7 @@ public sealed class SqliteStorageDurabilityTests
                CreateStorage(corrupt))
         {
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                 });
@@ -621,7 +621,7 @@ public sealed class SqliteStorageDurabilityTests
         Entry[] entries = Entries((1, 1), (2, 1), (3, 1));
         using (SqliteStorage storage = CreateStorage(directory))
         {
-            storage.SetHardState(new HardState { Term = 1 });
+            storage.SetHardState(new RaftHardState { Term = 1 });
             storage.Append(entries);
         }
 
@@ -660,7 +660,7 @@ public sealed class SqliteStorageDurabilityTests
         using TemporaryStorageDirectory directory = CreateDirectory();
         using (SqliteStorage storage = CreateStorage(directory))
         {
-            storage.SetHardState(new HardState { Term = 1 });
+            storage.SetHardState(new RaftHardState { Term = 1 });
             storage.Append(Entries((1, 1), (2, 1), (3, 1)));
         }
 
@@ -687,7 +687,7 @@ public sealed class SqliteStorageDurabilityTests
         using TemporaryStorageDirectory directory = CreateDirectory();
         using (SqliteStorage storage = CreateStorage(directory))
         {
-            storage.SetHardState(new HardState { Term = term });
+            storage.SetHardState(new RaftHardState { Term = term });
             storage.Append(Entries((1, term), (2, term), (3, term)));
         }
 
@@ -714,7 +714,7 @@ public sealed class SqliteStorageDurabilityTests
     {
         using TemporaryStorageDirectory directory =
             CreateDirectory();
-        var oldHardState = new HardState { Term = 1, Vote = 1, Commit = 1 };
+        var oldHardState = new RaftHardState { Term = 1, Vote = 1, Commit = 1 };
         var oldEntry = new Entry { Index = 1, Term = 1, Data = ByteString.CopyFromUtf8("original") };
         var newHardState = new HardState { Term = 3, Vote = 2, Commit = 3 };
         Snapshot newSnapshot = SnapshotAt(2, 2, data: "new");
@@ -723,7 +723,7 @@ public sealed class SqliteStorageDurabilityTests
         using (SqliteStorage storage =
                CreateStorage(directory))
         {
-            storage.SetHardState(new HardState { Term = 1, Vote = 1 });
+            storage.SetHardState(new RaftHardState { Term = 1, Vote = 1 });
             storage.Append([oldEntry]);
             storage.SetHardState(oldHardState);
             oldSnapshot = storage.CreateSnapshot(1, new ConfState { Voters = { 1 } }, ByteString.CopyFromUtf8("old app"));
@@ -910,11 +910,11 @@ public sealed class SqliteStorageDurabilityTests
         using TemporaryStorageDirectory directory =
             CreateDirectory();
         var oldEntry = new Entry { Index = 1, Term = 3, Data = ByteString.CopyFromUtf8("original") };
-        var oldState = new HardState { Term = 3, Vote = 1, Commit = 1 };
+        var oldState = new RaftHardState { Term = 3, Vote = 1, Commit = 1 };
         var oldVoters = new ConfState { Voters = { 1 } };
         using (SqliteStorage initialize = CreateStorage(directory))
         {
-            initialize.SetHardState(new HardState { Term = 3, Vote = 1 });
+            initialize.SetHardState(new RaftHardState { Term = 3, Vote = 1 });
             initialize.Append([oldEntry]);
             initialize.SetHardState(oldState);
             initialize.CreateSnapshot(1, oldVoters, ByteString.CopyFromUtf8("old application snapshot"));
@@ -931,7 +931,7 @@ public sealed class SqliteStorageDurabilityTests
         {
             var voters = new ConfState { Voters = { 1, 2 } };
             Snapshot snapshot = SnapshotAt(2, 6, voters, data: "new application snapshot");
-            Assert.Equal(new HardState { Term = 7, Vote = 2, Commit = 3 }, reopened.GetHardState());
+            Assert.Equal(new RaftHardState { Term = 7, Vote = 2, Commit = 3 }, reopened.GetHardState());
             Assert.Equal(3UL, reopened.GetFirstIndex());
             Assert.Equal(3UL, reopened.GetLastIndex());
             Assert.Equal(6UL, reopened.GetTerm(2));
@@ -976,14 +976,14 @@ public sealed class SqliteStorageDurabilityTests
         using SqliteStorage storage =
             CreateStorage(directory);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
             });
         storage.Append(
             Entries((1, 1)));
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 1,
@@ -997,7 +997,7 @@ public sealed class SqliteStorageDurabilityTests
         long before =
             GC.GetAllocatedBytesForCurrentThread();
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 2,
                 Commit = 1,

@@ -367,25 +367,17 @@ public sealed class MemoryStorageTests
     }
 
     [Fact]
-    public void HardStateIsClonedOnInputAndOutput()
+    public void HardStateReadsCaptureTheStoredValue()
     {
         var storage = new MemoryStorage();
-        var input = new HardState
-        {
-            Term = 2,
-            Vote = 1,
-            Commit = 3,
-        };
-
-        storage.SetHardState(input);
-        input.Term = 9;
-
+        var first = new RaftHardState(Term: 2, Vote: 1, Commit: 3);
+        storage.SetHardState(first);
         StorageState firstRead = storage.GetInitialState();
-        Assert.NotNull(firstRead.HardState);
-        Assert.Equal(2UL, firstRead.HardState.Term);
+        var next = new RaftHardState(Term: 3, Vote: 0, Commit: 3);
+        storage.SetHardState(next);
 
-        firstRead.HardState.Term = 10;
-        Assert.Equal(2UL, storage.GetInitialState().HardState!.Term);
+        Assert.Equal(first, firstRead.HardState);
+        Assert.Equal(next, storage.GetInitialState().HardState);
     }
 
     [Fact]

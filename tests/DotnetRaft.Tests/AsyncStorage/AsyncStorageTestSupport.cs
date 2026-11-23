@@ -79,7 +79,7 @@ internal static class AsyncStorageTestSupport
             Assert.True(request.HasVote);
             Assert.True(request.HasCommit);
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = request.Term,
                     Vote = request.Vote,

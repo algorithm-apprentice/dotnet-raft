@@ -1,17 +1,14 @@
 using DotnetRaft.Protocol;
 
-using Google.Protobuf;
-
 using Microsoft.Data.Sqlite;
 
 namespace DotnetRaft.Examples.KvCluster;
 
 public sealed partial class SqliteKeyValueStateMachine
 {
-    public KvApplyResult ApplyCommand(ulong index, ByteString data)
+    public KvApplyResult ApplyCommand(ulong index, KvCommand command)
     {
-        ArgumentNullException.ThrowIfNull(data);
-        (KvCommand command, ByteString fingerprint) = DurableKvCommandCodec.ParseForApplication(data.Span);
+        KvCommandFingerprint fingerprint = DurableKvCommandCodec.Fingerprint(command);
         lock (gate)
         {
             ThrowIfDisposed();
@@ -25,18 +22,16 @@ public sealed partial class SqliteKeyValueStateMachine
 
     // The Ready consumer passes a nonempty run of ordinary entries. The
     // entire run becomes visible at commit, including its request results.
-    internal IReadOnlyList<KvApplyResult> ApplyNormalEntries(IReadOnlyList<Entry> entries, int start, int end)
+    internal IReadOnlyList<KvApplyResult> ApplyCommittedBatch(IReadOnlyList<CommittedKvEntry> entries)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(start);
-        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(end, start);
-        ArgumentOutOfRangeException.ThrowIfGreaterThan(end, entries.Count);
+        ArgumentOutOfRangeException.ThrowIfZero(entries.Count);
         var results = new List<KvApplyResult>();
         lock (gate)
         {
             ThrowIfDisposed();
             using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
-            ulong appliedThrough = entries[end - 1].Index;
-            ApplyBatchInTransaction(entries, start, end, appliedThrough, transaction, results);
+            ulong appliedThrough = entries[^1].Index;
+            ApplyBatchInTransaction(entries, appliedThrough, transaction, results);
             CommitAppliedPrefix(appliedThrough, transaction);
         }
 
@@ -44,27 +39,18 @@ public sealed partial class SqliteKeyValueStateMachine
     }
 
     private void ApplyBatchInTransaction(
-        IReadOnlyList<Entry> entries,
-        int start,
-        int end,
+        IReadOnlyList<CommittedKvEntry> entries,
         ulong appliedThrough,
         SqliteTransaction transaction,
         List<KvApplyResult> results)
     {
         ulong previous = physicalApplied;
-        for (int offset = start; offset < end; offset++)
+        foreach (CommittedKvEntry entry in entries)
         {
-            Entry entry = entries[offset];
             EnsureNext(previous, entry.Index);
-            if (entry.Type != EntryType.EntryNormal)
+            if (entry.Mutation is { } mutation)
             {
-                throw new InvalidDataException($"Entry {entry.Index} is not an ordinary application entry.");
-            }
-
-            if (!entry.Data.IsEmpty)
-            {
-                (KvCommand command, ByteString fingerprint) = DurableKvCommandCodec.ParseForApplication(entry.Data.Span);
-                results.Add(ApplyCommandCore(entry.Index, appliedThrough, command, fingerprint, transaction));
+                results.Add(ApplyCommandCore(entry.Index, appliedThrough, mutation.Command, mutation.Fingerprint, transaction));
             }
 
             previous = entry.Index;
@@ -75,7 +61,7 @@ public sealed partial class SqliteKeyValueStateMachine
         ulong index,
         ulong appliedThrough,
         KvCommand command,
-        ByteString fingerprint,
+        KvCommandFingerprint fingerprint,
         SqliteTransaction transaction)
     {
         RequestRecord? existing = ReadRequest(command.RequestId, transaction);

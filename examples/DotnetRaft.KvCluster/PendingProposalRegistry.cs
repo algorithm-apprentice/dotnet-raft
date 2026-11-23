@@ -1,5 +1,3 @@
-using Google.Protobuf;
-
 namespace DotnetRaft.Examples.KvCluster;
 
 public sealed class PendingProposalRegistry
@@ -15,7 +13,7 @@ public sealed class PendingProposalRegistry
         return Register(command.RequestId, DurableKvCommandCodec.Fingerprint(command));
     }
 
-    internal PendingProposalRegistration Register(Guid requestId, ByteString fingerprint)
+    internal PendingProposalRegistration Register(Guid requestId, KvCommandFingerprint fingerprint)
     {
         lock (gate)
         {
@@ -40,7 +38,7 @@ public sealed class PendingProposalRegistry
     }
 
     // Called while gate is held, so joining and creating registrations remain atomic.
-    private PendingProposalRegistration JoinPendingRequest(Entry entry, ByteString fingerprint)
+    private PendingProposalRegistration JoinPendingRequest(Entry entry, KvCommandFingerprint fingerprint)
     {
         if (!entry.Fingerprint.Equals(fingerprint))
         {
@@ -76,7 +74,7 @@ public sealed class PendingProposalRegistry
     }
 
     public int CompleteResolved(
-        Func<Guid, ByteString, KvApplyResult?>
+        Func<Guid, KvCommandFingerprint, KvApplyResult?>
             resolver)
     {
         ArgumentNullException.ThrowIfNull(resolver);
@@ -187,7 +185,7 @@ public sealed class PendingProposalRegistry
     {
         internal Entry(
             Guid requestId,
-            ByteString fingerprint)
+            KvCommandFingerprint fingerprint)
         {
             RequestId = requestId;
             Fingerprint = fingerprint;
@@ -195,7 +193,7 @@ public sealed class PendingProposalRegistry
 
         internal Guid RequestId { get; }
 
-        internal ByteString Fingerprint { get; }
+        internal KvCommandFingerprint Fingerprint { get; }
 
         internal TaskCompletionSource<
             KvApplyResult> Completion

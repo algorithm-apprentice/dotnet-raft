@@ -15,10 +15,15 @@ if [[ -n "$(git -C "$repo" status --porcelain)" ]]; then
 fi
 
 candidate="$repo/artifacts/package"
-test -f "$candidate/DotnetRaft.1.0.0.nupkg"
-test -f "$candidate/DotnetRaft.1.0.0.snupkg"
-test -f "$candidate/DotnetRaft.Sqlite.1.0.0.nupkg"
-test -f "$candidate/DotnetRaft.Sqlite.1.0.0.snupkg"
+packages=(
+  DotnetRaft.2.0.0.nupkg
+  DotnetRaft.2.0.0.snupkg
+  DotnetRaft.Sqlite.2.0.0.nupkg
+  DotnetRaft.Sqlite.2.0.0.snupkg
+)
+for package in "${packages[@]}"; do
+  test -f "$candidate/$package"
+done
 
 temp="$(cd "$(mktemp -d)" && pwd -P)"
 left="$temp/left"
@@ -49,27 +54,7 @@ compare() {
     compare "$1" "$2"
 }
 
-compare \
-  "$candidate/DotnetRaft.1.0.0.nupkg" \
-  "$left/artifacts/package/DotnetRaft.1.0.0.nupkg"
-compare \
-  "$candidate/DotnetRaft.1.0.0.nupkg" \
-  "$right/artifacts/package/DotnetRaft.1.0.0.nupkg"
-compare \
-  "$candidate/DotnetRaft.1.0.0.snupkg" \
-  "$left/artifacts/package/DotnetRaft.1.0.0.snupkg"
-compare \
-  "$candidate/DotnetRaft.1.0.0.snupkg" \
-  "$right/artifacts/package/DotnetRaft.1.0.0.snupkg"
-compare \
-  "$candidate/DotnetRaft.Sqlite.1.0.0.nupkg" \
-  "$left/artifacts/package/DotnetRaft.Sqlite.1.0.0.nupkg"
-compare \
-  "$candidate/DotnetRaft.Sqlite.1.0.0.nupkg" \
-  "$right/artifacts/package/DotnetRaft.Sqlite.1.0.0.nupkg"
-compare \
-  "$candidate/DotnetRaft.Sqlite.1.0.0.snupkg" \
-  "$left/artifacts/package/DotnetRaft.Sqlite.1.0.0.snupkg"
-compare \
-  "$candidate/DotnetRaft.Sqlite.1.0.0.snupkg" \
-  "$right/artifacts/package/DotnetRaft.Sqlite.1.0.0.snupkg"
+for package in "${packages[@]}"; do
+  compare "$candidate/$package" "$left/artifacts/package/$package"
+  compare "$candidate/$package" "$right/artifacts/package/$package"
+done

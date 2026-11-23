@@ -50,7 +50,7 @@ type public static class DotnetRaft.Diagnostics.RaftDescriptions
   public static string DescribeConfState(DotnetRaft.Protocol.ConfState state)
   public static string DescribeEntries(System.Collections.Generic.IEnumerable<DotnetRaft.Protocol.Entry> entries, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
   public static string DescribeEntry(DotnetRaft.Protocol.Entry entry, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
-  public static string DescribeHardState(DotnetRaft.Protocol.HardState state)
+  public static string DescribeHardState(DotnetRaft.RaftHardState state)
   public static string DescribeMessage(DotnetRaft.Protocol.Message message, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
   public static string DescribeReady(DotnetRaft.Ready ready, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
   public static string DescribeSnapshot(DotnetRaft.Protocol.Snapshot snapshot)
@@ -498,6 +498,9 @@ type public sealed class DotnetRaft.Protocol.SnapshotMetadata : Google.Protobuf.
   public void ClearIndex()
   public void ClearTerm()
 
+type public static class DotnetRaft.Protocol.StorageAppendHardState
+  public static DotnetRaft.RaftHardState? Read(DotnetRaft.Protocol.Message request)
+
 type public sealed class DotnetRaft.RaftConfig
   public DotnetRaft.Diagnostics.IRaftLogger? Logger { get; init; }
   public DotnetRaft.Diagnostics.IRaftTraceSink? TraceSink { get; init; }
@@ -519,6 +522,19 @@ type public sealed class DotnetRaft.RaftConfig
   public ulong MaxInflightBytes { get; init; }
   public ulong MaxSizePerMessage { get; init; }
   public ulong MaxUncommittedEntriesSize { get; init; }
+
+type public struct DotnetRaft.RaftHardState : System.IEquatable<DotnetRaft.RaftHardState>
+  public RaftHardState(ulong Term, ulong Vote, ulong Commit)
+  public sealed virtual bool Equals(DotnetRaft.RaftHardState other)
+  public static bool op_Equality(DotnetRaft.RaftHardState left, DotnetRaft.RaftHardState right)
+  public static bool op_Inequality(DotnetRaft.RaftHardState left, DotnetRaft.RaftHardState right)
+  public ulong Commit { get; init; }
+  public ulong Term { get; init; }
+  public ulong Vote { get; init; }
+  public virtual bool Equals(object obj)
+  public virtual int GetHashCode()
+  public virtual string ToString()
+  public void Deconstruct(out ulong Term, out ulong Vote, out ulong Commit)
 
 type public static class DotnetRaft.RaftLocalMessageTargets
   public const ulong AppendThread = 18446744073709551615
@@ -573,7 +589,7 @@ type public sealed class DotnetRaft.RawNode
   public bool HasReady()
   public static DotnetRaft.RawNode Restart(DotnetRaft.RaftConfig config)
   public static DotnetRaft.RawNode Start(DotnetRaft.RaftConfig config, System.Collections.Generic.IEnumerable<DotnetRaft.Peer> peers)
-  public static bool MustSync(DotnetRaft.Protocol.HardState state, DotnetRaft.Protocol.HardState previousState, int entryCount)
+  public static bool MustSync(DotnetRaft.RaftHardState state, DotnetRaft.RaftHardState previousState, int entryCount)
   public void Advance(DotnetRaft.Ready ready)
   public void Bootstrap(System.Collections.Generic.IEnumerable<DotnetRaft.Peer> peers)
   public void Campaign()
@@ -596,8 +612,8 @@ type public enum DotnetRaft.Read.ReadOnlyOption : System.IComparable, System.ICo
 
 type public sealed class DotnetRaft.ReadState : System.IEquatable<DotnetRaft.ReadState>
   public DotnetRaft.ReadState <Clone>$()
-  public Google.Protobuf.ByteString RequestContext { get; }
-  public ReadState(ulong index, Google.Protobuf.ByteString requestContext)
+  public ReadState(ulong index, System.ReadOnlySpan<byte> requestContext)
+  public System.ReadOnlyMemory<byte> RequestContext { get; }
   public sealed virtual bool Equals(DotnetRaft.ReadState? other)
   public static bool op_Equality(DotnetRaft.ReadState? left, DotnetRaft.ReadState? right)
   public static bool op_Inequality(DotnetRaft.ReadState? left, DotnetRaft.ReadState? right)
@@ -607,8 +623,8 @@ type public sealed class DotnetRaft.ReadState : System.IEquatable<DotnetRaft.Rea
   public virtual string ToString()
 
 type public sealed class DotnetRaft.Ready
-  public DotnetRaft.Protocol.HardState? HardState { get; }
   public DotnetRaft.Protocol.Snapshot? Snapshot { get; }
+  public DotnetRaft.RaftHardState? HardState { get; }
   public DotnetRaft.SoftState? SoftState { get; }
   public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> CommittedEntries { get; }
   public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> Entries { get; }
@@ -666,7 +682,7 @@ type public sealed class DotnetRaft.Storage.MemoryStorage : DotnetRaft.Storage.I
   public void Append(System.Collections.Generic.IEnumerable<DotnetRaft.Protocol.Entry> entries)
   public void ApplySnapshot(DotnetRaft.Protocol.Snapshot snapshot)
   public void Compact(ulong compactIndex)
-  public void SetHardState(DotnetRaft.Protocol.HardState state)
+  public void SetHardState(DotnetRaft.RaftHardState state)
 
 type public enum DotnetRaft.Storage.StorageError : System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
   public const DotnetRaft.Storage.StorageError Compacted = 1
@@ -682,14 +698,14 @@ type public sealed class DotnetRaft.Storage.StorageException : System.Exception,
 
 type public sealed class DotnetRaft.Storage.StorageState : System.IEquatable<DotnetRaft.Storage.StorageState>
   public DotnetRaft.Protocol.ConfState ConfState { get; init; }
-  public DotnetRaft.Protocol.HardState? HardState { get; init; }
+  public DotnetRaft.RaftHardState? HardState { get; init; }
   public DotnetRaft.Storage.StorageState <Clone>$()
-  public StorageState(DotnetRaft.Protocol.HardState? HardState, DotnetRaft.Protocol.ConfState ConfState)
+  public StorageState(DotnetRaft.RaftHardState? HardState, DotnetRaft.Protocol.ConfState ConfState)
   public sealed virtual bool Equals(DotnetRaft.Storage.StorageState? other)
   public static bool op_Equality(DotnetRaft.Storage.StorageState? left, DotnetRaft.Storage.StorageState? right)
   public static bool op_Inequality(DotnetRaft.Storage.StorageState? left, DotnetRaft.Storage.StorageState? right)
   public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
   public virtual string ToString()
-  public void Deconstruct(out DotnetRaft.Protocol.HardState? HardState, out DotnetRaft.Protocol.ConfState ConfState)
+  public void Deconstruct(out DotnetRaft.RaftHardState? HardState, out DotnetRaft.Protocol.ConfState ConfState)
 

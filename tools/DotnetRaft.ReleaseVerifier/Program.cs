@@ -9,7 +9,7 @@ using System.Xml.Linq;
 
 const string PackageId = "DotnetRaft";
 const string SqlitePackageId = "DotnetRaft.Sqlite";
-const string PackageVersion = "1.0.0";
+const string PackageVersion = "2.0.0";
 const string Description =
     "A deterministic Raft consensus library for building replicated state machines in .NET.";
 const string SqliteDescription =
@@ -399,9 +399,9 @@ static void VerifySqlitePackage(
         ((string?)core.Attribute("version")
          ?? string.Empty)
         .Contains(
-            "1.0.0",
+            PackageVersion,
             StringComparison.Ordinal),
-        "DotnetRaft dependency version is not 1.0.0.");
+        $"DotnetRaft dependency version is not {PackageVersion}.");
     XElement sqlite =
         dependencies.SingleOrDefault(
             dependency =>

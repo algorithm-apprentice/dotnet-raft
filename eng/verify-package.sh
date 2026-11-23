@@ -62,7 +62,7 @@ cat > "$consumer/Consumer.csproj" <<'EOF'
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="DotnetRaft" Version="1.0.0" />
+    <PackageReference Include="DotnetRaft" Version="2.0.0" />
   </ItemGroup>
 </Project>
 EOF
@@ -91,7 +91,7 @@ dotnet restore "$consumer/Consumer.csproj" \
   --configfile "$temp/NuGet.Config" \
   --no-cache
 
-metadata="$packages/dotnetraft/1.0.0/.nupkg.metadata"
+metadata="$packages/dotnetraft/2.0.0/.nupkg.metadata"
 test -f "$metadata"
 resolved_source="$(
   sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$metadata"
@@ -105,4 +105,4 @@ dotnet build "$consumer/Consumer.csproj" \
   -c Release \
   --no-restore
 
-echo "consumer verified DotnetRaft 1.0.0"
+echo "consumer verified DotnetRaft 2.0.0"

@@ -1,19 +1,27 @@
-using Google.Protobuf;
-
 namespace DotnetRaft;
 
 public sealed record ReadState
 {
     public ReadState(
         ulong index,
-        ByteString requestContext)
+        ReadOnlySpan<byte> requestContext)
     {
-        ArgumentNullException.ThrowIfNull(requestContext);
         Index = index;
-        RequestContext = requestContext;
+        RequestContext = requestContext.ToArray();
     }
 
     public ulong Index { get; }
 
-    public ByteString RequestContext { get; }
+    public ReadOnlyMemory<byte> RequestContext { get; }
+
+    public bool Equals(ReadState? other) => other is not null
+        && Index == other.Index && RequestContext.Span.SequenceEqual(other.RequestContext.Span);
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(Index);
+        hash.AddBytes(RequestContext.Span);
+        return hash.ToHashCode();
+    }
 }

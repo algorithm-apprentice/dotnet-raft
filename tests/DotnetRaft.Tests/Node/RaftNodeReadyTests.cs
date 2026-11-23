@@ -37,7 +37,7 @@ public sealed class RaftNodeReadyTests
                 committed.Type);
             Assert.Equal(1UL, ready.HardState?.Term);
             storage.Append(ready.Entries);
-            storage.SetHardState(ready.HardState!);
+            storage.SetHardState(Assert.IsType<RaftHardState>(ready.HardState));
             await node.ApplyConfChangeAsync(
                 ProtocolConfChange.Parser.ParseFrom(
                     committed.Data));
@@ -63,7 +63,7 @@ public sealed class RaftNodeReadyTests
             },
         ]);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 3,

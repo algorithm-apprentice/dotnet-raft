@@ -336,10 +336,10 @@ public sealed class RaftCoreMembershipInteractionTests
                 core.Log.AcceptUnstable();
             }
 
-            HardState hardState = core.HardState;
+            RaftHardState hardState = core.HardState;
             storage.LogStorage.SetHardState(hardState);
             storage.InitialState = new StorageState(
-                hardState.Clone(),
+                hardState,
                 core.Tracker.ToConfState());
             if (snapshot is not null)
             {

@@ -108,9 +108,9 @@ internal static class RaftNodeTestSupport
         }
 
         storage.Append(ready.Entries);
-        if (ready.HardState is not null)
+        if (ready.HardState is { } hardState)
         {
-            storage.SetHardState(ready.HardState);
+            storage.SetHardState(hardState);
         }
 
         foreach (Entry entry in ready.CommittedEntries)

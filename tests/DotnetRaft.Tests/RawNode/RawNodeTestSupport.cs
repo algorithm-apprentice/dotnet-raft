@@ -115,9 +115,9 @@ internal static class RawNodeTestSupport
         }
 
         storage.Append(ready.Entries);
-        if (ready.HardState is not null)
+        if (ready.HardState is { } hardState)
         {
-            storage.SetHardState(ready.HardState);
+            storage.SetHardState(hardState);
         }
     }
 

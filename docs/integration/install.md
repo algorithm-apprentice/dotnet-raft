@@ -1,6 +1,6 @@
 # Install from a checkout
 
-Both packages target `net10.0`. Version `1.0.0` is packed and verified by CI,
+Both packages target `net10.0`. Version `2.0.0` is packed and verified by CI,
 but is not published to NuGet.org. These commands install a local build; to
 just run the project, use the [examples](../../examples/README.md) instead.
 
@@ -28,16 +28,16 @@ absolute path to the checkout:
 ```bash
 dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
   --name dotnet-raft-local --configfile nuget.config
-dotnet add package DotnetRaft --version 1.0.0
+dotnet add package DotnetRaft --version 2.0.0
 ```
 
 For durable SQLite Raft storage, also install:
 
 ```bash
-dotnet add package DotnetRaft.Sqlite --version 1.0.0
+dotnet add package DotnetRaft.Sqlite --version 2.0.0
 ```
 
-NuGet may reuse `1.0.0` after a rebuild. When testing fresh package contents,
+NuGet may reuse `2.0.0` after a rebuild. When testing fresh package contents,
 set `NUGET_PACKAGES` to a new directory before restoring the consumer.
 
 Continue with [choosing a node API and storage protocol](README.md). For SQLite

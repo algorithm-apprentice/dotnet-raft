@@ -108,12 +108,27 @@ public sealed partial class RaftClusterHost
 
     private void ApplyApplicationBatch(IReadOnlyList<Entry> entries, int start, int end)
     {
+        CommittedKvEntry[] committed = DecodeCommittedBatch(entries, start, end);
         // Results become visible only after the complete application transaction
         // commits. A batch never crosses a configuration entry.
-        foreach (KvApplyResult result in stateMachine.ApplyNormalEntries(entries, start, end))
+        foreach (KvApplyResult result in stateMachine.ApplyCommittedBatch(committed))
         {
             pendingProposals.Complete(result);
         }
+    }
+
+    private static CommittedKvEntry[] DecodeCommittedBatch(IReadOnlyList<Entry> entries, int start, int end)
+    {
+        var committed = new CommittedKvEntry[end - start];
+        for (int offset = start; offset < end; offset++)
+        {
+            Entry entry = entries[offset];
+            committed[offset - start] = new CommittedKvEntry(entry.Index, entry.Data.IsEmpty
+                ? null
+                : DurableKvCommandCodec.ParseForApplication(entry.Data.Span));
+        }
+
+        return committed;
     }
 
     private bool IsOrdinaryApplicationEntry(Entry entry) =>

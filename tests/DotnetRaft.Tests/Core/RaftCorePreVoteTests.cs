@@ -15,7 +15,7 @@ public sealed class RaftCorePreVoteTests
             term: 5,
             vote: 2,
             preVote: true).Core;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(Hup(1));
 
@@ -140,7 +140,7 @@ public sealed class RaftCorePreVoteTests
         core.TakeMessagesAfterAppend();
         core.SetClockElapsedForTesting(3);
         SoftState softState = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(new Message
         {
@@ -174,7 +174,7 @@ public sealed class RaftCorePreVoteTests
             ],
             term: 2,
             vote: 1).Core;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         core.Step(new Message
         {
@@ -366,7 +366,7 @@ public sealed class RaftCorePreVoteTests
             term: ulong.MaxValue,
             preVote: true).Core;
         SoftState softState = core.SoftState;
-        HardState hardState = core.HardState;
+        RaftHardState hardState = core.HardState;
 
         Assert.Throws<RaftInvariantException>(
             () => core.Step(Hup(1)));

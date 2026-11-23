@@ -71,7 +71,7 @@ internal static class RaftCoreElectionTestSupport
         }
 
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = term,
                 Vote = vote,

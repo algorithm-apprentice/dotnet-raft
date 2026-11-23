@@ -35,7 +35,7 @@ public sealed class RaftDescriptionsTests
         Assert.Equal(
             "Term:2 Vote:1 Commit:3",
             RaftDescriptions.DescribeHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Vote = 1,
@@ -44,7 +44,7 @@ public sealed class RaftDescriptionsTests
         Assert.Equal(
             "Term:2 Commit:3",
             RaftDescriptions.DescribeHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Commit = 3,
@@ -305,15 +305,13 @@ public sealed class RaftDescriptionsTests
         };
         Ready ready = Ready.FromDetachedWork(
             new SoftState(1, RaftRole.Leader),
-            new HardState
+            new RaftHardState
             {
                 Term = 2,
                 Vote = 1,
                 Commit = 3,
             },
-            [new ReadState(
-                3,
-                ByteString.CopyFromUtf8("ctx"))],
+            [new ReadState(3, "ctx"u8)],
             [entry],
             new Snapshot
             {
@@ -384,7 +382,7 @@ public sealed class RaftDescriptionsTests
             Assert.Equal(
                 "Term:1234 Vote:2 Commit:99",
                 RaftDescriptions.DescribeHardState(
-                    new HardState
+                    new RaftHardState
                     {
                         Term = 1234,
                         Vote = 2,

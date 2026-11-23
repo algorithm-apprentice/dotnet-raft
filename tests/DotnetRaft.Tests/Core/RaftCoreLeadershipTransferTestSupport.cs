@@ -72,7 +72,7 @@ internal static class RaftCoreLeadershipTransferTestSupport
             EntryAt(7, 1),
         ]);
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 5,

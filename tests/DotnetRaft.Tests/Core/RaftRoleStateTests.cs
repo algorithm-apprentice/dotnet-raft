@@ -98,7 +98,7 @@ public sealed class RaftRoleStateTests
         state.StartTransfer(4);
 
         SoftState soft = state.GetSoftState();
-        HardState hard = state.GetHardState(
+        RaftHardState hard = state.GetHardState(
             commit: 7);
 
         Assert.Equal(
@@ -108,10 +108,8 @@ public sealed class RaftRoleStateTests
         Assert.Equal(1UL, hard.Vote);
         Assert.Equal(7UL, hard.Commit);
 
-        hard.Term = 9;
-        hard.Vote = 9;
-        Assert.Equal(5UL, state.Term);
-        Assert.Equal(1UL, state.Vote);
-        Assert.Equal(4UL, state.LeaderTransferee);
+        state.Reset(6);
+        Assert.Equal(new RaftHardState(5, 1, 7), hard);
+        Assert.Equal(new RaftHardState(6, 0, 7), state.GetHardState(commit: 7));
     }
 }

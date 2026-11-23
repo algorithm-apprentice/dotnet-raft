@@ -23,6 +23,8 @@ a separate package without becoming a core dependency.
 Use generated Raft messages in the core and in transport. A second DTO
 model would require reproducing presence, cloning, wire fields, and encoded
 size semantics and could drift from the log that is actually replicated.
+This representation decision was superseded by [ADR 0010](0010-separate-state-from-serialization.md);
+the host/consensus boundary still applies.
 
 ## Consequences
 

@@ -248,7 +248,7 @@ public sealed class RaftCoreMessageTests
         var storage = new CoreTestStorage
         {
             InitialState = new StorageState(
-                new HardState
+                new RaftHardState
                 {
                     Term = term,
                 },

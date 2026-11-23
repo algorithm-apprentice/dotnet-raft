@@ -550,7 +550,7 @@ public sealed class KvClusterIntegrationTests
 
         donor.AdvanceNoOp(4);
         var command = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
-        donor.ApplyCommand(snapshotIndex, ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)));
+        donor.ApplyCommand(snapshotIndex, command);
         var transport = new GatedTransport();
         var proposals = new PendingProposalRegistry();
         NodeHarness target = CreateNode(1, new InMemoryNetwork(), directory: directory,

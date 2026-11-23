@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Text;
 
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
@@ -143,7 +144,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "joint",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
     }
 
     [Fact]
@@ -160,7 +161,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         Assert.Equal(core.Log.Committed, state.Index);
         Assert.Equal(
             "local-joint",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
         Assert.Empty(core.TakeMessages());
         Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
@@ -212,7 +213,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "reconfigure",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
         Assert.Equal(0, core.GetReadOnlyPendingCountForTesting());
     }
 
@@ -232,7 +233,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         Assert.Equal(1UL, state.Index);
         Assert.Equal(
             "membership",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
         Assert.Equal(1UL, core.Log.Committed);
         Assert.Empty(core.TakeMessages());
     }
@@ -282,7 +283,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         Assert.Equal(2UL, state.Index);
         Assert.Equal(
             "survives",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
     }
 
     [Fact]
@@ -330,7 +331,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             core.TakeReadStates());
         Assert.Equal(
             "new",
-            state.RequestContext.ToStringUtf8());
+            Encoding.UTF8.GetString(state.RequestContext.Span));
     }
 
     [Theory]

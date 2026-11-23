@@ -3,5 +3,5 @@ using DotnetRaft.Protocol;
 namespace DotnetRaft.Storage;
 
 public sealed record StorageState(
-    HardState? HardState,
+    RaftHardState? HardState,
     ConfState ConfState);

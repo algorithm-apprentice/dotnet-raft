@@ -44,7 +44,7 @@ public sealed class RaftCoreStateTests
         core.SetClockElapsedForTesting(2);
         Progress beforeProgress = core.Tracker.Progress[1];
         SoftState beforeSoftState = core.SoftState;
-        HardState beforeHardState = core.HardState;
+        RaftHardState beforeHardState = core.HardState;
         int beforeTimeout = core.GetClockStateForTesting().RandomizedElectionTimeout;
 
         Assert.Throws<RaftInvariantException>(
@@ -92,7 +92,7 @@ public sealed class RaftCoreStateTests
         RaftCore core = NewCore(voters: [1], term: 1);
         core.BecomeCandidate();
         core.BecomeLeader();
-        HardState before = core.HardState;
+        RaftHardState before = core.HardState;
 
         Assert.Throws<RaftInvariantException>(
             core.BecomeCandidate);
@@ -111,7 +111,7 @@ public sealed class RaftCoreStateTests
             term: ulong.MaxValue,
             vote: 1);
         SoftState beforeSoftState = core.SoftState;
-        HardState beforeHardState = core.HardState;
+        RaftHardState beforeHardState = core.HardState;
         Progress beforeProgress = core.Tracker.Progress[1];
 
         Assert.Throws<RaftInvariantException>(
@@ -454,7 +454,7 @@ public sealed class RaftCoreStateTests
         }
 
         storage.InitialState = new StorageState(
-            new HardState
+            new RaftHardState
             {
                 Term = term,
                 Vote = vote,

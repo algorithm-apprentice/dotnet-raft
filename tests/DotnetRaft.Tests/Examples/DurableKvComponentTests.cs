@@ -1,4 +1,6 @@
+using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 
 using DotnetRaft.Examples.KvCluster;
 using DotnetRaft.Protocol;
@@ -120,32 +122,10 @@ public sealed class DurableKvComponentTests
         {
             Assert.True(state.WasCreated);
             state.AdvanceNoOp(1);
-            KvApplyResult first =
-                state.ApplyCommand(
-                    2,
-                    ByteString.CopyFrom(
-                        DurableKvCommandCodec.Encode(
-                            set)));
-            KvApplyResult duplicate =
-                state.ApplyCommand(
-                    3,
-                    ByteString.CopyFrom(
-                        DurableKvCommandCodec.Encode(
-                            set)));
-            KvApplyResult conflict =
-                state.ApplyCommand(
-                    4,
-                    ByteString.CopyFrom(
-                        DurableKvCommandCodec.Encode(
-                            set with
-                            {
-                                Value = "green",
-                            })));
-            state.ApplyCommand(
-                5,
-                ByteString.CopyFrom(
-                    DurableKvCommandCodec.Encode(
-                        delete)));
+            KvApplyResult first = state.ApplyCommand(2, set);
+            KvApplyResult duplicate = state.ApplyCommand(3, set);
+            KvApplyResult conflict = state.ApplyCommand(4, set with { Value = "green" });
+            state.ApplyCommand(5, delete);
 
             Assert.False(first.Duplicate);
             Assert.Equal(2UL, first.ResultIndex);
@@ -253,6 +233,22 @@ public sealed class DurableKvComponentTests
     }
 
     [Fact]
+    public void AppliedCommandPersistsTheCanonicalSha256Digest()
+    {
+        using var directory = new TemporaryDirectory();
+        using var state = new SqliteKeyValueStateMachine(directory.ApplicationPath, nodeId: 1);
+        var command = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
+        byte[] expected = SHA256.HashData(DurableKvCommandCodec.Encode(command));
+
+        state.ApplyCommand(1, command);
+
+        using JsonDocument snapshot = JsonDocument.Parse(state.CreateSnapshotData().Memory);
+        JsonElement request = Assert.Single(snapshot.RootElement.GetProperty("requests").EnumerateArray());
+        Assert.Equal(expected, request.GetProperty("commandHash").GetBytesFromBase64());
+        Assert.Equal(1UL, request.GetProperty("resultIndex").GetUInt64());
+    }
+
+    [Fact]
     public void ApplicationSnapshotIsDeterministicAndIdempotent()
     {
         using var directory =
@@ -270,24 +266,10 @@ public sealed class DurableKvComponentTests
                 confState);
             state.ApplyCommand(
                 2,
-                ByteString.CopyFrom(
-                    DurableKvCommandCodec.Encode(
-                        new KvCommand(
-                            Guid.Parse(
-                                "11111111-2222-3333-4444-555555555555"),
-                            KvCommandType.Set,
-                            "b",
-                            "2"))));
+                new KvCommand(Guid.Parse("11111111-2222-3333-4444-555555555555"), KvCommandType.Set, "b", "2"));
             state.ApplyCommand(
                 3,
-                ByteString.CopyFrom(
-                    DurableKvCommandCodec.Encode(
-                        new KvCommand(
-                            Guid.Parse(
-                                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-                            KvCommandType.Set,
-                            "a",
-                            "1"))));
+                new KvCommand(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), KvCommandType.Set, "a", "1"));
             snapshot = state.CreateSnapshotData();
             Assert.Equal(
                 snapshot,
@@ -337,24 +319,10 @@ public sealed class DurableKvComponentTests
                 configuration);
             state.ApplyCommand(
                 2,
-                ByteString.CopyFrom(
-                    DurableKvCommandCodec.Encode(
-                        new KvCommand(
-                            Guid.Parse(
-                                "11111111-2222-3333-4444-555555555555"),
-                            KvCommandType.Set,
-                            "\uE000",
-                            "bmp"))));
+                new KvCommand(Guid.Parse("11111111-2222-3333-4444-555555555555"), KvCommandType.Set, "\uE000", "bmp"));
             state.ApplyCommand(
                 3,
-                ByteString.CopyFrom(
-                    DurableKvCommandCodec.Encode(
-                        new KvCommand(
-                            Guid.Parse(
-                                "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"),
-                            KvCommandType.Set,
-                            "\U00010000",
-                            "supplementary"))));
+                new KvCommand(Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"), KvCommandType.Set, "\U00010000", "supplementary"));
             snapshot = state.CreateSnapshotData();
         }
 
@@ -664,11 +632,7 @@ public sealed class DurableKvComponentTests
         using PendingProposalRegistry
             .PendingProposalRegistration registration =
             registry.Register(command);
-        _ = state.ApplyCommand(
-            1,
-            ByteString.CopyFrom(
-                DurableKvCommandCodec.Encode(
-                    command)));
+        _ = state.ApplyCommand(1, command);
 
         Assert.Equal(
             1,
@@ -693,13 +657,11 @@ public sealed class DurableKvComponentTests
 
         // A retry reads before the original applies, then registers after it.
         Assert.Null(state.ResolveRequest(winner));
-        KvApplyResult original = state.ApplyCommand(1,
-            ByteString.CopyFrom(DurableKvCommandCodec.Encode(winner)));
+        KvApplyResult original = state.ApplyCommand(1, winner);
         Assert.False(registry.Complete(original));
         using PendingProposalRegistry.PendingProposalRegistration retry = registry.Register(winner);
 
-        KvApplyResult rejected = state.ApplyCommand(2,
-            ByteString.CopyFrom(DurableKvCommandCodec.Encode(loser)));
+        KvApplyResult rejected = state.ApplyCommand(2, loser);
         Assert.True(rejected.Conflict);
         Assert.True(registry.Complete(rejected));
 
@@ -719,7 +681,7 @@ public sealed class DurableKvComponentTests
         var winner = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
         using PendingProposalRegistry.PendingProposalRegistration previous =
             registry.Register(winner with { Value = "red" });
-        state.ApplyCommand(1, ByteString.CopyFrom(DurableKvCommandCodec.Encode(winner)));
+        state.ApplyCommand(1, winner);
 
         PendingProposalRegistry.PendingProposalRegistration? next = null;
         Assert.Equal(1, registry.CompleteResolved((requestId, expectedFingerprint) =>
@@ -756,7 +718,7 @@ public sealed class DurableKvComponentTests
                    nodeId: 1))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                 });
@@ -774,7 +736,7 @@ public sealed class DurableKvComponentTests
                 },
             ]);
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Commit = 2,
@@ -851,7 +813,7 @@ public sealed class DurableKvComponentTests
                new SqliteStorage(directory.RaftPath))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                 });
@@ -869,7 +831,7 @@ public sealed class DurableKvComponentTests
                 },
             ]);
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Commit = 2,
@@ -912,7 +874,7 @@ public sealed class DurableKvComponentTests
                new SqliteStorage(directory.RaftPath))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                 });
@@ -925,7 +887,7 @@ public sealed class DurableKvComponentTests
                 },
             ]);
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                     Commit = 1,
@@ -968,7 +930,7 @@ public sealed class DurableKvComponentTests
                    new SqliteStorage(directory.RaftPath))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                 });
@@ -986,7 +948,7 @@ public sealed class DurableKvComponentTests
                     },
                 ]);
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Commit = 2,
@@ -1029,7 +991,7 @@ public sealed class DurableKvComponentTests
                new SqliteStorage(directory.RaftPath))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                 });
@@ -1097,7 +1059,7 @@ public sealed class DurableKvComponentTests
                new SqliteStorage(directory.RaftPath))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                 });
@@ -1110,7 +1072,7 @@ public sealed class DurableKvComponentTests
                 },
             ]);
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                     Commit = 1,
@@ -1155,21 +1117,14 @@ public sealed class DurableKvComponentTests
                 application.CreateSnapshotData();
             application.ApplyCommand(
                 4,
-                ByteString.CopyFrom(
-                        DurableKvCommandCodec.Encode(
-                            new KvCommand(
-                                Guid.Parse(
-                                    "11111111-2222-3333-4444-555555555555"),
-                                KvCommandType.Set,
-                                "large",
-                                new string('x', 4096)))));
+                new KvCommand(Guid.Parse("11111111-2222-3333-4444-555555555555"), KvCommandType.Set, "large", new string('x', 4096)));
         }
 
         using (var raft =
                new SqliteStorage(directory.RaftPath))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                 });
@@ -1197,7 +1152,7 @@ public sealed class DurableKvComponentTests
                 },
             ]);
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 2,
                     Commit = 4,
@@ -1288,7 +1243,7 @@ public sealed class DurableKvComponentTests
                        nodeId: 1))
         {
             raft.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 3,
                     Vote = 2,
@@ -1320,7 +1275,7 @@ public sealed class DurableKvComponentTests
                 or "acknowledged")
             {
                 raft.SetHardState(
-                    new HardState
+                    new RaftHardState
                     {
                         Term = 3,
                         Vote = 2,
@@ -1352,8 +1307,8 @@ public sealed class DurableKvComponentTests
         Assert.Null(
                 reopenedRaft
                     .GetPendingApplicationSnapshot());
-        HardState hardState =
-                Assert.IsType<HardState>(
+        RaftHardState hardState =
+                Assert.IsType<RaftHardState>(
                     reopenedRaft.GetHardState());
         Assert.Equal(3UL, hardState.Term);
         Assert.Equal(2UL, hardState.Vote);

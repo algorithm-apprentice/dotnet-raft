@@ -83,7 +83,7 @@ public sealed class SqliteStorageRawNodeTests
             var confState = new ConfState();
             confState.Voters.Add(1);
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                 });
@@ -93,7 +93,7 @@ public sealed class SqliteStorageRawNodeTests
                     1,
                     confState));
             storage.SetHardState(
-                new HardState
+                new RaftHardState
                 {
                     Term = 1,
                     Commit = 2,
@@ -124,8 +124,8 @@ public sealed class SqliteStorageRawNodeTests
 
         using SqliteStorage reopened =
             CreateStorage(directory);
-        HardState hardState =
-            Assert.IsType<HardState>(
+        RaftHardState hardState =
+            Assert.IsType<RaftHardState>(
                 reopened.GetHardState());
         Assert.Equal(2UL, hardState.Term);
         Assert.Equal(1UL, hardState.Vote);

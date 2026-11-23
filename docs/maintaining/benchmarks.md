@@ -43,12 +43,14 @@ also report per-operation allocations.
 ## Example baseline
 
 This capture illustrates what to record; it is not a measurement of the
-current checkout. For noisy timings, interleave baseline and candidate runs
-on the same machine at identical operation counts. Check output checksums
+current checkout. Check out the recorded commit to rerun its original workload;
+the recorded Git blob identifies its exact source. For noisy timings, interleave
+baseline and candidate runs on the same machine at identical operation counts. Check output checksums
 and bytes per operation where available, not just throughput.
 
 ```text
 commit: 2907292d80fc7401e48ea2094eeb750d473aca90
+workloadBlob: 08ade39b919333900b9e4ac180c7adb61bcc0d37
 utcDate: 2026-10-03T08:36:42Z
 sdk: 10.0.100
 runtime: 10.0.0

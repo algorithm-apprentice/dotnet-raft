@@ -17,7 +17,7 @@ public sealed class RaftNodeSchedulingTests
         var storage = new CoreTestStorage
         {
             InitialState = new StorageState(
-                new HardState { Term = 1, Commit = 1 },
+                new RaftHardState { Term = 1, Commit = 1 },
                 new ConfState { Voters = { 1, 2 } }),
         };
         storage.LogStorage.Append([new Entry { Index = 1, Term = 1 }]);

@@ -334,7 +334,7 @@ public sealed class AsyncStorageResponseTests
             });
         storage.Append([EntryAt(3, 1)]);
         storage.SetHardState(
-            new HardState
+            new RaftHardState
             {
                 Term = 1,
                 Commit = 3,
