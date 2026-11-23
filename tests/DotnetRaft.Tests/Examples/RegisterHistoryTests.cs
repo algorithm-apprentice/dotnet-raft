@@ -27,8 +27,9 @@ public sealed class RegisterHistoryTests
     }
 }
 
-// For a single key, null is absence. A completed write of null deletes it.
-internal readonly record struct RegisterOperation(int Started, int Completed, bool IsRead, string? Value);
+// Null value means absence/deletion; null completion means an optional mutation.
+internal readonly record struct RegisterOperation(
+    int Started, int? Completed, bool IsRead, string? Value, ulong? WriteIndex = null);
 
 internal static class RegisterHistory
 {
@@ -36,11 +37,32 @@ internal static class RegisterHistory
     {
         ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(history.Count, 64);
         var predecessors = new ulong[history.Count];
+        var writeIndexes = new HashSet<ulong>();
         for (var index = 0; index < history.Count; index++)
         {
+            RegisterOperation operation = history[index];
+            if ((operation.IsRead && operation.Completed is null) || operation.Completed <= operation.Started)
+            {
+                throw new ArgumentException("An operation must have a valid interval; only mutations can be unconfirmed.", nameof(history));
+            }
+
+            if (operation.WriteIndex is { } writeIndex)
+            {
+                if (operation.IsRead || operation.Completed is null || writeIndex == 0)
+                {
+                    throw new ArgumentException("Only a confirmed mutation can carry a write index.", nameof(history));
+                }
+
+                if (!writeIndexes.Add(writeIndex))
+                {
+                    return false;
+                }
+            }
+
             for (var other = 0; other < history.Count; other++)
             {
-                if (history[other].Completed < history[index].Started)
+                RegisterOperation prior = history[other];
+                if (prior.Completed < operation.Started || prior.WriteIndex < operation.WriteIndex)
                 {
                     predecessors[index] |= 1UL << other;
                 }
@@ -71,6 +93,11 @@ internal static class RegisterHistory
                 }
 
                 RegisterOperation operation = history[index];
+                if (operation.Completed is null && Search(remaining & ~bit, value))
+                {
+                    return true;
+                }
+
                 if (operation.IsRead && !string.Equals(operation.Value, value, StringComparison.Ordinal))
                 {
                     continue;

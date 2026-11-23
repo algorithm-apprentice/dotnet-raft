@@ -1,0 +1,53 @@
+{
+  "name": "failover-read",
+  "nodeCount": 3,
+  "voters": [1, 2, 3],
+  "actions": [
+    { "kind": "campaign", "node": 1 },
+    { "kind": "drain" },
+    { "kind": "propose", "node": 2, "text": "before/" },
+    { "kind": "drain" },
+    { "kind": "read", "node": 3, "text": "healthy" },
+    { "kind": "drain" },
+    { "kind": "checkpoint", "text": "first-read" },
+    { "kind": "cut", "node": 1 },
+    { "kind": "campaign", "node": 2 },
+    { "kind": "drain" },
+    { "kind": "propose", "node": 3, "text": "majority/" },
+    { "kind": "drain" },
+    { "kind": "read", "node": 1, "text": "isolated" },
+    { "kind": "drain" },
+    { "kind": "read", "node": 3, "text": "majority" },
+    { "kind": "drain" },
+    { "kind": "checkpoint", "text": "partitioned" },
+    { "kind": "heal" },
+    { "kind": "heartbeat", "node": 2 },
+    { "kind": "drain" },
+    { "kind": "read", "node": 1, "text": "healed" },
+    { "kind": "drain" },
+    { "kind": "checkpoint", "text": "healed" }
+  ],
+  "witnesses": [
+    {
+      "label": "first-read",
+      "nodes": [
+        { "id": 1, "term": 1, "leader": 1, "commit": 4, "application": "before/" },
+        { "id": 3, "physicalApplied": 4, "application": "before/" }
+      ],
+      "reads": [{ "node": 3, "index": 4, "context": "healthy" }]
+    },
+    {
+      "label": "partitioned",
+      "nodes": [
+        { "id": 1, "term": 1, "leader": 1, "commit": 4, "physicalApplied": 4, "application": "before/" },
+        { "id": 2, "term": 2, "leader": 2, "commit": 6, "application": "before/majority/" }
+      ],
+      "reads": [{ "node": 3, "index": 6, "context": "majority" }]
+    },
+    {
+      "label": "healed",
+      "nodes": [{ "id": 1, "term": 2, "leader": 2, "physicalApplied": 6, "application": "before/majority/" }],
+      "reads": [{ "node": 1, "index": 6, "context": "healed" }]
+    }
+  ]
+}

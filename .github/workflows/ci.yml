@@ -34,6 +34,15 @@ jobs:
       - name: Test Release
         run: dotnet test DotnetRaft.sln -c Release --no-restore --verbosity quiet
 
+      - name: Set up Go for the reference comparison
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: tools/raft-reference/go.mod
+          cache-dependency-path: tools/raft-reference/go.sum
+
+      - name: Compare Raft semantics with pinned etcd/raft
+        run: bash eng/verify-raft-reference.sh "$GITHUB_WORKSPACE"
+
       - name: Replicated counter examples
         run: |
           dotnet run --project examples/DotnetRaft.Counter -c Release --no-restore

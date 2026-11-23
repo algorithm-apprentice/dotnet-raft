@@ -156,11 +156,11 @@ The [KV integration test](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegra
 drives the actual host with SQLite and an in-memory transport. Each round
 releases a writer, reader, and deleter through a common gate and records the
 actual order; it does not rely on a particular race winner. The checker is
-deliberately limited to one key and completed operations with healthy
-connectivity. A fault-tolerant history checker would also need to model
-ambiguous outcomes: a timed-out write may have taken effect, and skipping
-such operations blindly can make a correct execution look impossible or
-hide a real error.
+deliberately limited to one key. The healthy schedule checks only completed
+operations. The [faulted KV history](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.FaultHistory.cs)
+additionally groups same-command retries by request ID and allows an
+unconfirmed write to take effect after its timeout or not at all. It covers
+one controlled partition and recovery, not arbitrary fault histories.
 
 ## Run and read the results
 

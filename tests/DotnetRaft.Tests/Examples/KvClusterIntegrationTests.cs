@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 namespace DotnetRaft.Tests.Examples;
 
-public sealed class KvClusterIntegrationTests
+public sealed partial class KvClusterIntegrationTests
 {
     private static readonly TimeSpan PhaseTimeout = TimeSpan.FromSeconds(5);
 
@@ -814,7 +814,8 @@ public sealed class KvClusterIntegrationTests
         int snapshotThresholdEntries = 10,
         IRaftMessageTransport? transportOverride = null,
         PendingProposalRegistry? proposalRegistry = null,
-        PendingReadRegistry? readRegistry = null)
+        PendingReadRegistry? readRegistry = null,
+        TimeSpan? requestTimeout = null)
     {
         TemporaryNodeDirectory actualDirectory =
             directory
@@ -831,6 +832,10 @@ public sealed class KvClusterIntegrationTests
                     snapshotThresholdEntries);
         ValidatedClusterOptions options =
             configured.Validate();
+        if (requestTimeout is { } timeout)
+        {
+            options = options with { RequestTimeout = timeout };
+        }
         var storage = new SqliteStorage(
             actualDirectory.RaftPath);
         var state =
@@ -1030,13 +1035,20 @@ public sealed class KvClusterIntegrationTests
         private readonly ConcurrentDictionary<
             ulong,
             IRaftMessageReceiver> receivers = [];
+        private Func<Message, bool>? drop;
+
+        internal Func<Message, bool>? Drop
+        {
+            get => Volatile.Read(ref drop);
+            set => Volatile.Write(ref drop, value);
+        }
 
         internal InMemoryTransport CreateTransport(
             ulong senderId)
         {
             return new InMemoryTransport(
                 senderId,
-                receivers);
+                this);
         }
 
         internal void Register(
@@ -1047,48 +1059,29 @@ public sealed class KvClusterIntegrationTests
                     receiver.NodeId,
                     receiver));
         }
-    }
 
-    private sealed class InMemoryTransport
-        : IRaftMessageTransport
-    {
-        private readonly ConcurrentDictionary<
-            ulong,
-            IRaftMessageReceiver> receivers;
-        private readonly ulong senderId;
-
-        internal InMemoryTransport(
-            ulong senderId,
-            ConcurrentDictionary<
-                ulong,
-                IRaftMessageReceiver> receivers)
+        internal void Unregister(RaftClusterHost receiver)
         {
-            this.senderId = senderId;
-            this.receivers = receivers;
+            Assert.True(receivers.TryRemove(receiver.NodeId, out IRaftMessageReceiver? registered));
+            Assert.Same(receiver, registered);
         }
 
-        public async ValueTask<RaftSendResult> SendAsync(
-            Message message,
-            CancellationToken cancellationToken)
+        internal sealed class InMemoryTransport(ulong senderId, InMemoryNetwork network) : IRaftMessageTransport
         {
-            Assert.Equal(senderId, message.From);
-            if (!receivers.TryGetValue(
-                    message.To,
-                    out IRaftMessageReceiver? receiver))
+            public async ValueTask<RaftSendResult> SendAsync(Message message, CancellationToken cancellationToken)
             {
-                return RaftSendResult.Unavailable;
+                Assert.Equal(senderId, message.From);
+                if (network.Drop?.Invoke(message) == true
+                    || !network.receivers.TryGetValue(message.To, out IRaftMessageReceiver? receiver))
+                {
+                    return RaftSendResult.Unavailable;
+                }
+
+                await receiver.ReceiveAsync(message.Clone(), cancellationToken).ConfigureAwait(false);
+                return RaftSendResult.Delivered;
             }
 
-            await receiver.ReceiveAsync(
-                    message.Clone(),
-                    cancellationToken)
-                .ConfigureAwait(false);
-            return RaftSendResult.Delivered;
-        }
-
-        public ValueTask DisposeAsync()
-        {
-            return ValueTask.CompletedTask;
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
         }
     }
 

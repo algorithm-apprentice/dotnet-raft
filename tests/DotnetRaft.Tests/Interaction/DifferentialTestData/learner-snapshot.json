@@ -1,0 +1,40 @@
+{
+  "name": "learner-snapshot",
+  "nodeCount": 4,
+  "voters": [1, 2, 3],
+  "actions": [
+    { "kind": "cut", "node": 4 },
+    { "kind": "campaign", "node": 1 },
+    { "kind": "drain" },
+    { "kind": "add-learner", "node": 1, "index": 4 },
+    { "kind": "drain" },
+    { "kind": "propose", "node": 1, "text": "snapshot/" },
+    { "kind": "drain" },
+    { "kind": "compact", "node": 1, "index": 5 },
+    { "kind": "checkpoint", "text": "before-heal" },
+    { "kind": "heal" },
+    { "kind": "heartbeat", "node": 1 },
+    { "kind": "drain" },
+    { "kind": "propose", "node": 2, "text": "suffix/" },
+    { "kind": "drain" },
+    { "kind": "checkpoint", "text": "suffix-applied" }
+  ],
+  "witnesses": [
+    {
+      "label": "before-heal",
+      "nodes": [
+        { "id": 1, "physicalApplied": 5, "firstIndex": 6, "learners": [4], "application": "snapshot/" },
+        { "id": 4, "physicalApplied": 2, "firstIndex": 3, "lastIndex": 2, "learners": [], "application": "" }
+      ],
+      "reads": []
+    },
+    {
+      "label": "suffix-applied",
+      "nodes": [
+        { "id": 1, "physicalApplied": 6, "learners": [4], "application": "snapshot/suffix/" },
+        { "id": 4, "physicalApplied": 6, "firstIndex": 6, "learners": [4], "application": "snapshot/suffix/" }
+      ],
+      "reads": []
+    }
+  ]
+}

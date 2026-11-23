@@ -8,6 +8,8 @@ does not prove that an application applied it.
 The [test evidence design](test-evidence-design.md) records the negative
 controls for recovery, snapshots, and durability, and how the harnesses
 distinguish them.
+The [Raft correctness testing design](raft-correctness-testing-design.md)
+defines the pinned Go comparison and the faulted KV history checks.
 
 ## Exercise the boundary that changed
 
@@ -15,7 +17,7 @@ distinguish them.
 |---|---|---|
 | Election, log, and membership | [Core](../../tests/DotnetRaft.Tests/Core/), [quorum](../../tests/DotnetRaft.Tests/Quorum/), [tracker](../../tests/DotnetRaft.Tests/Tracker/), [configuration](../../tests/DotnetRaft.Tests/ConfChange/) | Which transition was permitted, which quorum counted, and whether committed entries or membership were preserved. |
 | Safe and lease reads | [Read quorum tests](../../tests/DotnetRaft.Tests/Core/RaftCoreReadIndexQuorumTests.cs), [lease tests](../../tests/DotnetRaft.Tests/Core/RaftCoreForgetLeaderAndLeaseReadTests.cs), [single-voter commit barrier](../../tests/DotnetRaft.Tests/RawNode/RawNodeReadIndexTests.cs) | Which commit the index includes, whose acknowledgements count, and whether a nonvoter or a new term can answer too early. |
-| Ready identity and persistence | [RawNode Ready](../../tests/DotnetRaft.Tests/RawNode/RawNodeReadyTests.cs), [replay](../../tests/DotnetRaft.Tests/RawNode/RawNodePersistenceTests.cs), [async responses](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs) | Which work was emitted and acknowledged, what is stable, and whether an old response overwrote newer state. |
+| Ready identity and persistence | [RawNode Ready](../../tests/DotnetRaft.Tests/RawNode/RawNodeReadyTests.cs), [replay](../../tests/DotnetRaft.Tests/RawNode/RawNodePersistenceTests.cs), [async receipts](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs), [receipt rejections](../../tests/DotnetRaft.Tests/Node/RaftNodeStorageCompletionTests.cs) | Which work was emitted and acknowledged, whether a stale receipt left newer state intact, and whether rejecting invalid input left the facade usable. |
 | Local caller races | [Node tests](../../tests/DotnetRaft.Tests/Node/) | Claim vs. cancel, one Ready consumer, proposals blocked on eligibility vs. an owner blocked on a stable read, and completion on stop or fault. |
 | Cluster schedules | [Deterministic failure labs](../../tests/DotnetRaft.Tests/Interaction/RaftLabTests.cs), [seeded schedules](../../tests/DotnetRaft.Tests/Release/RandomizedInteractionPropertyTests.cs) | Minority cannot apply a conflicting command; surviving nodes converge after healing; crash replay starts from an actual physical prefix. |
 | Storage and client effects | [SQLite durability](../../tests/DotnetRaft.Sqlite.Tests/SqliteStorageDurabilityTests.cs), [KV recovery](../../tests/DotnetRaft.Tests/Examples/DurableKvComponentTests.cs), [KV integration](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.cs) | Atomic publication across process stop, physical recovery and read barriers, request identity, and legal histories of completed operations. |
@@ -50,6 +52,30 @@ when a change crosses the application/storage or real transport boundary.
 Abrupt process termination verifies publication, reopening, and replay. It
 does not emulate power loss or prove that independent backups of the two
 stores are compatible.
+
+## Cross-implementation and faulted history checks
+
+The Release CI job also compares the same bounded schedules against pinned
+`etcd/raft`. With [Go](https://go.dev/dl/) and a Release build of the test
+project, run from the repository root:
+
+```bash
+bash eng/verify-raft-reference.sh "$PWD"
+```
+
+The Go driver is test-only; ordinary `dotnet test` runs the C# witness and
+negative controls without Go. The comparison observes applied entries,
+application bytes, membership, read barriers, and durability boundaries; it
+does not rewrite the golden scripts or require identical diagnostic text.
+See the [schedules](../../tests/DotnetRaft.Tests/Interaction/DifferentialTestData/).
+Files prefixed `async-` use only the asynchronous Ready protocol; the
+remaining schedules run in both modes.
+
+The [faulted KV history](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.FaultHistory.cs)
+checks one key under partition, leader change, SQLite reopen, snapshot
+catch-up, and request-ID retry. A timeout is an unknown write outcome, not
+proof that the write was discarded. It is a deterministic host test; the
+process smoke separately exercises real sockets and abrupt exits.
 
 ## Script fixtures
 
