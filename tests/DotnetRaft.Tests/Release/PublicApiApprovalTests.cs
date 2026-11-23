@@ -1130,10 +1130,14 @@ internal static class ProtocolDescriptorFormatter
                     .Append(')');
             }
 
+            string wireType = GetWireType(field.FieldType);
+            // Reflection reports the inherited proto3 packed feature even on fields
+            // that cannot be packed. Approve only packing that affects binary output.
+            bool packed = field.IsRepeated && (wireType is "varint" or "fixed32" or "fixed64") && field.IsPacked;
             builder.Append(" wire=")
-                .Append(GetWireType(field.FieldType))
+                .Append(wireType)
                 .Append(" packed=")
-                .Append(field.IsPacked ? "true" : "false")
+                .Append(packed ? "true" : "false")
                 .Append('\n');
         }
 

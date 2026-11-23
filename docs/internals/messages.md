@@ -8,7 +8,10 @@ distinction between producing a message and making its effect visible.
 ## Keep term, log position, and membership separate
 
 [`raft.proto`](../../src/DotnetRaft.Protobuf/Protocol/raft.proto) defines the
-wire format behind the adapter. The node only sees the .NET values in
+wire format behind the adapter. It uses proto3 with explicit scalar presence
+and the original unpacked membership encoding; see
+[ADR 0012](../adr/0012-use-proto3-for-raftpb.md) for wire and storage compatibility.
+The node only sees the .NET values in
 `DotnetRaft.Protocol`. `Message.Term` normally identifies the
 sender's consensus term, but an election message can refer to a prospective
 term and some local messages use zero. `Entry.Term` identifies the term that

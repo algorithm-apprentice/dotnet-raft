@@ -1,13 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: smoke-durable-kv-cluster.sh <repository-root>" >&2
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "usage: smoke-durable-kv-cluster.sh <repository-root> [restart-repository-root]" >&2
   exit 2
 fi
 
+release_host=examples/DotnetRaft.KvCluster/bin/Release/net10.0/DotnetRaft.KvCluster.dll
 repo="$(cd "$1" && pwd -P)"
-dll="$repo/examples/DotnetRaft.KvCluster/bin/Release/net10.0/DotnetRaft.KvCluster.dll"
+dll="$repo/$release_host"
+restart_dll="$dll"
+if [[ $# -eq 2 ]]; then
+  restart_repo="$(cd "$2" && pwd -P)"
+  if [[ "$restart_repo" == "$repo" ]]; then
+    echo "a mixed-build smoke requires two separate checkouts" >&2
+    exit 2
+  fi
+  restart_dll="$restart_repo/$release_host"
+fi
 
 require_command() {
   local command="$1"
@@ -21,11 +31,13 @@ for command in curl jq python3; do
   require_command "$command"
 done
 
-if [[ ! -f "$dll" ]]; then
-  echo "missing Release host at $dll" >&2
-  echo "run: dotnet build examples/DotnetRaft.KvCluster -c Release" >&2
-  exit 1
-fi
+for host in "$dll" "$restart_dll"; do
+  if [[ ! -f "$host" ]]; then
+    echo "missing Release host at $host" >&2
+    echo "run: dotnet build examples/DotnetRaft.KvCluster -c Release in that checkout" >&2
+    exit 1
+  fi
+done
 
 python3 - <<'PY'
 import socket
@@ -55,6 +67,7 @@ PY
 
 temp="$(mktemp -d)"
 pids=()
+node_dlls=()
 
 cleanup() {
   local status="$?"
@@ -102,7 +115,7 @@ start_node() {
   http="$(http_port "$id")"
   grpc="$(grpc_port "$id")"
   mkdir -p "$temp/node-$id"
-  dotnet "$dll" \
+  dotnet "${node_dlls[$id]:-$dll}" \
     "--Logging:LogLevel:Microsoft.AspNetCore=Warning" \
     "--Logging:LogLevel:DotnetRaft.Examples.KvCluster.RaftClusterHost=Information" \
     "--Raft:NodeId=$id" \
@@ -266,6 +279,10 @@ put_file() {
     --data-binary "@$file"
 }
 
+last_mutation_index() {
+  jq -er '.appliedIndex | select(type == "number" and . > 0)' "$temp/curl-response.txt"
+}
+
 wait_value() {
   local id="$1"
   local key="$2"
@@ -313,6 +330,44 @@ with sqlite3.connect(database, uri=True) as db:
     index, = db.execute('SELECT last_index FROM raft_metadata WHERE singleton = 1').fetchone()
 print(int.from_bytes(index, 'big'))
 PY
+}
+
+verify_reopened_color() {
+  local id="$1"
+  local required="$2"
+  if ! curl_bounded "http://127.0.0.1:$(http_port "$id")/local/color" | jq -e \
+      --argjson node "$id" --argjson index "$required" \
+      '.nodeId == $node and .found == true and .value == "blue" and .linearizable == false and .physicalApplied >= $index' >/dev/null; then
+    echo "node $id did not reopen its pre-crash data at or past $required without peers" >&2
+    return 1
+  fi
+}
+
+reopen_lagging_node() {
+  local lagger="$1"
+  local required="$2"
+  local id
+  shift 2
+  if [[ "$restart_dll" != "$dll" ]]; then
+    for id in "$@"; do
+      stop_node "$id"
+    done
+    node_dlls["$lagger"]="$restart_dll"
+    echo "reopening node $lagger offline with $restart_dll"
+  fi
+
+  start_node "$lagger"
+  wait_http "$lagger"
+
+  if [[ "$restart_dll" != "$dll" ]]; then
+    verify_reopened_color "$lagger" "$required"
+    for id in "$@"; do
+      start_node "$id"
+    done
+    for id in "$@"; do
+      wait_http "$id"
+    done
+  fi
 }
 
 verify_large_value() {
@@ -370,7 +425,7 @@ if [[ "$writer" == "$leader" ]]; then
   writer=2
 fi
 put_value "$writer" color blue 11111111-2222-3333-4444-555555555555
-wait_value 3 color blue
+color_index="$(last_mutation_index)"
 
 lagger=1
 if [[ "$lagger" == "$leader" ]]; then
@@ -382,11 +437,12 @@ for id in 1 2 3; do
     large_writer="$id"
   fi
 done
+wait_value "$lagger" color blue
 crash_node "$lagger"
 lagging_last="$(stopped_last_index "$lagger")"
 snapshot_request=33333333-4444-5555-6666-777777777776
 put_value "$large_writer" snapshot-request present "$snapshot_request"
-snapshot_request_index="$(jq -er '.appliedIndex | select(type == "number" and . > 0)' "$temp/curl-response.txt")"
+snapshot_request_index="$(last_mutation_index)"
 python3 - "$temp/large.json" <<'PY'
 import json
 import sys
@@ -402,7 +458,7 @@ with open(sys.argv[1], "w", encoding="utf-8") as output:
     )
 PY
 put_file "$large_writer" large "$temp/large.json"
-large_index="$(jq -er '.appliedIndex | select(type == "number" and . > 0)' "$temp/curl-response.txt")"
+large_index="$(last_mutation_index)"
 put_value "$large_writer" checkpoint-a a 44444444-5555-6666-7777-888888888888
 put_value "$large_writer" checkpoint-b b 55555555-6666-7777-8888-999999999999
 put_value "$large_writer" checkpoint-c c 66666666-7777-8888-9999-aaaaaaaaaaaa
@@ -415,8 +471,7 @@ for id in "$leader" "$large_writer"; do
   wait_snapshot_event "$id" "Compacted Raft log through snapshot index " "$large_index"
 done
 previous_log_lines="$(wc -l <"$temp/node-$lagger.log")"
-start_node "$lagger"
-wait_http "$lagger"
+reopen_lagging_node "$lagger" "$color_index" "$leader" "$large_writer"
 wait_snapshot_event "$lagger" "Restored incoming Raft snapshot at index " "$large_index" "$((previous_log_lines + 1))"
 verify_large_value "$lagger" "$large_index"
 put_value "$lagger" snapshot-request present "$snapshot_request"
@@ -426,11 +481,15 @@ if ! jq -e --argjson index "$snapshot_request_index" \
   exit 1
 fi
 
-leader="$(wait_any_leader 1 2 3)"
-crash_node "$leader"
+crashed="$(wait_any_leader 1 2 3)"
+if [[ "$restart_dll" != "$dll" && "$crashed" == "$lagger" ]]; then
+  # A mixed-build write must require the restarted node, even if it won election.
+  crashed="$large_writer"
+fi
+crash_node "$crashed"
 survivors=()
 for id in 1 2 3; do
-  if [[ "$id" != "$leader" ]]; then
+  if [[ "$id" != "$crashed" ]]; then
     survivors+=("$id")
   fi
 done
@@ -446,12 +505,12 @@ fi
 put_value "$surviving_writer" shape circle aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee
 wait_value "$new_leader" shape circle
 
-start_node "$leader"
-wait_http "$leader"
+start_node "$crashed"
+wait_http "$crashed"
 put_value "$surviving_writer" resumed yes 22222222-3333-4444-5555-666666666666
-wait_value "$leader" color blue
-wait_value "$leader" shape circle
-wait_value "$leader" resumed yes
+wait_value "$crashed" color blue
+wait_value "$crashed" shape circle
+wait_value "$crashed" resumed yes
 
 for id in 1 2 3; do
   stop_node "$id"
@@ -471,4 +530,8 @@ done
 wait_value 2 color blue
 wait_value 2 shape circle
 
-echo "durable KV cluster smoke passed"
+if [[ "$restart_dll" != "$dll" ]]; then
+  echo "durable KV cluster smoke passed (mixed builds)"
+else
+  echo "durable KV cluster smoke passed"
+fi

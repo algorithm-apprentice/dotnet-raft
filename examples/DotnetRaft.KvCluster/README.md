@@ -236,3 +236,24 @@ continues with the remaining quorum, rejoins the old leader from the same
 directory, and restarts the complete cluster. Transient mutation failures
 are retried with the same durable request ID. Failures report snapshot
 events and recent logs for every node before cleanup.
+
+### Check a mixed-build upgrade and rollback
+
+For the [raftpb proto3 migration](../../docs/adr/0012-use-proto3-for-raftpb.md),
+build the candidate and a separate checkout at `56a4a4d` (the last proto2
+build). Run these commands in the candidate checkout:
+
+```bash
+legacy=/absolute/path/to/legacy-checkout
+dotnet build "$legacy/examples/DotnetRaft.KvCluster" -c Release
+dotnet build examples/DotnetRaft.KvCluster -c Release
+./eng/smoke-durable-kv-cluster.sh "$legacy" "$PWD"
+./eng/smoke-durable-kv-cluster.sh "$PWD" "$legacy"
+```
+
+The first checkout starts all three nodes; the second supplies only the
+restarted follower. That follower must read its old data before the other
+peers restart, then install the incoming snapshot and commit writes with a
+peer on the other build. Reversing the checkout order tests rollback on data
+written by the new build. Run the two commands sequentially; they use the
+same loopback ports and independent temporary databases.

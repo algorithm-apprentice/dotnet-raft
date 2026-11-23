@@ -18,6 +18,7 @@ alternatives it rejected. Find the current mechanism in the
 | [0002: Define the compatibility surface](0002-release-and-compatibility-contract.md) | Why binary, wire, host behavior, and persisted data must be checked together. |
 | [0010: Separate domain state from its encoding](0010-separate-state-from-serialization.md) | First migration of hard state, ReadIndex results, and KV commands. |
 | [0011: Complete domain and codec separation](0011-complete-domain-codec-separation.md) | How the core remains codec-independent and how typed local work preserves completion ordering. |
+| [0012: Move raftpb to proto3](0012-use-proto3-for-raftpb.md) | How presence, enum handling, and unpacked membership keep the old wire and disk formats readable in both directions. |
 
 An ADR is not a backlog. When changing a decision, explain what problem
 changed and keep the earlier context traceable in Git. See

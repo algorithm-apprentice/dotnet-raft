@@ -12,9 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //
-// Modified for dotnet-raft by adding the C# namespace option.
+// Modified for dotnet-raft by adding the C# namespace option and using proto3
+// with explicit scalar presence and the original unpacked membership encoding.
 
-syntax = "proto2";
+syntax = "proto3";
 package raftpb;
 
 option csharp_namespace = "DotnetRaft.Protobuf.Wire";
@@ -34,14 +35,14 @@ message Entry {
 }
 
 message SnapshotMetadata {
-  optional ConfState conf_state = 1;
-  optional uint64    index      = 2;
-  optional uint64    term       = 3;
+  ConfState       conf_state = 1;
+  optional uint64 index      = 2;
+  optional uint64 term       = 3;
 }
 
 message Snapshot {
-  optional bytes            data     = 1;
-  optional SnapshotMetadata metadata = 2;
+  optional bytes   data     = 1;
+  SnapshotMetadata metadata = 2;
 }
 
 enum MessageType {
@@ -81,7 +82,7 @@ message Message {
   repeated Entry       entries     = 7;
   optional uint64      commit      = 8;
   optional uint64      vote        = 13;
-  optional Snapshot    snapshot    = 9;
+  Snapshot             snapshot    = 9;
   optional bool        reject      = 10;
   optional uint64      rejectHint  = 11;
   optional bytes       context     = 12;
@@ -101,10 +102,10 @@ enum ConfChangeTransition {
 }
 
 message ConfState {
-  repeated uint64 voters          = 1;
-  repeated uint64 learners        = 2;
-  repeated uint64 voters_outgoing = 3;
-  repeated uint64 learners_next   = 4;
+  repeated uint64 voters          = 1 [packed = false];
+  repeated uint64 learners        = 2 [packed = false];
+  repeated uint64 voters_outgoing = 3 [packed = false];
+  repeated uint64 learners_next   = 4 [packed = false];
   optional bool   auto_leave      = 5;
 }
 

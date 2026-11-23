@@ -28,7 +28,7 @@ public sealed class ProtocolModelTests
     }
 
     [Fact]
-    public void ExplicitZeroRetainsProto2Presence()
+    public void HardStateDistinguishesAnExplicitZeroFromAnAbsentField()
     {
         var absent = new DotnetRaft.Protobuf.Wire.HardState();
         var explicitZero = new DotnetRaft.Protobuf.Wire.HardState

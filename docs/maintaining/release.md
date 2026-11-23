@@ -11,7 +11,8 @@ not publish anything to NuGet.org.
 |---|---|
 | Core and SQLite managed API | [`PublicApi.approved.txt`](../../tests/DotnetRaft.Tests/Release/PublicApi.approved.txt), [`SqlitePublicApi.approved.txt`](../../tests/DotnetRaft.Tests/Release/SqlitePublicApi.approved.txt) |
 | Codec managed API | [`ProtobufPublicApi.approved.txt`](../../tests/DotnetRaft.Tests/Release/ProtobufPublicApi.approved.txt) |
-| Protobuf wire numbers, types, cardinality, and enums | [`ProtocolDescriptor.approved.txt`](../../tests/DotnetRaft.Tests/Release/ProtocolDescriptor.approved.txt) |
+| Protobuf wire numbers, types, cardinality, packing, and enums | [`ProtocolDescriptor.approved.txt`](../../tests/DotnetRaft.Tests/Release/ProtocolDescriptor.approved.txt) |
+| Protobuf presence and original binary output | [Legacy wire fixtures](../../tests/DotnetRaft.Tests/Protocol/ProtobufWireCompatibilityTests.cs) and the [mixed-build smoke](../../examples/DotnetRaft.KvCluster/README.md#check-a-mixed-build-upgrade-and-rollback) |
 | SQLite persisted format | [`SqliteSchema.approved.sql`](../../tests/DotnetRaft.Sqlite.Tests/Schema/SqliteSchema.approved.sql) and [reopen/recovery tests](../../tests/DotnetRaft.Sqlite.Tests/SqliteStorageDurabilityTests.cs) |
 | Ready, durability, and host recovery behavior | The [integration contract](../integration/README.md) and [host boundary tests](testing.md) |
 | Packaged files, dependencies, and symbols | [Release verifier](../../tools/DotnetRaft.ReleaseVerifier/Program.cs) and a consumer restore for each package |

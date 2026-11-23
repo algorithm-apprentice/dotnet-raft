@@ -1,22 +1,20 @@
 using DotnetRaft.Storage.Sqlite;
 
-using Google.Protobuf;
-
 using Microsoft.Data.Sqlite;
 
 using static DotnetRaft.Sqlite.Tests.SqliteStorageTestSupport;
-
-using ProtocolHardState = DotnetRaft.Protobuf.Wire.HardState;
 
 namespace DotnetRaft.Sqlite.Tests;
 
 public sealed class SqliteHardStateCompatibilityTests
 {
     [Fact]
-    public void ReopensStateWrittenWithTheOldProtobufModel()
+    public void ReopensLegacyHardStateWithoutRewritingAbsentFields()
     {
         using TemporaryStorageDirectory directory = CreateDirectory();
-        InitializeWithLegacyState(directory, new ProtocolHardState { Term = 5 });
+        // The proto2 writer at 56a4a4d emitted only term for this partial state.
+        byte[] legacy = [0x08, 0x05];
+        InitializeWithLegacyState(directory, legacy);
 
         using (SqliteStorage storage = CreateStorage(directory))
         {
@@ -26,14 +24,11 @@ public sealed class SqliteHardStateCompatibilityTests
 
         // Appending entries without a hard-state update must not rewrite
         // the old blob and change the presence of its zero-valued fields.
-        ProtocolHardState stored = ReadProtocolState(directory);
-        Assert.Equal(5UL, stored.Term);
-        Assert.False(stored.HasVote);
-        Assert.False(stored.HasCommit);
+        Assert.Equal(legacy, ReadStoredHardState(directory));
     }
 
     [Fact]
-    public void NewStateCanStillBeReadByTheProtobufParser()
+    public void HardStateWithZeroVoteAndCommitRetainsLegacyEncoding()
     {
         using TemporaryStorageDirectory directory = CreateDirectory();
         var state = new RaftHardState(Term: ulong.MaxValue, Vote: 0, Commit: 0);
@@ -42,17 +37,14 @@ public sealed class SqliteHardStateCompatibilityTests
             storage.SetHardState(state);
         }
 
-        ProtocolHardState stored = ReadProtocolState(directory);
-        Assert.True(stored.HasTerm);
-        Assert.True(stored.HasVote);
-        Assert.True(stored.HasCommit);
-        Assert.Equal(state, new RaftHardState(stored.Term, stored.Vote, stored.Commit));
+        byte[] legacy = Convert.FromHexString("08FFFFFFFFFFFFFFFFFF0110001800");
+        Assert.Equal(legacy, ReadStoredHardState(directory));
 
         using SqliteStorage reopened = CreateStorage(directory);
         Assert.Equal(state, reopened.GetHardState());
     }
 
-    private static void InitializeWithLegacyState(TemporaryStorageDirectory directory, ProtocolHardState state)
+    private static void InitializeWithLegacyState(TemporaryStorageDirectory directory, byte[] payload)
     {
         using (SqliteStorage initialize = CreateStorage(directory))
         {
@@ -62,15 +54,15 @@ public sealed class SqliteHardStateCompatibilityTests
         using SqliteConnection connection = OpenRaw(directory.DatabasePath);
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "UPDATE raft_metadata SET hard_state = $state WHERE singleton = 1;";
-        command.Parameters.AddWithValue("$state", state.ToByteArray());
+        command.Parameters.AddWithValue("$state", payload);
         Assert.Equal(1, command.ExecuteNonQuery());
     }
 
-    private static ProtocolHardState ReadProtocolState(TemporaryStorageDirectory directory)
+    private static byte[] ReadStoredHardState(TemporaryStorageDirectory directory)
     {
         using SqliteConnection connection = OpenRaw(directory.DatabasePath);
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT hard_state FROM raft_metadata WHERE singleton = 1;";
-        return ProtocolHardState.Parser.ParseFrom(Assert.IsType<byte[]>(command.ExecuteScalar()));
+        return Assert.IsType<byte[]>(command.ExecuteScalar());
     }
 }
