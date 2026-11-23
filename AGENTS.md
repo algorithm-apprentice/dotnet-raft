@@ -29,6 +29,11 @@
   extract independent operations and predicates until each leaf function has
   one clear purpose, rather than mixing scheduling, validation, I/O, and
   application decisions in the same body.
+- Group state by the invariant and lifetime its owner maintains. Prefer a named
+  value or state slot when fields must be published or cleared together. Do not
+  replace a flat field list with an unbounded `State`/`Options` bag or hide the
+  ordering between distinct owners. When a review identifies a pattern, check
+  other owners for the same problem before treating it as a one-file cleanup.
 - After decomposition, search for equivalent helpers and merge redundant
   implementations when their contracts, invariants, and owner are the same.
   Similar-looking code with different durability, error, or lifetime semantics

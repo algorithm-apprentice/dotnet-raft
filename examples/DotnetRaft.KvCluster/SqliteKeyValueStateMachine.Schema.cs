@@ -63,24 +63,24 @@ public sealed partial class SqliteKeyValueStateMachine
             throw new InvalidDataException("Application database is not empty.");
         }
 
-        InitializeSchema();
+        var initial = new AppliedPrefix(0, NormalizeConfState(new ConfState()));
+        InitializeSchema(initial);
         ValidateSchema();
-        physicalApplied = 0;
-        confState = NormalizeConfState(new ConfState());
+        appliedPrefix = initial;
     }
 
-    private void InitializeSchema()
+    private void InitializeSchema(AppliedPrefix initial)
     {
         using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
         ExecuteNonQuery(MetadataTableSql, transaction);
         ExecuteNonQuery(KeyValueTableSql, transaction);
         ExecuteNonQuery(RequestsTableSql, transaction);
-        InsertInitialMetadata(NormalizeConfState(new ConfState()), transaction);
+        InsertInitialMetadata(initial, transaction);
         ExecuteNonQuery($"PRAGMA user_version = {SchemaVersion};", transaction);
         transaction.Commit();
     }
 
-    private void InsertInitialMetadata(ConfState configuration, SqliteTransaction transaction)
+    private void InsertInitialMetadata(AppliedPrefix initial, SqliteTransaction transaction)
     {
         using SqliteCommand insert = CreateCommand(
             """
@@ -91,8 +91,8 @@ public sealed partial class SqliteKeyValueStateMachine
         insert.Parameters.AddWithValue("$format", Format);
         insert.Parameters.AddWithValue("$schemaVersion", SchemaVersion);
         AddBlob(insert, "$nodeId", EncodeUInt64(NodeId));
-        AddBlob(insert, "$physicalApplied", EncodeUInt64(0));
-        AddBlob(insert, "$confState", ProtobufRaftCodec.EncodeMembership(configuration));
+        AddBlob(insert, "$physicalApplied", EncodeUInt64(initial.Index));
+        AddBlob(insert, "$confState", ProtobufRaftCodec.EncodeMembership(initial.Configuration));
         insert.ExecuteNonQuery();
     }
 
@@ -151,14 +151,15 @@ public sealed partial class SqliteKeyValueStateMachine
 
         ValidateMetadataFormat(reader);
         ValidateNodeBinding(reader);
-        physicalApplied = DecodeUInt64(reader.GetFieldValue<byte[]>(3), "Physical applied index");
-        confState = ReadStoredConfiguration(reader);
+        var recovered = new AppliedPrefix(DecodeUInt64(reader.GetFieldValue<byte[]>(3), "Physical applied index"),
+            ReadStoredConfiguration(reader));
         if (reader.Read())
         {
             throw new InvalidDataException("Application metadata contains multiple singleton rows.");
         }
 
-        ValidateRequestResultBounds();
+        ValidateRequestResultBounds(recovered.Index);
+        appliedPrefix = recovered;
     }
 
     private static void ValidateMetadataFormat(SqliteDataReader reader)
@@ -190,11 +191,11 @@ public sealed partial class SqliteKeyValueStateMachine
         }
     }
 
-    private void ValidateRequestResultBounds()
+    private void ValidateRequestResultBounds(ulong appliedIndex)
     {
         using SqliteCommand requests = CreateCommand("SELECT MAX(result_index) FROM requests;");
         object? maximum = requests.ExecuteScalar();
-        if (maximum is byte[] encoded && DecodeUInt64(encoded, "Maximum request result index") > physicalApplied)
+        if (maximum is byte[] encoded && DecodeUInt64(encoded, "Maximum request result index") > appliedIndex)
         {
             throw new InvalidDataException("Application request result exceeds physical application.");
         }

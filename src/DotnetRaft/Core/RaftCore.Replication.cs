@@ -22,7 +22,7 @@ internal sealed partial class RaftCore
                 "The follower has no known leader.");
         }
 
-        if (DisableProposalForwarding)
+        if (proposals.Policy.DisableForwarding)
         {
             throw new ProposalDroppedException(
                 "Proposal forwarding is disabled.");
@@ -168,7 +168,7 @@ internal sealed partial class RaftCore
                     Log.Applied,
                     alreadyJoint,
                     wantsLeaveJoint)
-                && !DisableConfChangeValidation)
+                && !proposals.Policy.DisableConfigurationValidation)
             {
                 owned[offset] = new Entry();
                 continue;

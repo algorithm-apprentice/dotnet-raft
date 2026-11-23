@@ -24,7 +24,8 @@ public sealed partial class SqliteKeyValueStateMachine
             ThrowIfDisposed();
             List<SnapshotValue> values = ReadSnapshotValues();
             List<SnapshotRequest> requests = ReadSnapshotRequests();
-            var snapshot = new ApplicationSnapshot(1, physicalApplied, ProtobufRaftCodec.EncodeMembership(confState), values, requests);
+            var snapshot = new ApplicationSnapshot(1, appliedPrefix.Index,
+                ProtobufRaftCodec.EncodeMembership(appliedPrefix.Configuration), values, requests);
             return RaftBytes.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(snapshot, SnapshotOptions));
         }
     }
@@ -106,10 +107,10 @@ public sealed partial class SqliteKeyValueStateMachine
 
     private void EnsureSnapshotDoesNotMoveBackward(ulong index)
     {
-        if (index < physicalApplied)
+        if (index < appliedPrefix.Index)
         {
             throw new InvalidOperationException(
-                $"Application snapshot index {index} is behind physical application {physicalApplied}.");
+                $"Application snapshot index {index} is behind physical application {appliedPrefix.Index}.");
         }
     }
 
@@ -120,10 +121,7 @@ public sealed partial class SqliteKeyValueStateMachine
         ExecuteNonQuery("DELETE FROM requests;", transaction);
         RestoreSnapshotValues(snapshot.Values, transaction);
         RestoreSnapshotRequests(snapshot.Requests, transaction);
-        UpdateMetadata(index, configuration, transaction);
-        transaction.Commit();
-        physicalApplied = index;
-        confState = configuration;
+        CommitAppliedPrefix(new AppliedPrefix(index, configuration), transaction);
     }
 
     private void RestoreSnapshotValues(IEnumerable<SnapshotValue> values, SqliteTransaction transaction)

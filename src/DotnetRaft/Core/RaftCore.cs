@@ -43,18 +43,9 @@ internal sealed partial class RaftCore
             randomOffset);
 
         Id = validated.Id;
-        AsyncStorageWrites = validated.AsyncStorageWrites;
         MaxMessageSize = validated.MaxSizePerMessage;
-        MaxCommittedSizePerReady =
-            validated.MaxCommittedSizePerReady;
-        proposals = new ProposalAdmission(
-            validated.MaxUncommittedEntriesSize);
-        CheckQuorum = validated.CheckQuorum;
-        PreVote = validated.PreVote;
-        DisableProposalForwarding =
-            validated.DisableProposalForwarding;
-        DisableConfChangeValidation =
-            validated.DisableConfChangeValidation;
+        proposals = new ProposalAdmission(validated.Proposals);
+        Election = validated.Election;
         StepDownOnRemoval = validated.StepDownOnRemoval;
         Logger = validated.Logger;
         traceSink = validated.TraceSink;
@@ -135,22 +126,11 @@ internal sealed partial class RaftCore
 
     internal IRaftLogger Logger { get; }
 
-    internal bool AsyncStorageWrites { get; }
-
     internal ulong MaxMessageSize { get; }
 
-    internal ulong MaxCommittedSizePerReady { get; }
+    internal ElectionPolicy Election { get; }
 
-    internal ulong MaxUncommittedEntriesSize =>
-        proposals.MaxUncommittedSize;
-
-    internal bool CheckQuorum { get; }
-
-    internal bool PreVote { get; }
-
-    internal bool DisableProposalForwarding { get; }
-
-    internal bool DisableConfChangeValidation { get; }
+    internal ProposalPolicy ProposalPolicy => proposals.Policy;
 
     internal bool StepDownOnRemoval { get; }
 
@@ -635,7 +615,7 @@ internal sealed partial class RaftCore
             return;
         }
 
-        if ((CheckQuorum || PreVote)
+        if ((Election.CheckQuorum || Election.PreVote)
             && message.Type is
                 MessageType.MsgApp or
                 MessageType.MsgHeartbeat)

@@ -12,10 +12,10 @@ public sealed partial class SqliteKeyValueStateMachine
         lock (gate)
         {
             ThrowIfDisposed();
-            EnsureNext(physicalApplied, index);
+            EnsureNext(appliedPrefix.Index, index);
             using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
             KvApplyResult result = ApplyCommandCore(index, index, command, fingerprint, transaction);
-            CommitAppliedPrefix(index, transaction);
+            CommitAppliedPrefix(appliedPrefix with { Index = index }, transaction);
             return result;
         }
     }
@@ -32,7 +32,7 @@ public sealed partial class SqliteKeyValueStateMachine
             using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
             ulong appliedThrough = entries[^1].Index;
             ApplyBatchInTransaction(entries, appliedThrough, transaction, results);
-            CommitAppliedPrefix(appliedThrough, transaction);
+            CommitAppliedPrefix(appliedPrefix with { Index = appliedThrough }, transaction);
         }
 
         return results;
@@ -44,7 +44,7 @@ public sealed partial class SqliteKeyValueStateMachine
         SqliteTransaction transaction,
         List<KvApplyResult> results)
     {
-        ulong previous = physicalApplied;
+        ulong previous = appliedPrefix.Index;
         foreach (CommittedKvEntry entry in entries)
         {
             EnsureNext(previous, entry.Index);
@@ -76,11 +76,11 @@ public sealed partial class SqliteKeyValueStateMachine
             Conflict: false).ForRequest(fingerprint);
     }
 
-    private void CommitAppliedPrefix(ulong index, SqliteTransaction transaction)
+    private void CommitAppliedPrefix(AppliedPrefix next, SqliteTransaction transaction)
     {
-        UpdateMetadata(index, confState, transaction);
+        UpdateMetadata(next, transaction);
         transaction.Commit();
-        physicalApplied = index;
+        appliedPrefix = next;
     }
 
     public void AdvanceNoOp(ulong index)
@@ -88,9 +88,9 @@ public sealed partial class SqliteKeyValueStateMachine
         lock (gate)
         {
             ThrowIfDisposed();
-            EnsureNext(physicalApplied, index);
+            EnsureNext(appliedPrefix.Index, index);
             using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
-            CommitAppliedPrefix(index, transaction);
+            CommitAppliedPrefix(appliedPrefix with { Index = index }, transaction);
         }
     }
 
@@ -101,12 +101,9 @@ public sealed partial class SqliteKeyValueStateMachine
         lock (gate)
         {
             ThrowIfDisposed();
-            EnsureNext(physicalApplied, index);
+            EnsureNext(appliedPrefix.Index, index);
             using SqliteTransaction transaction = connection.BeginTransaction(deferred: false);
-            UpdateMetadata(index, owned, transaction);
-            transaction.Commit();
-            confState = owned;
-            physicalApplied = index;
+            CommitAppliedPrefix(new AppliedPrefix(index, owned), transaction);
         }
     }
 

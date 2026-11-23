@@ -29,7 +29,7 @@ internal sealed partial class RaftCore
     internal void TickLeader()
     {
         LeaderClockTick tick = TickLeaderClocks();
-        if (tick.ElectionDue && CheckQuorum)
+        if (tick.ElectionDue && Election.CheckQuorum)
         {
             Step(new Message
             {
@@ -87,7 +87,7 @@ internal sealed partial class RaftCore
     private void HandleHup()
     {
         HandleHup(
-            PreVote
+            Election.PreVote
                 ? CampaignType.PreElection
                 : CampaignType.Election);
     }
@@ -119,7 +119,7 @@ internal sealed partial class RaftCore
             IReadOnlyList<Entry> entries = Log.Slice(
                 next,
                 high,
-                MaxCommittedSizePerReady);
+                Log.ApplicationByteLimit);
             if (entries.Count == 0)
             {
                 throw new RaftInvariantException(
@@ -409,7 +409,7 @@ internal sealed partial class RaftCore
         return message.Type is
                 MessageType.MsgVote or
                 MessageType.MsgPreVote
-            && CheckQuorum
+            && Election.CheckQuorum
             && LeaderId != RaftMessageTargets.None
             && clock.ElectionElapsed <
                 clock.ElectionTick

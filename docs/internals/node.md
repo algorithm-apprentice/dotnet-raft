@@ -15,15 +15,15 @@ paginated. Acknowledging work that the host never received would skip work
 both in the live application and on recovery if that cursor were persisted.
 
 Once the work is detached, `Ready` takes ownership rather than copying it
-again. The facade keeps the hard-state baseline and completion metadata
-separately; mirrored async fields, worker requests, and worker completions
-do not share mutable entries. Output queues are cleared at acceptance, not
-when a synthetic message trace is emitted.
+again. The facade keeps the last delivered soft/hard state as a pair,
+separate from any incomplete work. Mirrored async fields, worker requests,
+and worker completions do not share mutable entries. Output queues are
+cleared at acceptance, not when a synthetic message trace is emitted.
 
-In synchronous mode, one exact batch is outstanding. `RawNode` retains
-separate completion metadata, so a later caller mutation or new work cannot
-change what `Advance` confirms. The order in `AdvanceCore` matters: first
-step deferred self-responses (including the leader's self-append), then
+In synchronous mode, one exact batch is outstanding. `RawNode` binds its
+identity to detached completion metadata, so a later caller mutation or
+new work cannot change what `Advance` confirms. The order in `AdvanceCore`
+matters: first step deferred self-responses (including the leader's self-append), then
 stabilize entries/snapshot and acknowledge the application slice. A self
 append response can commit while the acknowledged term is still available
 in the unstable view. Completion releases accounting for the acknowledged
@@ -59,6 +59,8 @@ and [response tests](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageRespo
 
 [`RaftNode`](../../src/DotnetRaft/RaftNode.cs) wraps the same `RawNode` with
 one owner for commands, proposals, ticks, Ready publication, and stop.
+Its Ready slot holds either a waiter or a synchronous batch awaiting
+advance. Cancellation can remove only the matching waiter.
 Separate scheduler lanes keep an eligible stream from indefinitely hiding
 another. A request can be canceled while waiting; once claimed, the
 operation's actual result must win. Otherwise the facade could report a

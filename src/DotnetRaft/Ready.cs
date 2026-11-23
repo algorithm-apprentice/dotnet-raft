@@ -44,7 +44,7 @@ public sealed class Ready
         StorageApplyWork? applyWork)
     {
         // The producer transfers detached values, including independent
-        // mutable protobufs for each work/completion stream.
+        // mutable entries and messages for each work/completion stream.
         SoftState = softState;
         HardState = hardState;
         Snapshot = snapshot;

@@ -19,6 +19,8 @@ applies entries in order, checking each is the next index. The
 [schema approval](../../tests/DotnetRaft.Tests/Examples/TestData/DurableApplicationSchema.approved.sql)
 records the exact tables; the design depends on the cursor, configuration,
 and command result committing together, not on a specific SQL listing here.
+The application replaces its in-memory `AppliedPrefix` (physical index and
+membership) only after that transaction commits, under the same lock.
 
 ## Follow a fresh KV write
 

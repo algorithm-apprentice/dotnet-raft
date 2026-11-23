@@ -10,17 +10,15 @@ internal sealed record ValidatedRaftConfig(
     int HeartbeatTick,
     IStorage Storage,
     ulong Applied,
-    bool AsyncStorageWrites,
     ulong MaxSizePerMessage,
     ulong MaxCommittedSizePerReady,
-    ulong MaxUncommittedEntriesSize,
+    ProposalPolicy Proposals,
     int MaxInflightMessages,
     ulong MaxInflightBytes,
-    bool CheckQuorum,
-    bool PreVote,
+    ElectionPolicy Election,
     ReadOnlyOption ReadOnlyOption,
     IRaftTraceSink? TraceSink,
     IRaftLogger Logger,
-    bool DisableProposalForwarding,
-    bool DisableConfChangeValidation,
     bool StepDownOnRemoval);
+
+internal readonly record struct ElectionPolicy(bool CheckQuorum, bool PreVote);

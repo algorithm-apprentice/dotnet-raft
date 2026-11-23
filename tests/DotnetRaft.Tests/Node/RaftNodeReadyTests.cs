@@ -139,6 +139,46 @@ public sealed class RaftNodeReadyTests
     }
 
     [Fact]
+    public async Task CancelingAnotherReadyRequestDoesNotClearTheOutstandingBatch()
+    {
+        var trace = new BlockingTraceSink(traceEvent =>
+            traceEvent.Type == RaftTraceEventType.MessageReceived
+            && traceEvent.Message?.Type == MessageType.MsgHeartbeat);
+        (RaftNode node, MemoryStorage storage) = RestartNode(voters: [1, 2], traceSink: trace);
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            await node.CampaignAsync();
+            Ready election = await WaitReadyAsync(node);
+            Task heartbeat = node.StepAsync(new Message
+            {
+                Type = MessageType.MsgHeartbeat,
+                From = 2,
+                To = 1,
+                Term = 2,
+            }).AsTask();
+            Assert.True(trace.Entered.Wait(DeadlockGuardTimeout));
+
+            Task<Ready> canceled = node.WaitForReadyAsync(cancellation.Token).AsTask();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled.WaitAsync(DeadlockGuardTimeout));
+            trace.Release.Set();
+            await heartbeat.WaitAsync(DeadlockGuardTimeout);
+
+            await PersistAndAdvanceAsync(node, storage, election).WaitAsync(DeadlockGuardTimeout);
+            Ready follower = await WaitReadyAsync(node);
+            Assert.Equal(2UL, follower.HardState?.Term);
+            Assert.Equal(2UL, follower.SoftState?.LeaderId);
+            await PersistAndAdvanceAsync(node, storage, follower).WaitAsync(DeadlockGuardTimeout);
+        }
+        finally
+        {
+            trace.Release.Set();
+            await node.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task CanceledReadyWaitDoesNotAcceptBatch()
     {
         (RaftNode node, MemoryStorage storage) =

@@ -10,8 +10,7 @@ public sealed class ProposalAdmissionTests
     [Fact]
     public void PrepareIsPureAndCommitPointsAreExplicit()
     {
-        var admission = new ProposalAdmission(
-            maxUncommittedSize: 10);
+        var admission = new ProposalAdmission(new ProposalPolicy(10));
         admission.SetUncommittedSizeForTesting(4);
         admission.SetPendingConfigurationIndex(7);
         Entry[] entries =
@@ -53,8 +52,7 @@ public sealed class ProposalAdmissionTests
     [Fact]
     public void QuotaPreparationPreservesExistingAdmissionRules()
     {
-        var bounded = new ProposalAdmission(
-            maxUncommittedSize: 5);
+        var bounded = new ProposalAdmission(new ProposalPolicy(5));
         bounded.SetUncommittedSizeForTesting(4);
         ProposalAdmissionPlan rejected =
             bounded.Prepare(
@@ -63,8 +61,7 @@ public sealed class ProposalAdmissionTests
         Assert.False(rejected.Accepted);
         Assert.Equal(4UL, bounded.UncommittedSize);
 
-        var first = new ProposalAdmission(
-            maxUncommittedSize: 5);
+        var first = new ProposalAdmission(new ProposalPolicy(5));
         ProposalAdmissionPlan oversizedFirst =
             first.Prepare(
                 [EntryWithPayload(6)],
@@ -74,8 +71,7 @@ public sealed class ProposalAdmissionTests
             6UL,
             oversizedFirst.UncommittedSize);
 
-        var overflow = new ProposalAdmission(
-            maxUncommittedSize: ulong.MaxValue);
+        var overflow = new ProposalAdmission(new ProposalPolicy(ulong.MaxValue));
         overflow.SetUncommittedSizeForTesting(
             ulong.MaxValue);
         ProposalAdmissionPlan overflowed =
@@ -84,8 +80,7 @@ public sealed class ProposalAdmissionTests
                 pendingConfigurationIndex: 0);
         Assert.False(overflowed.Accepted);
 
-        var exact = new ProposalAdmission(
-            maxUncommittedSize: ulong.MaxValue);
+        var exact = new ProposalAdmission(new ProposalPolicy(ulong.MaxValue));
         exact.SetUncommittedSizeForTesting(
             ulong.MaxValue - 1);
         ProposalAdmissionPlan exactMaximum =
@@ -101,9 +96,6 @@ public sealed class ProposalAdmissionTests
     [Fact]
     public void ConfigurationPreparationMatchesPendingAndJointRules()
     {
-        var admission = new ProposalAdmission(
-            maxUncommittedSize: 10);
-
         Assert.True(
             ProposalAdmission.CanAcceptConfiguration(
                 candidatePendingIndex: 6,
@@ -151,8 +143,7 @@ public sealed class ProposalAdmissionTests
     [Fact]
     public void ReleaseAndResetOwnAllAdmissionState()
     {
-        var admission = new ProposalAdmission(
-            maxUncommittedSize: 10);
+        var admission = new ProposalAdmission(new ProposalPolicy(10));
         admission.SetUncommittedSizeForTesting(7);
         admission.SetPendingConfigurationIndex(9);
 

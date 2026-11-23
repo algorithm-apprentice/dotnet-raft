@@ -30,16 +30,13 @@ public sealed class RaftNode : IRaftNode
     private readonly LinkedList<ProposalRequest>
         _blockedProposals = new();
     private readonly RawNode _rawNode;
-    private readonly bool _asyncStorageWrites;
     private readonly IRaftLogger _logger;
     private readonly ulong _id;
     private readonly Task _runner;
-    private ReadyRequest? _readyWaiter;
-    private Ready? _outstandingReady;
+    private ReadySlot _ready;
     private Exception? _terminalCause;
     private Status? _terminalStatus;
-    private bool _hasObservedLocalProgress;
-    private bool _removedFromProgress;
+    private LocalMembership _localMembership;
     private int _missedTicks;
     private int _schedulerStart;
     private int _state;
@@ -52,8 +49,6 @@ public sealed class RaftNode : IRaftNode
         ArgumentNullException.ThrowIfNull(logger);
 
         _rawNode = rawNode;
-        _asyncStorageWrites =
-            rawNode.AsyncStorageWrites;
         _logger = logger;
         _id = ExecuteOwned(
             () => _rawNode.GetBasicStatus().Id);
@@ -246,7 +241,7 @@ public sealed class RaftNode : IRaftNode
     {
         Message owned = message.Clone();
         NetworkMessageValidation.ValidateType(owned);
-        return !_asyncStorageWrites && RaftMessageTargets.IsLocal(owned.From)
+        return !_rawNode.AsyncStorageWrites && RaftMessageTargets.IsLocal(owned.From)
             ? QueueOperation(_ => throw new NotSupportedException("Storage-thread responses require asynchronous storage writes."), cancellationToken)
             : QueueOperation(rawNode => rawNode.StepFixtureStorageResponse(owned), cancellationToken);
     }
@@ -320,7 +315,7 @@ public sealed class RaftNode : IRaftNode
     public ValueTask AdvanceAsync(
         CancellationToken cancellationToken = default)
     {
-        if (_asyncStorageWrites)
+        if (_rawNode.AsyncStorageWrites)
         {
             return QueueOperation(
                 _ => throw new NotSupportedException(
@@ -489,7 +484,7 @@ public sealed class RaftNode : IRaftNode
             _ticks.Writer.TryComplete();
             _wake.Writer.TryComplete();
             FailPending(terminal);
-            _outstandingReady = null;
+            _ready.Clear();
 
             if (terminalFault is null)
             {
@@ -597,9 +592,8 @@ public sealed class RaftNode : IRaftNode
 
     private void TryPublishReady()
     {
-        ReadyRequest? request = _readyWaiter;
-        if (request is null
-            || _outstandingReady is not null)
+        ReadyRequest? request = _ready.Waiter;
+        if (request is null)
         {
             return;
         }
@@ -623,7 +617,7 @@ public sealed class RaftNode : IRaftNode
 
         if (!TryClaimForDispatch(request))
         {
-            _readyWaiter = null;
+            _ready.RemoveWaiter(request);
             request.ReleaseRegistration();
             request.Fail(
                 GetUnavailableException()
@@ -631,14 +625,14 @@ public sealed class RaftNode : IRaftNode
             return;
         }
 
-        _readyWaiter = null;
+        _ready.RemoveWaiter(request);
         try
         {
             Ready ready = ExecuteOwned(
                 _rawNode.Ready);
-            if (!_asyncStorageWrites)
+            if (!_rawNode.AsyncStorageWrites)
             {
-                _outstandingReady = ready;
+                _ready.PublishBatch(ready);
             }
 
             request.Succeed(ready);
@@ -673,12 +667,9 @@ public sealed class RaftNode : IRaftNode
             {
                 canceled = true;
             }
-            else if (_readyWaiter is null
-                && (_asyncStorageWrites
-                    || _outstandingReady is null))
+            else
             {
-                _readyWaiter = request;
-                stored = true;
+                stored = _ready.TryStoreWaiter(request);
             }
         }
 
@@ -725,7 +716,7 @@ public sealed class RaftNode : IRaftNode
             return;
         }
 
-        if (_outstandingReady is null)
+        if (_ready.Batch is not { } batch)
         {
             request.Fail(
                 new InvalidOperationException(
@@ -735,13 +726,12 @@ public sealed class RaftNode : IRaftNode
 
         try
         {
-            Ready ready = _outstandingReady;
             ExecuteOwned(() =>
             {
-                _rawNode.Advance(ready);
+                _rawNode.Advance(batch);
                 RefreshLocalProgress();
             });
-            _outstandingReady = null;
+            _ready.Clear();
             request.Succeed();
         }
         catch (Exception exception)
@@ -754,7 +744,7 @@ public sealed class RaftNode : IRaftNode
 
     private bool CanProcessProposals()
     {
-        if (_removedFromProgress)
+        if (_localMembership == LocalMembership.Removed)
         {
             return false;
         }
@@ -800,8 +790,11 @@ public sealed class RaftNode : IRaftNode
 
     private void FailPending(Exception exception)
     {
-        _readyWaiter?.Fail(exception);
-        _readyWaiter = null;
+        if (_ready.Waiter is { } waiter)
+        {
+            waiter.Fail(exception);
+            _ready.RemoveWaiter(waiter);
+        }
 
         while (_blockedProposals.First is not null)
         {
@@ -842,12 +835,11 @@ public sealed class RaftNode : IRaftNode
     {
         if (_rawNode.HasPeerProgress(_id))
         {
-            _hasObservedLocalProgress = true;
-            _removedFromProgress = false;
+            _localMembership = LocalMembership.Present;
         }
-        else if (_hasObservedLocalProgress)
+        else if (_localMembership != LocalMembership.Unobserved)
         {
-            _removedFromProgress = true;
+            _localMembership = LocalMembership.Removed;
         }
     }
 
@@ -1010,12 +1002,7 @@ public sealed class RaftNode : IRaftNode
             }
 
             canceled = true;
-            if (ReferenceEquals(
-                    _readyWaiter,
-                    request))
-            {
-                _readyWaiter = null;
-            }
+            _ready.RemoveWaiter(request);
 
             if (request is ProposalRequest proposal
                 && proposal.QueueNode is not null)
@@ -1106,6 +1093,46 @@ public sealed class RaftNode : IRaftNode
         {
             ActiveOwner.Value = previous;
         }
+    }
+
+    private enum LocalMembership
+    {
+        Unobserved,
+        Present,
+        Removed,
+    }
+
+    // The owner publishes batches. Cancellation may remove only the matching
+    // waiter, under the same claim gate used to register that waiter.
+    private struct ReadySlot
+    {
+        private object? _item;
+
+        internal ReadyRequest? Waiter => _item as ReadyRequest;
+        internal Ready? Batch => _item as Ready;
+
+        internal bool TryStoreWaiter(ReadyRequest request)
+        {
+            if (_item is not null)
+            {
+                return false;
+            }
+
+            _item = request;
+            return true;
+        }
+
+        internal void RemoveWaiter(NodeRequest request)
+        {
+            if (ReferenceEquals(_item, request))
+            {
+                _item = null;
+            }
+        }
+
+        internal void PublishBatch(Ready batch) => _item = batch;
+
+        internal void Clear() => _item = null;
     }
 
     private interface ICommand

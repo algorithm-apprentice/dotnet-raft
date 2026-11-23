@@ -7,10 +7,8 @@ namespace DotnetRaft.Core;
 internal sealed class RaftLog
 {
     private readonly IRaftLogger _logger;
-    private readonly ulong _maxApplyingEntriesSize;
     private readonly IStorage _storage;
-    private ulong _applyingEntriesSize;
-    private bool _applyingEntriesPaused;
+    private ApplicationDelivery _application;
 
     internal RaftLog(
         IStorage storage,
@@ -36,7 +34,6 @@ internal sealed class RaftLog
 
         _storage = storage;
         _logger = logger;
-        _maxApplyingEntriesSize = maxApplyingEntriesSize;
         Unstable = new UnstableLog(
             lastIndex + 1,
             [],
@@ -46,21 +43,22 @@ internal sealed class RaftLog
             logger);
 
         Committed = firstIndex - 1;
-        Applying = firstIndex - 1;
-        Applied = firstIndex - 1;
+        _application = new ApplicationDelivery(firstIndex - 1, maxApplyingEntriesSize);
     }
 
     internal ulong Committed { get; private set; }
 
     // Work handed to the host, including any earlier acknowledged prefix.
-    internal ulong Applying { get; private set; }
+    internal ulong Applying => _application.Applying;
 
     // Work acknowledged to Raft; not necessarily the application's physical cursor.
-    internal ulong Applied { get; private set; }
+    internal ulong Applied => _application.Applied;
 
-    internal ulong ApplyingEntriesSize => _applyingEntriesSize;
+    internal ulong ApplicationByteLimit => _application.ByteLimit;
 
-    internal bool ApplyingEntriesPaused => _applyingEntriesPaused;
+    internal ulong ApplyingEntriesSize => _application.OutstandingBytes;
+
+    internal bool ApplyingEntriesPaused => _application.IsPaused;
 
     internal UnstableLog Unstable { get; }
 
@@ -355,7 +353,7 @@ internal sealed class RaftLog
 
     internal IReadOnlyList<Entry> GetNextCommittedEntries(bool allowUnstable)
     {
-        if (_applyingEntriesPaused || HasUnstableSnapshot)
+        if (_application.IsPaused || HasUnstableSnapshot)
         {
             return [];
         }
@@ -367,19 +365,19 @@ internal sealed class RaftLog
             return [];
         }
 
-        if (IsApplyingLimitReached())
+        if (_application.HasReachedLimit)
         {
             throw new RaftInvariantException(
                 "No application byte budget remains while delivery is unpaused.");
         }
 
-        ulong remainingSize = _maxApplyingEntriesSize - _applyingEntriesSize;
+        ulong remainingSize = _application.ByteLimit - _application.OutstandingBytes;
         return Slice(low, high, remainingSize);
     }
 
     internal bool HasNextCommittedEntries(bool allowUnstable)
     {
-        if (_applyingEntriesPaused || HasUnstableSnapshot)
+        if (_application.IsPaused || HasUnstableSnapshot)
         {
             return false;
         }
@@ -400,11 +398,7 @@ internal sealed class RaftLog
                 $"Applying index {index} is outside [{Applying}, {Committed}].");
         }
 
-        Applying = index;
-        _applyingEntriesSize = checked(_applyingEntriesSize + encodedSize);
-        _applyingEntriesPaused =
-            IsApplyingLimitReached()
-            || index < GetMaxApplicableIndex(allowUnstable);
+        _application.Deliver(index, encodedSize, GetMaxApplicableIndex(allowUnstable));
     }
 
     internal void AppliedTo(ulong index, ulong encodedSize)
@@ -415,12 +409,7 @@ internal sealed class RaftLog
                 $"Applied index {index} is outside [{Applied}, {Committed}].");
         }
 
-        Applied = index;
-        Applying = Math.Max(Applying, index);
-        _applyingEntriesSize = _applyingEntriesSize > encodedSize
-            ? _applyingEntriesSize - encodedSize
-            : 0;
-        _applyingEntriesPaused = IsApplyingLimitReached();
+        _application.Acknowledge(index, encodedSize);
     }
 
     internal ulong GetTerm(ulong index)
@@ -594,10 +583,31 @@ internal sealed class RaftLog
             : Math.Min(Committed, Unstable.Offset - 1);
     }
 
-    private bool IsApplyingLimitReached()
+    // This state tracks delivery and acknowledgement, not physical application.
+    private struct ApplicationDelivery(ulong retainedIndex, ulong byteLimit)
     {
-        return _applyingEntriesSize != 0
-            && _applyingEntriesSize >= _maxApplyingEntriesSize;
+        internal ulong Applying { get; private set; } = retainedIndex;
+        internal ulong Applied { get; private set; } = retainedIndex;
+        internal ulong OutstandingBytes { get; private set; }
+        internal ulong ByteLimit { get; } = byteLimit;
+        internal bool IsPaused { get; private set; }
+
+        internal bool HasReachedLimit => OutstandingBytes != 0 && OutstandingBytes >= ByteLimit;
+
+        internal void Deliver(ulong index, ulong encodedSize, ulong availableThrough)
+        {
+            Applying = index;
+            OutstandingBytes = checked(OutstandingBytes + encodedSize);
+            IsPaused = HasReachedLimit || index < availableThrough;
+        }
+
+        internal void Acknowledge(ulong index, ulong encodedSize)
+        {
+            Applied = index;
+            Applying = Math.Max(Applying, index);
+            OutstandingBytes = OutstandingBytes > encodedSize ? OutstandingBytes - encodedSize : 0;
+            IsPaused = HasReachedLimit;
+        }
     }
 
     private void CheckSliceBounds(

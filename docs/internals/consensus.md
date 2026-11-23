@@ -11,9 +11,9 @@ votes, and failure schedules.
 |---|---|
 | [`RaftRoleState`](../../src/DotnetRaft/Core/RaftRoleState.cs), [`RaftClock`](../../src/DotnetRaft/Core/RaftClock.cs) | Term, vote, role, leader and transferee; elapsed logical ticks and randomized deadlines. |
 | [`RaftOutput`](../../src/DotnetRaft/Core/RaftOutput.cs) | Sender/term normalization and detached immediate and after-append messages. |
-| [`RaftLog`](../../src/DotnetRaft/Core/RaftLog.cs), [`UnstableLog`](../../src/DotnetRaft/Core/UnstableLog.cs) | One logical log over stable storage and pending work; commit, applying, and applied positions. |
+| [`RaftLog`](../../src/DotnetRaft/Core/RaftLog.cs), [`UnstableLog`](../../src/DotnetRaft/Core/UnstableLog.cs) | One logical log over stable storage and pending work. Log commitment is separate from application delivery, which owns the applying/applied cursors, outstanding bytes, and pause. |
 | [`ProgressTracker`](../../src/DotnetRaft/Tracker/ProgressTracker.cs), [`ConfigurationChanger`](../../src/DotnetRaft/ConfChange/ConfigurationChanger.cs) | Installed voting sets, progress and votes; validate a candidate change before installing it. |
-| [`ProposalAdmission`](../../src/DotnetRaft/Core/ProposalAdmission.cs), [`ReadIndexCoordinator`](../../src/DotnetRaft/Core/ReadIndexCoordinator.cs) | Proposal payload and pending configuration index; gated reads, quorum confirmation, and read results. |
+| [`ProposalAdmission`](../../src/DotnetRaft/Core/ProposalAdmission.cs), [`ReadIndexCoordinator`](../../src/DotnetRaft/Core/ReadIndexCoordinator.cs) | Proposal policy, charged payload, and pending configuration index; gated reads, quorum confirmation, and read results. |
 
 [`RaftCore.Step`](../../src/DotnetRaft/Core/RaftCore.cs) handles term changes
 and shared messages before calling `StepFollower`, `StepCampaigning`, or

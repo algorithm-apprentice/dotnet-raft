@@ -19,10 +19,9 @@ public sealed partial class SqliteKeyValueStateMachine
                 : StringComparer.Ordinal);
     private readonly object gate = new();
     private readonly SqliteConnection connection;
-    private ConfState confState = new();
+    private AppliedPrefix appliedPrefix;
     private bool disposed;
     private bool ownsPath;
-    private ulong physicalApplied;
 
     public SqliteKeyValueStateMachine(
         string databasePath,
@@ -95,7 +94,7 @@ public sealed partial class SqliteKeyValueStateMachine
             lock (gate)
             {
                 ThrowIfDisposed();
-                return physicalApplied;
+                return appliedPrefix.Index;
             }
         }
     }
@@ -107,7 +106,7 @@ public sealed partial class SqliteKeyValueStateMachine
             lock (gate)
             {
                 ThrowIfDisposed();
-                return confState.Clone();
+                return appliedPrefix.Configuration.Clone();
             }
         }
     }
@@ -151,7 +150,7 @@ public sealed partial class SqliteKeyValueStateMachine
                 requestId,
                 existing.Fingerprint,
                 existing.ResultIndex,
-                physicalApplied,
+                appliedPrefix.Index,
                 Duplicate: true,
                 Conflict: false).ForRequest(expectedFingerprint);
         }
@@ -182,10 +181,10 @@ public sealed partial class SqliteKeyValueStateMachine
 
     private void EnsureAppliedCore(ulong requiredIndex)
     {
-        if (physicalApplied < requiredIndex)
+        if (appliedPrefix.Index < requiredIndex)
         {
             throw new InvalidOperationException(
-                $"Physical application {physicalApplied} has not reached read index {requiredIndex}.");
+                $"Physical application {appliedPrefix.Index} has not reached read index {requiredIndex}.");
         }
     }
 
@@ -321,8 +320,7 @@ public sealed partial class SqliteKeyValueStateMachine
     }
 
     private void UpdateMetadata(
-        ulong index,
-        ConfState configuration,
+        AppliedPrefix prefix,
         SqliteTransaction transaction)
     {
         using SqliteCommand command =
@@ -337,11 +335,11 @@ public sealed partial class SqliteKeyValueStateMachine
         AddBlob(
             command,
             "$physicalApplied",
-            EncodeUInt64(index));
+            EncodeUInt64(prefix.Index));
         AddBlob(
             command,
             "$confState",
-            ProtobufRaftCodec.EncodeMembership(configuration));
+            ProtobufRaftCodec.EncodeMembership(prefix.Configuration));
         if (command.ExecuteNonQuery() != 1)
         {
             throw new InvalidDataException(
@@ -366,12 +364,15 @@ public sealed partial class SqliteKeyValueStateMachine
             ? new KeyValueReadResult(
                 false,
                 null,
-                physicalApplied)
+                appliedPrefix.Index)
             : new KeyValueReadResult(
                 true,
                 (string)value,
-                physicalApplied);
+                appliedPrefix.Index);
     }
+
+    // The configuration is owned by the application; callers receive clones.
+    private readonly record struct AppliedPrefix(ulong Index, ConfState Configuration);
 
     private static void EnsureNext(ulong previous, ulong index)
     {

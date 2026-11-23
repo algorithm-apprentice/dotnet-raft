@@ -19,8 +19,8 @@ public sealed class RaftConfigTests
         var core = new RaftCore(config, _ => 0);
 
         Assert.Equal(ulong.MaxValue, core.MaxMessageSize);
-        Assert.Equal(ulong.MaxValue, core.MaxCommittedSizePerReady);
-        Assert.Equal(ulong.MaxValue, core.MaxUncommittedEntriesSize);
+        Assert.Equal(ulong.MaxValue, core.Log.ApplicationByteLimit);
+        Assert.Equal(new ProposalPolicy(ulong.MaxValue), core.ProposalPolicy);
         Assert.Equal(256, core.Tracker.MaxInflightMessages);
         Assert.Equal(ulong.MaxValue, core.Tracker.MaxInflightBytes);
         Assert.Same(NullRaftLogger.Instance, core.Logger);
@@ -196,19 +196,17 @@ public sealed class RaftConfigTests
             StepDownOnRemoval = true,
         };
 
-        var core = new RaftCore(config, _ => 0);
+        var node = new DotnetRaft.RawNode(config, _ => 0);
+        RaftCore core = node.Core;
 
-        Assert.True(core.AsyncStorageWrites);
+        Assert.True(node.AsyncStorageWrites);
         Assert.Equal(100UL, core.MaxMessageSize);
-        Assert.Equal(200UL, core.MaxCommittedSizePerReady);
-        Assert.Equal(300UL, core.MaxUncommittedEntriesSize);
+        Assert.Equal(200UL, core.Log.ApplicationByteLimit);
+        Assert.Equal(new ProposalPolicy(300, DisableForwarding: true, DisableConfigurationValidation: true), core.ProposalPolicy);
         Assert.Equal(4, core.Tracker.MaxInflightMessages);
         Assert.Equal(400UL, core.Tracker.MaxInflightBytes);
-        Assert.True(core.CheckQuorum);
-        Assert.True(core.PreVote);
+        Assert.Equal(new ElectionPolicy(CheckQuorum: true, PreVote: true), core.Election);
         Assert.Equal(ReadOnlyOption.LeaseBased, core.ReadOnlyOption);
-        Assert.True(core.DisableProposalForwarding);
-        Assert.True(core.DisableConfChangeValidation);
         Assert.True(core.StepDownOnRemoval);
     }
 }

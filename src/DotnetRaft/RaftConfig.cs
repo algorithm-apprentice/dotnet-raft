@@ -117,25 +117,22 @@ public sealed class RaftConfig
             HeartbeatTick,
             Storage,
             Applied,
-            AsyncStorageWrites,
             MaxSizePerMessage,
             MaxCommittedSizePerReady == 0
                 ? MaxSizePerMessage
                 : MaxCommittedSizePerReady,
-            MaxUncommittedEntriesSize == 0
-                ? ulong.MaxValue
-                : MaxUncommittedEntriesSize,
+            new ProposalPolicy(
+                MaxUncommittedEntriesSize == 0 ? ulong.MaxValue : MaxUncommittedEntriesSize,
+                DisableForwarding: DisableProposalForwarding,
+                DisableConfigurationValidation: DisableConfChangeValidation),
             MaxInflightMessages,
             MaxInflightBytes == 0
                 ? ulong.MaxValue
                 : MaxInflightBytes,
-            CheckQuorum,
-            PreVote,
+            new ElectionPolicy(CheckQuorum, PreVote),
             ReadOnlyOption,
             TraceSink,
             Logger ?? NullRaftLogger.Instance,
-            DisableProposalForwarding,
-            DisableConfChangeValidation,
             StepDownOnRemoval);
     }
 }

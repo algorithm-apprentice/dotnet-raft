@@ -14,10 +14,8 @@ public sealed partial class RawNode
 {
     private readonly RaftCore _core;
     private readonly Action _activate;
-    private SoftState _previousSoftState;
-    private RaftHardState _previousHardState;
-    private Ready? _outstanding;
-    private ReadyAcknowledgement? _acknowledgement;
+    private DeliveredState _previous;
+    private OutstandingReady? _outstanding;
     private Exception? _fault;
     private RawNodeLifecycle _lifecycle;
     private bool _operationInProgress;
@@ -37,18 +35,17 @@ public sealed partial class RawNode
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(randomOffset);
 
+        AsyncStorageWrites = config.AsyncStorageWrites;
         _core = new RaftCore(
             config,
             randomOffset);
         _activate = Activate;
-        _previousSoftState = _core.SoftState;
-        _previousHardState = _core.HardState;
+        _previous = new DeliveredState(_core.SoftState, _core.HardState);
     }
 
     internal RaftCore Core => _core;
 
-    public bool AsyncStorageWrites =>
-        _core.AsyncStorageWrites;
+    public bool AsyncStorageWrites { get; }
 
     internal bool IsFaultedForTesting =>
         IsFaulted;
@@ -229,7 +226,7 @@ public sealed partial class RawNode
         Execute(() =>
         {
             ArgumentNullException.ThrowIfNull(completion);
-            if (!_core.AsyncStorageWrites)
+            if (!AsyncStorageWrites)
             {
                 throw new NotSupportedException("Storage completions require asynchronous storage writes.");
             }
@@ -481,19 +478,19 @@ public sealed partial class RawNode
 
     private bool HasReadyCore()
     {
-        if (!_core.AsyncStorageWrites
+        if (!AsyncStorageWrites
             && _outstanding is not null)
         {
             return false;
         }
 
         SoftState softState = _core.SoftState;
-        if (softState != _previousSoftState)
+        if (softState != _previous.Soft)
         {
             return true;
         }
 
-        if (_core.HardState != _previousHardState)
+        if (_core.HardState != _previous.Hard)
         {
             return true;
         }
@@ -504,14 +501,13 @@ public sealed partial class RawNode
             || _core.Log.HasNextUnstableEntries
             || _core.Log.HasNextCommittedEntries(
                 allowUnstable:
-                    !_core.AsyncStorageWrites)
+                    !AsyncStorageWrites)
             || _core.HasReadStates;
     }
 
     private Ready CreateReady()
     {
-        bool asyncStorageWrites =
-            _core.AsyncStorageWrites;
+        bool asyncStorageWrites = AsyncStorageWrites;
         if (!asyncStorageWrites
             && _outstanding is not null)
         {
@@ -523,11 +519,11 @@ public sealed partial class RawNode
         SoftState currentSoftState = _core.SoftState;
         RaftHardState currentHardState = _core.HardState;
         SoftState? emittedSoftState =
-            currentSoftState == _previousSoftState
+            currentSoftState == _previous.Soft
                 ? null
                 : currentSoftState;
         RaftHardState? emittedHardState =
-            currentHardState == _previousHardState
+            currentHardState == _previous.Hard
                 ? null
                 : currentHardState;
 
@@ -604,7 +600,7 @@ public sealed partial class RawNode
 
         bool mustSync = MustSync(
             currentHardState,
-            _previousHardState,
+            _previous.Hard,
             unstableEntries.Length);
         ulong appliedEncodedSize = EntrySizing.EncodedSize(_core.Log.Format, committedEntries);
         Ready ready = DotnetRaft.Ready.FromDetachedWork(
@@ -628,14 +624,9 @@ public sealed partial class RawNode
                     committedEntries,
                     appliedEncodedSize);
 
-        if (emittedSoftState is not null)
+        if (emittedSoftState is not null || emittedHardState is not null)
         {
-            _previousSoftState = currentSoftState;
-        }
-
-        if (emittedHardState is not null)
-        {
-            _previousHardState = currentHardState;
+            _previous = new DeliveredState(emittedSoftState ?? _previous.Soft, emittedHardState ?? _previous.Hard);
         }
 
         _core.ClearReadyOutputs();
@@ -659,39 +650,36 @@ public sealed partial class RawNode
             return ready;
         }
 
-        _outstanding = ready;
-        _acknowledgement = acknowledgement
+        _outstanding = new OutstandingReady(ready, acknowledgement
             ?? throw new RaftInvariantException(
-                "Synchronous Ready acknowledgement is missing.");
+                "Synchronous Ready acknowledgement is missing."));
         _core.TraceReadyAccepted();
         return ready;
     }
 
     private void AdvanceCore(Ready ready)
     {
-        if (_core.AsyncStorageWrites)
+        if (AsyncStorageWrites)
         {
             throw new NotSupportedException(
                 "Advance is replaced by storage response messages when asynchronous storage writes are enabled.");
         }
 
         ArgumentNullException.ThrowIfNull(ready);
-        if (_outstanding is null
-            || _acknowledgement is null)
+        if (_outstanding is not { } outstanding)
         {
             throw new InvalidOperationException(
                 "No Ready is awaiting advancement.");
         }
 
-        if (!ReferenceEquals(_outstanding, ready))
+        if (!ReferenceEquals(outstanding.Batch, ready))
         {
             throw new InvalidOperationException(
                 "Advance must receive the exact outstanding Ready instance.");
         }
 
         Activate();
-        ReadyAcknowledgement acknowledgement =
-            _acknowledgement;
+        ReadyAcknowledgement acknowledgement = outstanding.Acknowledgement;
         try
         {
             foreach (Message message
@@ -728,7 +716,6 @@ public sealed partial class RawNode
         }
 
         _outstanding = null;
-        _acknowledgement = null;
     }
 
     private static bool NeedsStorageAppendMessage(
@@ -787,7 +774,7 @@ public sealed partial class RawNode
     private void ValidateStorageResponse(
         Message message)
     {
-        if (!_core.AsyncStorageWrites)
+        if (!AsyncStorageWrites)
         {
             throw new StorageResponseValidationException(
                 "Storage-thread responses require asynchronous storage writes.");
@@ -938,7 +925,6 @@ public sealed partial class RawNode
         _fault ??= exception;
         _lifecycle = RawNodeLifecycle.Faulted;
         _outstanding = null;
-        _acknowledgement = null;
     }
 
     private void EnsureUsable()
@@ -1115,6 +1101,10 @@ public sealed partial class RawNode
         Active,
         Faulted,
     }
+
+    private readonly record struct DeliveredState(SoftState Soft, RaftHardState Hard);
+
+    private readonly record struct OutstandingReady(Ready Batch, ReadyAcknowledgement Acknowledgement);
 
     private sealed record ReadyAcknowledgement(
         IReadOnlyList<Message> SelfMessages,

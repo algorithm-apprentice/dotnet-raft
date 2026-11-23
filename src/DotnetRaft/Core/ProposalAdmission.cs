@@ -7,15 +7,19 @@ internal readonly record struct ProposalAdmissionPlan(
     ulong UncommittedSize,
     ulong PendingConfigurationIndex);
 
+internal readonly record struct ProposalPolicy(
+    ulong MaxUncommittedSize,
+    bool DisableForwarding = false,
+    bool DisableConfigurationValidation = false);
+
 internal sealed class ProposalAdmission
 {
-    internal ProposalAdmission(
-        ulong maxUncommittedSize)
+    internal ProposalAdmission(ProposalPolicy policy)
     {
-        MaxUncommittedSize = maxUncommittedSize;
+        Policy = policy;
     }
 
-    internal ulong MaxUncommittedSize { get; }
+    internal ProposalPolicy Policy { get; }
 
     internal ulong UncommittedSize { get; private set; }
 
@@ -54,7 +58,7 @@ internal sealed class ProposalAdmission
             nextUncommittedSize =
                 UncommittedSize + payloadSize;
             if (nextUncommittedSize >
-                MaxUncommittedSize)
+                Policy.MaxUncommittedSize)
             {
                 return new ProposalAdmissionPlan(
                     Accepted: false,

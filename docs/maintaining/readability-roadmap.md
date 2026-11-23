@@ -72,3 +72,57 @@ not evidence about SQLite or end-to-end KV throughput.
 | Sync proposal cycle | 4,751 | 4,703 | 6,050.24 | `9240325797370691861` |
 | Follower heartbeat dispatch | 298.35 | 300.95 | 2,592.01 | `10936930208570869669` |
 | Safe read completion | 1,643 | 1,638 | 5,560.02 | `3884428198604542453` |
+
+## Group state by its owner
+
+`RaftCore` is not a single flat state object today: `RaftRoleState`,
+`RaftClock`, `RaftLog`, the tracker, proposal admission, and the read
+coordinator already own state. The remaining problem is where the same
+policy is surfaced as unrelated properties, or a lifecycle is represented
+by independently writable fields. Review the same pattern across the
+facades, log, storage packages, and example host instead of only rearranging
+the top of `RaftCore.cs`.
+
+| Boundary | Invariant and intervention | Evidence |
+|---|---|---|
+| Consensus configuration and log | Use named validated election and proposal policies. Let `ProposalAdmission` own its quota and policy. Move the committed-page bound to the `RaftLog` application delivery state, which owns the applying/applied cursors, outstanding bytes, and pause. Retain the distinct per-append size bound. The election scan uses the same limit as before. | Configuration, voting, proposal, log, and differential tests. |
+| `RawNode` Ready | Track the last delivered soft/hard state as a pair, and keep the exact outstanding synchronous batch and its detached acknowledgement in one optional slot. Keep Ready creation, exceptions, and the order of effects in `RawNode`. Async mode selects the host protocol, not consensus; retain it on `RawNode`, not as another core property. | Ready identity and frozen acknowledgements; synchronous and typed async completion regressions. |
+| `RaftNode` owner | A pending Ready waiter and an outstanding synchronous batch are mutually exclusive. Represent them in one slot without changing claim/cancel locking, dispatch, or scheduler order. Membership observation is unobserved, present, or removed, rather than two independently writable booleans. | Ready contention, cancellation, stop/fault, and removal/readdition tests. |
+| Durable KV application | One applied prefix carries the physical index and its membership. Reuse one commit-and-publish step for commands, no-ops, configuration, and snapshot restore. The same lock protects it, and SQLite commits before its in-memory replacement. | Atomic rollback, reopen, snapshot restore, request retries, and real process smoke. |
+
+The audit leaves the `SqliteStorage` metadata record, per-peer `Progress`,
+inflight window, clock, read coordinator, request registries, and test/trace
+observations with their existing owners. Field count alone does not justify
+splitting them further. `RaftConfig`, `Ready`, and status/wire projections
+remain compatible. Narrow read-only views are useful when they avoid exposing
+mutable subobjects to the facades or tests. Do not merge the earlier
+application configuration with live membership, the application's physical
+prefix with the log's acknowledged cursor, or the pre-persistence and
+post-persistence output queues.
+
+Pre-implementation review: the grouped values may simplify representation,
+but must not change when a budget pauses, when a Ready claim wins, or when a
+transaction becomes visible. Verify that cancellation of a different queued
+Ready request cannot clear a batch already awaiting `Advance`. Use in-place
+or value state, not per-transition containers. Keep `RaftCore` and the
+facades as orchestrators at their existing boundaries. Verify unchanged
+approvals, format, both full suites, pinned Go comparison, the real-process
+smoke, and a same-environment refactor benchmark against `5748c3c` before
+calling this a behavior-preserving cleanup.
+
+### State ownership verification
+
+- The new Ready cancellation test fails if cancellation clears the whole
+  slot: the original published batch can no longer be advanced. It passes
+  when cancellation removes only the matching waiter.
+- An initial layout made the full acknowledgement an inline value. It
+  allocated less but slowed the heartbeat workload in repeated comparisons.
+  The selected layout binds batch and acknowledgement with a small pair and
+  keeps the existing acknowledgement record. It updates the delivered-state
+  pair only when there is a state change.
+- Compared with `5748c3c`, six alternating pairs of Release benchmark runs
+  on the same macOS arm64 host kept all four checksums and bytes per operation
+  unchanged. Timing ranges overlapped; this is not a throughput guarantee.
+- The final layout passed 1,253 tests each in Debug and Release, formatting,
+  all 13 pinned Go comparison checkpoints, and the durable KV process smoke.
+  No public API, wire, schema, or golden approvals changed.
