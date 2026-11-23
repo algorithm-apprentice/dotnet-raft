@@ -1,8 +1,12 @@
 using System.Buffers.Binary;
+using System.Globalization;
 using System.Text;
 
 using DotnetRaft.Core;
+using DotnetRaft.Diagnostics;
 using DotnetRaft.Tests.Interaction;
+
+using static DotnetRaft.Tests.RawNode.RawNodeTestSupport;
 
 using ProtocolMessage = DotnetRaft.Protocol.Message;
 using TrackerProgress = DotnetRaft.Tracker.Progress;
@@ -11,72 +15,37 @@ namespace DotnetRaft.Tests.Release;
 
 public sealed class RandomizedInteractionPropertyTests
 {
+    public static TheoryData<bool, ulong> PairedSeeds
+    {
+        get
+        {
+            var seeds = new TheoryData<bool, ulong>();
+            for (ulong seed = 0; seed < 32; seed++)
+            {
+                seeds.Add(false, seed);
+                seeds.Add(true, seed);
+            }
+
+            return seeds;
+        }
+    }
+
     [Theory]
-    [InlineData(false, 0)]
-    [InlineData(false, 1)]
-    [InlineData(false, 2)]
-    [InlineData(false, 3)]
-    [InlineData(false, 4)]
-    [InlineData(false, 5)]
-    [InlineData(false, 6)]
-    [InlineData(false, 7)]
-    [InlineData(false, 8)]
-    [InlineData(false, 9)]
-    [InlineData(false, 10)]
-    [InlineData(false, 11)]
-    [InlineData(false, 12)]
-    [InlineData(false, 13)]
-    [InlineData(false, 14)]
-    [InlineData(false, 15)]
-    [InlineData(true, 16)]
-    [InlineData(true, 17)]
-    [InlineData(true, 18)]
-    [InlineData(true, 19)]
-    [InlineData(true, 20)]
-    [InlineData(true, 21)]
-    [InlineData(true, 22)]
-    [InlineData(true, 23)]
-    [InlineData(true, 24)]
-    [InlineData(true, 25)]
-    [InlineData(true, 26)]
-    [InlineData(true, 27)]
-    [InlineData(true, 28)]
-    [InlineData(true, 29)]
-    [InlineData(true, 30)]
-    [InlineData(true, 31)]
+    [MemberData(nameof(PairedSeeds))]
     public void FixedSeedClusterMaintainsInvariants(
         bool asyncStorageWrites,
         ulong seed)
     {
-        const ulong initialIndex = 10;
-        var oracle = new AppliedLogOracle(initialIndex);
-        var environment = new InteractionEnvironment { EntryApplied = oracle.Record };
-        environment.Handle(
-            "log-level none",
-            string.Empty);
-        environment.AddNodes(
-            3,
-            new InteractionNodeOptions
-            {
-                Voters = [1, 2, 3],
-                SnapshotIndex = initialIndex,
-                ElectionTick = 3,
-                HeartbeatTick = 1,
-                MaxInflightMessages = 4,
-                MaxCommittedSizePerReady = 256,
-                PreVote = (seed & 1) != 0,
-                CheckQuorum = (seed & 2) != 0,
-                AsyncStorageWrites =
-                    asyncStorageWrites,
-            });
+        InteractionEnvironment environment = CreateCluster(asyncStorageWrites, seed, out _);
         var random = new XorShift64Star(seed);
-        var leadersByTerm = new Dictionary<ulong, ulong>();
+        var actions = new StringBuilder();
 
         for (var actionNumber = 0;
              actionNumber < 200;
              actionNumber++)
         {
             ulong value = random.Next();
+            actions.Append(CultureInfo.InvariantCulture, $"{actionNumber} 0x{value:x16} {ActionName((byte)value)}: ");
             try
             {
                 Act(
@@ -84,11 +53,11 @@ public sealed class RandomizedInteractionPropertyTests
                     asyncStorageWrites,
                     seed,
                     actionNumber,
-                    value);
+                    value,
+                    actions);
                 AssertInvariants(
                     environment,
-                    asyncStorageWrites,
-                    leadersByTerm);
+                    asyncStorageWrites);
             }
             catch (Exception exception)
             {
@@ -98,10 +67,104 @@ public sealed class RandomizedInteractionPropertyTests
                         asyncStorageWrites,
                         seed,
                         actionNumber,
-                        value),
+                        value,
+                        actions),
                     exception);
             }
         }
+    }
+
+    [Theory]
+    [InlineData(false, 1UL)]
+    [InlineData(true, 1UL)]
+    [InlineData(false, 8UL)]
+    [InlineData(true, 8UL)]
+    [InlineData(false, 23UL)]
+    [InlineData(true, 23UL)]
+    public void SeededRecoveryAppliesBusinessWritesBeforeDuringAndAfterAnOutage(bool asyncStorageWrites, ulong seed)
+    {
+        InteractionEnvironment cluster = CreateCluster(asyncStorageWrites, seed, out var oracle, availabilityFeatures: false);
+        var random = new XorShift64Star(seed);
+        int leader = (int)(random.Next() % 3);
+        int survivor = (leader + 1 + (int)(random.Next() % 2)) % 3;
+        ulong leaderId = (ulong)leader + 1;
+        string prefix = string.Create(CultureInfo.InvariantCulture, $"seed-{seed}/");
+
+        cluster.Campaign(leader);
+        cluster.Stabilize();
+        cluster.Propose(leader, Encoding.UTF8.GetBytes(prefix));
+        cluster.Stabilize();
+        Assert.All(cluster.Nodes, node => Assert.Equal(prefix, node.GetApplicationSnapshot().Data.ToStringUtf8()));
+        ulong physical = oracle.AppliedThrough(leaderId);
+
+        // Persist and commit a write, but do not run the old leader's apply
+        // work. The survivors may finish their own work before the crash.
+        cluster.Propose(leader, "replay/"u8);
+        cluster.ProcessReady(leader);
+        if (asyncStorageWrites)
+        {
+            cluster.ProcessAppendThread(leader);
+        }
+
+        cluster.Stabilize(Enumerable.Range(0, 3).Where(index => index != leader).ToArray());
+        cluster.DeliverMessages(type: null, new InteractionRecipient(leaderId));
+        Assert.Equal(physical + 1, cluster.Nodes[leader].RawNode.GetBasicStatus().Commit);
+        InteractionNode previous = cluster.Nodes[leader];
+        if (asyncStorageWrites)
+        {
+            cluster.ProcessReady(leader);
+            Assert.True(previous.ApplyWorkCount > 0);
+            cluster.ProcessAppendThread(leader);
+        }
+        else
+        {
+            Ready ready = previous.RawNode.Ready();
+            Assert.Equal(physical + 1, Assert.Single(ready.CommittedEntries).Index);
+            Persist(previous.Storage, ready);
+        }
+
+        Assert.Equal(physical + 1, previous.Storage.GetInitialState().HardState?.Commit);
+        Assert.Equal(physical, oracle.AppliedThrough(leaderId));
+        cluster.CrashNode(leader);
+        cluster.Campaign(survivor);
+        cluster.Stabilize();
+        cluster.Propose(survivor, "during/"u8);
+        cluster.Stabilize();
+        Assert.Equal(physical, oracle.AppliedThrough(leaderId));
+        Assert.Equal(prefix + "replay/during/", cluster.Nodes[survivor].GetApplicationSnapshot().Data.ToStringUtf8());
+
+        cluster.RestartNode(leader);
+        cluster.Stabilize(leader);
+        Assert.Equal(physical + 1, oracle.AppliedThrough(leaderId));
+        Assert.Equal(prefix + "replay/", cluster.Nodes[leader].GetApplicationSnapshot().Data.ToStringUtf8());
+        cluster.TickHeartbeat(survivor);
+        cluster.Stabilize();
+        // Submit through the recovered replica, not just the current leader.
+        cluster.Propose(leader, "after/"u8);
+        cluster.Stabilize();
+        Assert.All(cluster.Nodes, node => Assert.Equal(prefix + "replay/during/after/", node.GetApplicationSnapshot().Data.ToStringUtf8()));
+    }
+
+    private static InteractionEnvironment CreateCluster(bool asyncStorageWrites, ulong seed, out AppliedLogOracle oracle,
+        bool availabilityFeatures = true)
+    {
+        const ulong initialIndex = 10;
+        oracle = new AppliedLogOracle(initialIndex);
+        var environment = new InteractionEnvironment { EntryApplied = oracle.Record, TraceSink = new ElectionSafetyOracle() };
+        environment.Handle("log-level none", string.Empty);
+        environment.AddNodes(3, new InteractionNodeOptions
+        {
+            Voters = [1, 2, 3],
+            SnapshotIndex = initialIndex,
+            ElectionTick = 3,
+            HeartbeatTick = 1,
+            MaxInflightMessages = 4,
+            MaxCommittedSizePerReady = 256,
+            PreVote = availabilityFeatures && (seed & 1) != 0,
+            CheckQuorum = availabilityFeatures && (seed & 2) != 0,
+            AsyncStorageWrites = asyncStorageWrites,
+        });
+        return environment;
     }
 
     private static void Act(
@@ -109,7 +172,8 @@ public sealed class RandomizedInteractionPropertyTests
         bool asyncStorageWrites,
         ulong seed,
         int actionNumber,
-        ulong value)
+        ulong value,
+        StringBuilder actions)
     {
         int action = (byte)value;
         int nodeIndex = (int)((value >> 8) % 3);
@@ -122,9 +186,11 @@ public sealed class RandomizedInteractionPropertyTests
         switch (action)
         {
             case <= 15:
+                actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1}");
                 environment.Campaign(nodeIndex);
                 break;
             case <= 63:
+                actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1}");
                 environment.Nodes[nodeIndex]
                     .RawNode.Tick();
                 break;
@@ -151,34 +217,43 @@ public sealed class RandomizedInteractionPropertyTests
                             (ulong)actionNumber);
                     try
                     {
+                        actions.Append(CultureInfo.InvariantCulture, $"leader={leaders[0].Config.Id} proposal={seed}/{actionNumber}");
                         leaders[0].RawNode.Propose(data);
+                        actions.AppendLine(" submitted");
                     }
                     catch (ProposalDroppedException)
                     {
+                        actions.AppendLine(" dropped by node");
                     }
+                }
+                else
+                {
+                    actions.AppendLine(CultureInfo.InvariantCulture, $"skipped ({leaders.Length} leaders)");
                 }
 
                 break;
             case <= 143:
-                if (environment.Nodes[nodeIndex]
-                    .RawNode.HasReady())
+                bool ready = environment.Nodes[nodeIndex].RawNode.HasReady();
+                actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1} {(ready ? "process" : "skipped (no Ready)")}");
+                if (ready)
                 {
                     environment.ProcessReady(nodeIndex);
                 }
 
                 break;
             case <= 191:
-                HandleMessages(environment, value);
+                HandleMessages(environment, value, actions);
                 break;
             case <= 207:
+                actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1} peer={peerId}");
                 environment.ReportUnreachable(
                     nodeIndex,
                     peerId);
                 break;
             case <= 223:
-                if (asyncStorageWrites
-                    && environment.Nodes[nodeIndex]
-                        .AppendWorkCount > 0)
+                bool hasAppendWork = asyncStorageWrites && environment.Nodes[nodeIndex].AppendWorkCount > 0;
+                actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1} {(hasAppendWork ? "process" : "skipped (no append work)")}");
+                if (hasAppendWork)
                 {
                     environment.ProcessAppendThread(
                         nodeIndex);
@@ -186,9 +261,9 @@ public sealed class RandomizedInteractionPropertyTests
 
                 break;
             case <= 239:
-                if (asyncStorageWrites
-                    && environment.Nodes[nodeIndex]
-                        .ApplyWorkCount > 0)
+                bool hasApplyWork = asyncStorageWrites && environment.Nodes[nodeIndex].ApplyWorkCount > 0;
+                actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1} {(hasApplyWork ? "process" : "skipped (no apply work)")}");
+                if (hasApplyWork)
                 {
                     environment.ProcessApplyThread(
                         nodeIndex);
@@ -196,16 +271,19 @@ public sealed class RandomizedInteractionPropertyTests
 
                 break;
             case <= 247:
+                actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1}");
                 environment.CrashNode(nodeIndex);
                 environment.RestartNode(nodeIndex);
                 break;
             default:
                 if (((value >> 40) & 1) == 0)
                 {
+                    actions.AppendLine("all nodes");
                     environment.Stabilize();
                 }
                 else
                 {
+                    actions.AppendLine(CultureInfo.InvariantCulture, $"node={nodeIndex + 1}");
                     environment.Stabilize(nodeIndex);
                 }
 
@@ -215,12 +293,14 @@ public sealed class RandomizedInteractionPropertyTests
 
     private static void HandleMessages(
         InteractionEnvironment environment,
-        ulong value)
+        ulong value,
+        StringBuilder actions)
     {
         IReadOnlyList<ProtocolMessage> queued =
             environment.QueuedMessages;
         if (queued.Count == 0)
         {
+            actions.AppendLine("skipped (empty queue)");
             return;
         }
 
@@ -234,21 +314,26 @@ public sealed class RandomizedInteractionPropertyTests
             || selected.From == selected.To;
         if (local)
         {
+            actions.AppendLine(CultureInfo.InvariantCulture, $"deliver local {selected.Type} to node={selected.To}");
             environment.DeliverMessages(selected.Type, new InteractionRecipient(selected.To));
         }
         else
         {
+            bool drop = ((value >> 32) & 3) == 1;
+            bool duplicate = ((value >> 32) & 3) == 2;
+            string disposition = drop ? "drop" : duplicate ? "duplicate" : "deliver";
+            actions.AppendLine(CultureInfo.InvariantCulture,
+                $"slot={index} {selected.From}->{selected.To} {selected.Type} term={selected.Term} {disposition}");
             environment.DeliverNetworkMessage(
                 index,
-                drop: ((value >> 32) & 3) == 1,
-                duplicate: ((value >> 32) & 3) == 2);
+                drop,
+                duplicate);
         }
     }
 
     private static void AssertInvariants(
         InteractionEnvironment environment,
-        bool asyncStorageWrites,
-        Dictionary<ulong, ulong> leadersByTerm)
+        bool asyncStorageWrites)
     {
         foreach (InteractionNode node in
                  environment.Nodes)
@@ -283,11 +368,6 @@ public sealed class RandomizedInteractionPropertyTests
                 Assert.True(
                     progress.Next > progress.Match);
             }
-            BasicStatus status = node.RawNode.GetBasicStatus();
-            if (status.Role == RaftRole.Leader && !leadersByTerm.TryAdd(status.Term, status.Id))
-            {
-                Assert.Equal(leadersByTerm[status.Term], status.Id);
-            }
         }
     }
 
@@ -296,7 +376,8 @@ public sealed class RandomizedInteractionPropertyTests
         bool asyncStorageWrites,
         ulong seed,
         int action,
-        ulong value)
+        ulong value,
+        StringBuilder actions)
     {
         var builder = new StringBuilder();
         builder.Append("mode=")
@@ -312,7 +393,7 @@ public sealed class RandomizedInteractionPropertyTests
             .Append(
                 value.ToString(
                     "x16",
-                    System.Globalization.CultureInfo.InvariantCulture))
+                    CultureInfo.InvariantCulture))
             .Append(" kind=")
             .Append(ActionName((byte)value))
             .AppendLine();
@@ -350,7 +431,7 @@ public sealed class RandomizedInteractionPropertyTests
                 environment.QueuedMessages.Select(
                     message =>
                         $"{message.From}->{message.To}/{message.Type}"));
-        return builder.ToString();
+        return builder.AppendLine().AppendLine("Executed actions:").Append(actions).ToString();
     }
 
     private static string ActionName(int action)
@@ -390,6 +471,21 @@ public sealed class RandomizedInteractionPropertyTests
             _state = value;
             return value
                 * 2685821657736338717UL;
+        }
+    }
+
+    private sealed class ElectionSafetyOracle : IRaftTraceSink
+    {
+        private readonly Dictionary<ulong, ulong> leadersByTerm = [];
+
+        public void Trace(RaftTraceEvent traceEvent)
+        {
+            if (traceEvent.Type == RaftTraceEventType.BecameLeader)
+            {
+                BasicStatus status = traceEvent.Status;
+                Assert.True(leadersByTerm.TryAdd(status.Term, status.Id) || leadersByTerm[status.Term] == status.Id,
+                    $"Term {status.Term}: node {status.Id} became leader after node {leadersByTerm[status.Term]}.");
+            }
         }
     }
 }

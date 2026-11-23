@@ -1,5 +1,7 @@
 using DotnetRaft.Protocol;
 
+using Google.Protobuf;
+
 namespace DotnetRaft.Tests.Interaction;
 
 public sealed class InteractionAsyncStorageTests
@@ -199,5 +201,71 @@ public sealed class InteractionAsyncStorageTests
             5UL,
             node.GetApplicationSnapshot()
                 .Metadata.Index);
+    }
+
+    [Fact]
+    public void SnapshotSupersedesAnOlderApplyRequestWithoutLosingItsCompletion()
+    {
+        var delivered = new List<ulong>();
+        var applied = new List<ulong>();
+        var environment = new InteractionEnvironment
+        {
+            EntryDelivered = (_, entry) => delivered.Add(entry.Index),
+            EntryApplied = (_, entry) => applied.Add(entry.Index),
+        };
+        environment.AddNodes(1, new InteractionNodeOptions
+        {
+            Voters = [1, 2],
+            SnapshotIndex = 2,
+            AsyncStorageWrites = true,
+        });
+        InteractionNode node = environment.Nodes[0];
+        const ulong oldEntry = 3;
+        const ulong snapshotIndex = 5;
+        var append = new Message
+        {
+            Type = MessageType.MsgApp,
+            From = 2,
+            To = 1,
+            Term = 1,
+            Index = 2,
+            LogTerm = 1,
+            Commit = oldEntry,
+        };
+        append.Entries.Add(new Entry { Index = oldEntry, Term = 1, Data = ByteString.CopyFromUtf8("older") });
+        node.RawNode.Step(append);
+        environment.ProcessReady(0);
+        environment.ProcessAppendThread(0);
+        environment.DeliverMessages(MessageType.MsgStorageAppendResp, new InteractionRecipient(1));
+        environment.ProcessReady(0);
+        Assert.Equal(1, node.ApplyWorkCount);
+
+        node.RawNode.Step(new Message
+        {
+            Type = MessageType.MsgSnap,
+            From = 2,
+            To = 1,
+            Term = 2,
+            Snapshot = new Snapshot
+            {
+                Metadata = new SnapshotMetadata { Index = snapshotIndex, Term = 2, ConfState = new ConfState { Voters = { 1, 2 } } },
+                Data = ByteString.CopyFromUtf8("replacement"),
+            },
+        });
+        environment.ProcessReady(0);
+        environment.ProcessAppendThread(0);
+        environment.DeliverMessages(MessageType.MsgStorageAppendResp, new InteractionRecipient(1));
+        Assert.Equal(snapshotIndex, node.GetApplicationSnapshot().Metadata.Index);
+        Assert.True(node.RawNode.Core.Log.ApplyingEntriesSize > 0);
+
+        environment.ProcessApplyThread(0);
+        Assert.Equal([oldEntry], delivered);
+        Assert.Empty(applied);
+        Message completion = Assert.Single(environment.QueuedMessages, message => message.Type == MessageType.MsgStorageApplyResp);
+        Assert.Equal(oldEntry, Assert.Single(completion.Entries).Index);
+        environment.DeliverMessages(MessageType.MsgStorageApplyResp, new InteractionRecipient(1));
+        Assert.Equal(0UL, node.RawNode.Core.Log.ApplyingEntriesSize);
+        Assert.Equal(snapshotIndex, node.RawNode.GetBasicStatus().Applied);
+        Assert.Equal("replacement", node.GetApplicationSnapshot().Data.ToStringUtf8());
     }
 }

@@ -78,7 +78,8 @@ cleanup() {
     for log in "$temp"/node-*.log; do
       if [[ -f "$log" ]]; then
         echo "===== $(basename "$log") =====" >&2
-        cat "$log" >&2
+        grep -E 'Compacted Raft log|Restored incoming Raft snapshot' "$log" >&2 || true
+        tail -n 100 "$log" >&2
       fi
     done
   fi
@@ -102,6 +103,8 @@ start_node() {
   grpc="$(grpc_port "$id")"
   mkdir -p "$temp/node-$id"
   dotnet "$dll" \
+    "--Logging:LogLevel:Microsoft.AspNetCore=Warning" \
+    "--Logging:LogLevel:DotnetRaft.Examples.KvCluster.RaftClusterHost=Information" \
     "--Raft:NodeId=$id" \
     "--Raft:HttpPort=$http" \
     "--Raft:GrpcPort=$grpc" \
@@ -113,7 +116,7 @@ start_node() {
     "--Raft:Peers:1=http://127.0.0.1:17201" \
     "--Raft:Peers:2=http://127.0.0.1:17202" \
     "--Raft:Peers:3=http://127.0.0.1:17203" \
-    >"$temp/node-$id.log" 2>&1 &
+    >>"$temp/node-$id.log" 2>&1 &
   pids["$id"]=$!
 }
 
@@ -174,7 +177,7 @@ curl_retrying_mutation() {
     fi
 
     if [[ "$curl_exit" -eq 0 && "$status" == 2?? ]]; then
-      return
+      return 0
     fi
 
     if [[ "$attempt" -lt 3 ]] \
@@ -188,7 +191,7 @@ curl_retrying_mutation() {
 
     echo "$operation failed after attempt $attempt (curl=$curl_exit, HTTP=$status)" >&2
     if [[ -s "$response" ]]; then
-      cat "$response" >&2
+      head -c 8192 "$response" >&2
       echo >&2
     fi
     return 1
@@ -278,19 +281,76 @@ wait_value() {
   exit 1
 }
 
-wait_value_length() {
+wait_snapshot_event() {
   local id="$1"
-  local key="$2"
-  local expected="$3"
-  local url="http://127.0.0.1:$(http_port "$id")/kv/$key"
-  for _ in $(seq 1 100); do
-    if [[ "$(curl_bounded "$url" 2>/dev/null | jq -r '.value | length')" == "$expected" ]]; then
-      return
+  local event="$2"
+  local at_least="$3"
+  local first_line="${4:-1}"
+  for _ in $(seq 1 300); do
+    if awk -v prefix="$event" -v required="$at_least" -v first="$first_line" '
+      NR >= first && index($0, prefix) {
+        value = substr($0, index($0, prefix) + length(prefix));
+        if (value + 0 >= required) found = 1;
+      }
+      END { exit !found }
+    ' "$temp/node-$id.log"; then
+      return 0
     fi
     sleep 0.1
   done
-  echo "node $id did not return $key length $expected" >&2
-  exit 1
+  echo "node $id did not report '$event' through required index $at_least" >&2
+  return 1
+}
+
+stopped_last_index() {
+  python3 - "$temp/node-$1/raft.db" <<'PY'
+import pathlib
+import sqlite3
+import sys
+
+database = pathlib.Path(sys.argv[1]).as_uri() + '?mode=ro'
+with sqlite3.connect(database, uri=True) as db:
+    index, = db.execute('SELECT last_index FROM raft_metadata WHERE singleton = 1').fetchone()
+print(int.from_bytes(index, 'big'))
+PY
+}
+
+verify_large_value() {
+  local id="$1"
+  local required="$2"
+  local url="http://127.0.0.1:$(http_port "$id")/kv/large"
+  local retrieved=false
+  for _ in $(seq 1 15); do
+    if curl_bounded "$url" >"$temp/large-read.json"; then
+      retrieved=true
+      break
+    fi
+    sleep 0.1
+  done
+  if [[ "$retrieved" != true ]]; then
+    echo "node $id did not complete a linearizable read after restoring the snapshot" >&2
+    return 1
+  fi
+  python3 - "$temp/large.json" "$temp/large-read.json" "$id" "$required" <<'PY'
+import hashlib
+import json
+import sys
+
+def read(path):
+    with open(path, encoding='utf-8') as stream:
+        return json.load(stream)
+
+def digest(value):
+    return hashlib.sha256(value.encode('utf-8')).hexdigest()
+
+expected, actual = map(read, sys.argv[1:3])
+node, required = map(int, sys.argv[3:])
+if (not actual['found'] or not actual['linearizable'] or actual['nodeId'] != node
+        or actual['physicalApplied'] < actual['requiredIndex'] or actual['requiredIndex'] < required):
+    sys.exit('Large value did not come from the restored node at the required read prefix')
+if digest(expected['value']) != digest(actual['value']):
+    sys.exit('Large value SHA-256 differs after snapshot restore')
+PY
 }
 
 for id in 1 2 3; do
@@ -323,6 +383,10 @@ for id in 1 2 3; do
   fi
 done
 crash_node "$lagger"
+lagging_last="$(stopped_last_index "$lagger")"
+snapshot_request=33333333-4444-5555-6666-777777777776
+put_value "$large_writer" snapshot-request present "$snapshot_request"
+snapshot_request_index="$(jq -er '.appliedIndex | select(type == "number" and . > 0)' "$temp/curl-response.txt")"
 python3 - "$temp/large.json" <<'PY'
 import json
 import sys
@@ -330,7 +394,7 @@ import sys
 with open(sys.argv[1], "w", encoding="utf-8") as output:
     json.dump(
         {
-            "value": "x" * (31 * 1024 * 1024),
+            "value": "".join(f"{chunk:02d}" + "x" * (1024 * 1024 - 2) for chunk in range(31)),
             "requestId": "33333333-4444-5555-6666-777777777777",
         },
         output,
@@ -338,13 +402,31 @@ with open(sys.argv[1], "w", encoding="utf-8") as output:
     )
 PY
 put_file "$large_writer" large "$temp/large.json"
+large_index="$(jq -er '.appliedIndex | select(type == "number" and . > 0)' "$temp/curl-response.txt")"
 put_value "$large_writer" checkpoint-a a 44444444-5555-6666-7777-888888888888
 put_value "$large_writer" checkpoint-b b 55555555-6666-7777-8888-999999999999
 put_value "$large_writer" checkpoint-c c 66666666-7777-8888-9999-aaaaaaaaaaaa
+put_value "$large_writer" checkpoint-d d 77777777-8888-9999-aaaa-bbbbbbbbbbbb
+if (( snapshot_request_index <= lagging_last || large_index <= snapshot_request_index )); then
+  echo "expected stopped node $lagger last index ($lagging_last) < snapshot request ($snapshot_request_index) < large write ($large_index)" >&2
+  exit 1
+fi
+for id in "$leader" "$large_writer"; do
+  wait_snapshot_event "$id" "Compacted Raft log through snapshot index " "$large_index"
+done
+previous_log_lines="$(wc -l <"$temp/node-$lagger.log")"
 start_node "$lagger"
 wait_http "$lagger"
-wait_value_length "$lagger" large 32505856
+wait_snapshot_event "$lagger" "Restored incoming Raft snapshot at index " "$large_index" "$((previous_log_lines + 1))"
+verify_large_value "$lagger" "$large_index"
+put_value "$lagger" snapshot-request present "$snapshot_request"
+if ! jq -e --argjson index "$snapshot_request_index" \
+    '.duplicate == true and .appliedIndex == $index' "$temp/curl-response.txt" >/dev/null; then
+  echo "node $lagger did not restore the request result at index $snapshot_request_index" >&2
+  exit 1
+fi
 
+leader="$(wait_any_leader 1 2 3)"
 crash_node "$leader"
 survivors=()
 for id in 1 2 3; do

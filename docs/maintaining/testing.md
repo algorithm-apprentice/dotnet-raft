@@ -5,6 +5,10 @@ observe the safety property that would be wrong. Agreeing final indexes
 cannot by itself prove that the same commands ran, and a delivered message
 does not prove that an application applied it.
 
+The [test evidence design](test-evidence-design.md) records the negative
+controls for recovery, snapshots, and durability, and how the harnesses
+distinguish them.
+
 ## Exercise the boundary that changed
 
 | Boundary | Representative evidence | What to observe |
@@ -50,9 +54,19 @@ stores are compatible.
 ## Script fixtures
 
 [`InteractionGoldenTests`](../../tests/DotnetRaft.Tests/Interaction/InteractionGoldenTests.cs)
-runs scripts through our own node and host model. The imported fixtures
-provide fixed command inputs alongside approved C# output, not a second
-specification. Their [manifest](../../tests/DotnetRaft.Tests/Interaction/PinnedTestData/manifest.json)
+runs each fixture as an independently reported, read-only test through our
+own node and host model. To preview a change to the expected output, run the
+test assembly's explicit command after building it:
+
+```bash
+dotnet run --project tests/DotnetRaft.Tests -c Debug --no-build -- \
+  preview-golden tests/DotnetRaft.Tests/Interaction/TestData/02-replication-drop.txt
+```
+
+The command writes to stdout only. Review the differences before editing
+the fixture; do not redirect the preview onto the input file. The imported
+fixtures provide fixed command inputs alongside approved C# output, not a
+second specification. Their [manifest](../../tests/DotnetRaft.Tests/Interaction/PinnedTestData/manifest.json)
 and [integrity test](../../tests/DotnetRaft.Tests/Release/PinnedInteractionCorpusTests.cs)
 keep input changes distinguishable from output changes. The
 [third-party notices](../../THIRD-PARTY-NOTICES.md) identify their source.

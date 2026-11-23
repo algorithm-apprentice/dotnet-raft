@@ -192,19 +192,23 @@ command. Do not infer from a timeout that the write never committed.
 
 ## Automated real-process smoke
 
-The smoke requires `curl`, `jq`, and `python3`. Ports `17101`-`17103` and
-`17201`-`17203` must be unused. From the repository root:
+The smoke requires `curl`, `jq`, and `python3` with its standard `sqlite3`
+module. Ports `17101`-`17103` and `17201`-`17203` must be unused. From the
+repository root:
 
 ```bash
 dotnet build examples/DotnetRaft.KvCluster -c Release
 ./eng/smoke-durable-kv-cluster.sh "$PWD"
 ```
 
-The smoke starts three Kestrel processes, writes through a follower, takes a
-follower offline while replicating and snapshotting a 31 MiB value, verifies
-HTTP ingestion beyond Kestrel's former default and large-snapshot catch-up,
-kills the leader with SIGKILL, continues with the remaining quorum, restarts
-the old leader from the same directory, and finally restarts the complete
-cluster. It waits for each active node to observe the elected leader and
-retries only transient mutation failures with the same durable request ID.
-Any failure prints all node logs before cleanup.
+The smoke starts three Kestrel processes and writes through a follower. With
+one follower offline, it writes a 31 MiB value and waits for both survivors to
+compact past the offline node's durable log. It then observes that node
+install a snapshot, checks the full value's SHA-256 through a linearizable
+read, and verifies that a retried request from the snapshot returns its
+original result index. This rules out normal log catch-up as an explanation
+for the restored value. The smoke also kills the leader with SIGKILL,
+continues with the remaining quorum, rejoins the old leader from the same
+directory, and restarts the complete cluster. Transient mutation failures
+are retried with the same durable request ID. Failures report snapshot
+events and recent logs for every node before cleanup.

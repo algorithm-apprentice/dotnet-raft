@@ -55,13 +55,74 @@ public sealed class RaftLabTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void IsolatedFormerLeaderCannotConfirmANewRead(bool asyncStorageWrites)
+    {
+        var reads = new List<(ulong Node, ReadState State)>();
+        (InteractionEnvironment cluster, AppliedLogOracle oracle) = CreateCluster(
+            asyncStorageWrites, count: 3, readDelivered: (node, state) => reads.Add((node, state)));
+        cluster.Campaign(0);
+        cluster.Stabilize();
+        cluster.Propose(0, "before/"u8);
+        cluster.Stabilize();
+        ulong before = oracle.AppliedThrough(1);
+        cluster.Nodes[0].RawNode.ReadIndex("healthy"u8);
+        cluster.Stabilize();
+        (ulong id, ReadState read) = Assert.Single(reads);
+        Assert.Equal(1UL, id);
+        Assert.Equal(before, read.Index);
+        Assert.Equal("healthy", read.RequestContext.ToStringUtf8());
+
+        cluster.NetworkLinkIsOpen = message => message.From != 1 && message.To != 1;
+        cluster.Campaign(1);
+        cluster.Stabilize();
+        cluster.Propose(1, "majority/"u8);
+        cluster.Stabilize();
+        ulong majority = oracle.AppliedThrough(2);
+        BasicStatus formerLeader = cluster.Nodes[0].RawNode.GetBasicStatus();
+        BasicStatus majorityLeader = cluster.Nodes[1].RawNode.GetBasicStatus();
+        Assert.True(majority > before);
+        Assert.Equal("before/majority/", cluster.Nodes[1].GetApplicationSnapshot().Data.ToStringUtf8());
+        Assert.Equal(RaftRole.Leader, formerLeader.Role);
+        Assert.Equal(RaftRole.Leader, majorityLeader.Role);
+        Assert.True(majorityLeader.Term > formerLeader.Term);
+        Assert.Equal(before, oracle.AppliedThrough(1));
+
+        reads.Clear();
+        cluster.Nodes[0].RawNode.ReadIndex("isolated"u8);
+        cluster.Stabilize();
+        Assert.Empty(reads);
+        Assert.Equal(RaftRole.Leader, cluster.Nodes[0].RawNode.GetBasicStatus().Role);
+
+        cluster.NetworkLinkIsOpen = null;
+        cluster.TickHeartbeat(1);
+        cluster.Stabilize();
+        AssertApplication(cluster, "before/majority/");
+        reads.Clear();
+        cluster.Nodes[0].RawNode.ReadIndex("after-heal"u8);
+        cluster.Stabilize();
+        (id, read) = Assert.Single(reads, item => item.State.RequestContext.ToStringUtf8() == "after-heal");
+        Assert.Equal(1UL, id);
+        Assert.Equal(majority, read.Index);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(true, true)]
     public void CrashAtStorageBoundaryReplaysOnlyUnappliedWorkAndRejoins(
         bool asyncStorageWrites, bool applyBeforeCommitWrite)
     {
-        (InteractionEnvironment cluster, AppliedLogOracle oracle) = CreateCluster(asyncStorageWrites, 3);
+        var deliveries = new List<Entry>();
+        (InteractionEnvironment cluster, AppliedLogOracle oracle) = CreateCluster(asyncStorageWrites, 3,
+            entryDelivered: (id, entry) =>
+            {
+                if (id == 1)
+                {
+                    deliveries.Add(entry);
+                }
+            });
         cluster.Campaign(0);
         cluster.Stabilize();
         InteractionNode previous = cluster.Nodes[0];
@@ -112,22 +173,41 @@ public sealed class RaftLabTests
         cluster.Stabilize();
         Assert.Equal(physicalBeforeCrash, oracle.AppliedThrough(1));
 
+        deliveries.Clear();
         cluster.RestartNode(0);
         Assert.NotSame(previous.RawNode, cluster.Nodes[0].RawNode);
         cluster.Stabilize(0);
+        if (applyBeforeCommitWrite)
+        {
+            Assert.Empty(deliveries);
+        }
+        else
+        {
+            Entry replay = Assert.Single(deliveries);
+            Assert.Equal(physicalBeforeCrash + 1, replay.Index);
+            Assert.Equal("durable/", replay.Data.ToStringUtf8());
+        }
         Assert.Equal(before + 1, oracle.AppliedThrough(1));
         Assert.Equal("durable/", cluster.Nodes[0].GetApplicationSnapshot().Data.ToStringUtf8());
 
         cluster.TickHeartbeat(1);
         cluster.Stabilize();
         AssertApplication(cluster, "durable/while-down/");
+        Assert.Equal(Enumerable.Range(1, deliveries.Count).Select(offset => physicalBeforeCrash + (ulong)offset),
+            deliveries.Select(entry => entry.Index));
     }
 
-    private static (InteractionEnvironment, AppliedLogOracle) CreateCluster(bool asyncStorageWrites, int count)
+    private static (InteractionEnvironment, AppliedLogOracle) CreateCluster(bool asyncStorageWrites, int count,
+        Action<ulong, Entry>? entryDelivered = null, Action<ulong, ReadState>? readDelivered = null)
     {
         const ulong initialIndex = 2;
         var oracle = new AppliedLogOracle(initialIndex);
-        var cluster = new InteractionEnvironment { EntryApplied = oracle.Record };
+        var cluster = new InteractionEnvironment
+        {
+            EntryApplied = oracle.Record,
+            EntryDelivered = entryDelivered,
+            ReadStateDelivered = readDelivered,
+        };
         cluster.Handle("log-level none", string.Empty);
         cluster.AddNodes(count, new InteractionNodeOptions
         {

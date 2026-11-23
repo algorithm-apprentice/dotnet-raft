@@ -26,7 +26,7 @@ public sealed class RaftNodeCommandTests
             Task proposal = node.ProposeAsync(payload)
                 .AsTask();
             payload[0] = (byte)'X';
-            await Task.Yield();
+            await ObserveProposalScheduleAsync(node);
             Assert.False(proposal.IsCompleted);
 
             await node.CampaignAsync();
@@ -1004,7 +1004,7 @@ public sealed class RaftNodeCommandTests
                     "blocked"u8.ToArray(),
                     cancellation.Token)
                 .AsTask();
-            await Task.Yield();
+            await ObserveProposalScheduleAsync(node);
             Assert.False(blocked.IsCompleted);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -1066,9 +1066,7 @@ public sealed class RaftNodeCommandTests
                     "blocked"u8.ToArray(),
                     cancellation.Token)
                 .AsTask();
-            await node.GetStatusAsync();
-            await node.GetStatusAsync();
-            await node.GetStatusAsync();
+            await ObserveProposalScheduleAsync(node);
             Assert.False(blocked.IsCompleted);
 
             cancellation.Cancel();
@@ -1079,6 +1077,17 @@ public sealed class RaftNodeCommandTests
         {
             cancellation.Cancel();
             await node.StopAsync();
+        }
+    }
+
+    private static async Task ObserveProposalScheduleAsync(RaftNode node)
+    {
+        using var guard = new CancellationTokenSource(DeadlockGuardTimeout);
+        // The owner handles at most one command per turn. Between the first
+        // and third status commands there is a full turn, independent of lane order.
+        for (var command = 0; command < 3; command++)
+        {
+            _ = await node.GetStatusAsync(guard.Token).AsTask().WaitAsync(guard.Token);
         }
     }
 }

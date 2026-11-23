@@ -408,6 +408,7 @@ public sealed partial class RaftClusterHost
         {
             DurableHostRecovery.CompletePendingSnapshot(
                 storage, stateMachine, ready.Snapshot, recovering: false);
+            LogIncomingSnapshotRestored(logger, ready.Snapshot.Metadata.Index);
             CompletePendingProposalsFromDurableState();
         }
 
@@ -650,6 +651,7 @@ public sealed partial class RaftClusterHost
         if (compacted < applied)
         {
             storage.Compact(applied);
+            LogSnapshotCompacted(logger, applied);
         }
     }
 
@@ -788,4 +790,10 @@ public sealed partial class RaftClusterHost
         ILogger logger,
         ulong index,
         int contextLength);
+
+    [LoggerMessage(EventId = 2, Level = LogLevel.Information, Message = "Compacted Raft log through snapshot index {Index}.")]
+    private static partial void LogSnapshotCompacted(ILogger logger, ulong index);
+
+    [LoggerMessage(EventId = 3, Level = LogLevel.Information, Message = "Restored incoming Raft snapshot at index {Index}.")]
+    private static partial void LogIncomingSnapshotRestored(ILogger logger, ulong index);
 }

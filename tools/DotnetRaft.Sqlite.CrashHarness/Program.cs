@@ -52,13 +52,23 @@ internal static class Program
             To =
                 RaftLocalMessageTargets.AppendThread,
             Term = 7,
-            Vote = 1,
-            Commit = 1,
+            Vote = 2,
+            Commit = 3,
+            Snapshot = new Snapshot
+            {
+                Metadata = new SnapshotMetadata
+                {
+                    Index = 2,
+                    Term = 6,
+                    ConfState = new ConfState { Voters = { 1, 2 } },
+                },
+                Data = ByteString.CopyFromUtf8("new application snapshot"),
+            },
         };
         request.Entries.Add(
             new Entry
             {
-                Index = 1,
+                Index = 3,
                 Term = 7,
                 Data =
                     ByteString.CopyFromUtf8(
@@ -107,7 +117,10 @@ internal static class Program
                 Vote = 99,
                 Commit = 0,
             }.ToByteArray());
-        command.ExecuteNonQuery();
+        if (command.ExecuteNonQuery() != 1)
+        {
+            throw new InvalidOperationException("The crash fixture did not update its metadata row.");
+        }
         Console.Out.WriteLine(
             "UNCOMMITTED_MUTATION_EXECUTED");
         Console.Out.Flush();

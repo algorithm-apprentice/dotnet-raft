@@ -104,21 +104,10 @@ internal static class InteractionScriptRunner
         }
     }
 
-    internal static void RunFile(string file)
+    internal static string Preview(string source, string file)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(file);
-        Run(
-            File.ReadAllText(file),
-            Path.GetFileName(file));
-    }
-
-    internal static void RewriteFile(string file)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(file);
-        string source = File.ReadAllText(file);
-        string name = Path.GetFileName(file);
         IReadOnlyList<InteractionScriptCase> cases =
-            Parse(source, name);
+            Parse(source, file);
         var environment =
             new InteractionEnvironment();
         var builder = new System.Text.StringBuilder();
@@ -136,20 +125,12 @@ internal static class InteractionScriptRunner
                     environment.Handle(
                         testCase.CommandLine,
                         testCase.Input,
-                        name,
+                        file,
                         testCase.LineNumber)));
             builder.AppendLine();
         }
 
-        File.WriteAllText(
-            file,
-            builder.ToString()
-                .Replace(
-                    "\r\n",
-                    "\n",
-                    StringComparison.Ordinal)
-                .TrimEnd('\n')
-                + "\n");
+        return builder.ToString().Replace("\r\n", "\n", StringComparison.Ordinal).TrimEnd('\n') + "\n";
     }
 
     private static void SkipSeparators(

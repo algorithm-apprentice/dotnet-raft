@@ -14,6 +14,8 @@ namespace DotnetRaft.Tests.Examples;
 
 public sealed class KvClusterIntegrationTests
 {
+    private static readonly TimeSpan PhaseTimeout = TimeSpan.FromSeconds(5);
+
     [Fact]
     public async Task ThreeNodeClusterReplicatesFollowerProposalAndRead()
     {
@@ -35,15 +37,8 @@ public sealed class KvClusterIntegrationTests
                     CancellationToken.None);
             Assert.True(proposal.AppliedIndex >= 4);
 
-            await WaitUntilAsync(
-                () => nodes.All(node =>
-                {
-                    KeyValueReadResult result =
-                        node.State.ReadLocal(
-                            "color");
-                    return result.Found
-                        && result.Value == "blue";
-                }));
+            await WaitForApplicationAsync(nodes, proposal.AppliedIndex);
+            Assert.All(nodes, node => Assert.Equal("blue", node.State.ReadLocal("color").Value));
 
             ReadResponse read =
                 await nodes[2].Host.ReadAsync(
@@ -56,24 +51,16 @@ public sealed class KvClusterIntegrationTests
                 read.PhysicalApplied >=
                 read.RequiredIndex);
 
-            await nodes[1].Host.DeleteAsync(
+            ProposalResponse deletion = await nodes[1].Host.DeleteAsync(
                 "color",
                 requestId: null,
                 CancellationToken.None);
-            await WaitUntilAsync(
-                () => nodes.All(node =>
-                    !node.State.ReadLocal(
-                        "color").Found));
+            await WaitForApplicationAsync(nodes, deletion.AppliedIndex);
+            Assert.All(nodes, node => Assert.False(node.State.ReadLocal("color").Found));
         }
         finally
         {
-            foreach (NodeHarness node in
-                     nodes.Reverse())
-            {
-                await node.Host.StopAsync(
-                    CancellationToken.None);
-                await DisposeNodeAsync(node);
-            }
+            await StopAndDisposeNodesAsync(nodes, disposeDirectories: true);
         }
     }
 
@@ -108,39 +95,17 @@ public sealed class KvClusterIntegrationTests
                         network,
                         directory: directories[2]),
                 ];
-                foreach (NodeHarness node in nodes)
-                {
-                    network.Register(node.Host);
-                    await node.Host.StartAsync(
-                        CancellationToken.None);
-                }
-
                 try
                 {
-                    await WaitUntilAsync(
-                        () => nodes.All(node =>
-                            node.State
-                                .PhysicalApplied
-                            >= 3));
-                    await nodes[0].Host
-                        .CampaignAsync(
-                            CancellationToken.None);
-                    await WaitUntilAsync(async () =>
-                        (await nodes[0].Host
-                            .GetStatusAsync(
-                                CancellationToken.None))
-                        .Role == RaftRole.Leader);
+                    await StartAndElectAsync(network, nodes);
                     original =
                         await nodes[1].Host.PutAsync(
                             "color",
                             "blue",
                             requestId,
                             CancellationToken.None);
-                    await WaitUntilAsync(
-                        () => nodes.All(node =>
-                            node.State.ReadLocal(
-                                "color").Value
-                            == "blue"));
+                    await WaitForApplicationAsync(nodes, original.AppliedIndex);
+                    Assert.All(nodes, node => Assert.Equal("blue", node.State.ReadLocal("color").Value));
                 }
                 finally
                 {
@@ -167,28 +132,12 @@ public sealed class KvClusterIntegrationTests
                         network,
                         directory: directories[2]),
                 ];
-                foreach (NodeHarness node in nodes)
-                {
-                    network.Register(node.Host);
-                    await node.Host.StartAsync(
-                        CancellationToken.None);
-                }
-
                 try
                 {
-                    await WaitUntilAsync(
-                        () => nodes.All(node =>
-                            node.State.ReadLocal(
-                                "color").Value
-                            == "blue"));
-                    await nodes[0].Host
-                        .CampaignAsync(
-                            CancellationToken.None);
-                    await WaitUntilAsync(async () =>
-                        (await nodes[0].Host
-                            .GetStatusAsync(
-                                CancellationToken.None))
-                        .Role == RaftRole.Leader);
+                    await StartNodesAsync(network, nodes);
+                    await WaitForApplicationAsync(nodes, original.AppliedIndex);
+                    Assert.All(nodes, node => Assert.Equal("blue", node.State.ReadLocal("color").Value));
+                    await ElectAsync(nodes[0]);
                     await nodes[1].Host.PutAsync(
                         "shape",
                         "circle",
@@ -241,62 +190,46 @@ public sealed class KvClusterIntegrationTests
             CreateNode(2, network),
             CreateNode(3, network),
         ];
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         try
         {
             await StartAndElectAsync(network, nodes);
 
             Guid requestId = Guid.Parse(
                 "11111111-2222-3333-4444-555555555555");
-            Task<ProposalResponse> first =
-                nodes[1].Host.PutAsync(
-                    "first",
-                    "one",
-                    requestId,
-                    CancellationToken.None);
-            Task<ProposalResponse> second =
-                nodes[2].Host.PutAsync(
-                    "second",
-                    "two",
-                    requestId,
-                    CancellationToken.None);
-            var successes = 0;
-            var conflicts = 0;
-            foreach (Task<ProposalResponse> task in
-                     new[] { first, second })
-            {
-                try
-                {
-                    _ = await task;
-                    successes++;
-                }
-                catch (KvRequestConflictException)
-                {
-                    conflicts++;
-                }
-            }
+            var first = new KvCommand(requestId, KvCommandType.Set, "first", "one");
+            var second = new KvCommand(requestId, KvCommandType.Set, "second", "two");
+            ProposalResponse?[] results = await Task.WhenAll(
+                ObserveProposalAsync(nodes[1].Host, first), ObserveProposalAsync(nodes[2].Host, second));
+            ProposalResponse winner = Assert.Single(results.OfType<ProposalResponse>());
+            (KvCommand winning, KvCommand losing) = results[0] is not null ? (first, second) : (second, first);
 
-            Assert.Equal(1, successes);
-            Assert.Equal(1, conflicts);
-            await WaitUntilAsync(
-                () => nodes.All(node =>
-                {
-                    bool firstFound =
-                        node.State.ReadLocal(
-                            "first").Found;
-                    bool secondFound =
-                        node.State.ReadLocal(
-                            "second").Found;
-                    return firstFound ^ secondFound;
-                }));
+            ReadResponse barrier = await nodes[0].Host.ReadAsync(winning.Key, guard.Token);
+            Assert.True(barrier.Linearizable);
+            Assert.True(barrier.RequiredIndex >= winner.AppliedIndex);
+            await WaitForApplicationAsync(nodes, barrier.RequiredIndex);
+            Assert.All(nodes, node =>
+            {
+                Assert.Equal(winning.Value, node.State.ReadLocal(winning.Key).Value);
+                Assert.False(node.State.ReadLocal(losing.Key).Found);
+                Assert.Equal(new KvRequestResolution(winner.AppliedIndex, false), node.State.ResolveRequest(winning));
+                Assert.Equal(new KvRequestResolution(winner.AppliedIndex, true), node.State.ResolveRequest(losing));
+            });
         }
         finally
         {
-            foreach (NodeHarness node in
-                     nodes.Reverse())
+            await StopAndDisposeNodesAsync(nodes, disposeDirectories: true);
+        }
+
+        async Task<ProposalResponse?> ObserveProposalAsync(RaftClusterHost host, KvCommand command)
+        {
+            try
             {
-                await node.Host.StopAsync(
-                    CancellationToken.None);
-                await DisposeNodeAsync(node);
+                return await host.PutAsync(command.Key, command.Value!, command.RequestId, guard.Token);
+            }
+            catch (KvRequestConflictException)
+            {
+                return null;
             }
         }
     }
@@ -362,6 +295,115 @@ public sealed class KvClusterIntegrationTests
     }
 
     [Fact]
+    public async Task ConfirmedFollowerReadWaitsForItsLocalApplication()
+    {
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var readCancellation = CancellationTokenSource.CreateLinkedTokenSource(guard.Token);
+        var transport = new ScriptedTransport();
+        var reads = new PendingReadRegistry();
+        var target = CreateNode(1, new InMemoryNetwork(), transportOverride: transport, readRegistry: reads);
+        Task<ReadResponse>? read = null;
+        try
+        {
+            await target.Host.StartAsync(guard.Token);
+            await target.Host.GetStatusAsync(guard.Token);
+            await SendHeartbeatAsync(marker: 1);
+            await ObserveHeartbeatReplyAsync(marker: 1);
+            transport.ReleaseHeartbeat();
+
+            read = target.Host.ReadAsync("color", readCancellation.Token);
+            Message request = await transport.NextAsync(guard.Token);
+            Assert.Equal(MessageType.MsgReadIndex, request.Type);
+            Assert.Equal(2UL, request.To);
+            Entry context = Assert.Single(request.Entries);
+
+            // Hold the consumer in Ready 2 while the owner accepts the read
+            // result and heartbeat 3. Ready 3 sends its heartbeat before it
+            // handles the read; Ready 4 is the post-Advance fence for Ready 3.
+            await SendHeartbeatAsync(marker: 2);
+            await ObserveHeartbeatReplyAsync(marker: 2);
+            var response = new Message { Type = MessageType.MsgReadIndexResp, From = 2, To = 1, Term = 2, Index = 4 };
+            response.Entries.Add(context.Clone());
+            await target.Host.ReceiveAsync(response, guard.Token);
+            await SendHeartbeatAsync(marker: 3);
+            transport.ReleaseHeartbeat();
+            await ObserveHeartbeatReplyAsync(marker: 3);
+            await SendHeartbeatAsync(marker: 4);
+            transport.ReleaseHeartbeat();
+            await ObserveHeartbeatReplyAsync(marker: 4);
+
+            Assert.Equal(3UL, target.State.PhysicalApplied);
+            Assert.False(target.State.ReadLocal("color").Found);
+            // Releasing the barrier removes its registration synchronously;
+            // the client task alone can race its asynchronous continuation.
+            Guid requestId = new(context.Data.Span);
+            Assert.Throws<InvalidOperationException>(() => { _ = reads.Register(requestId); });
+            Assert.False(read.IsCompleted, "A confirmed read must not complete before local application.");
+
+            var command = new KvCommand(Guid.NewGuid(), KvCommandType.Set, "color", "blue");
+            var append = new Message
+            {
+                Type = MessageType.MsgApp,
+                From = 2,
+                To = 1,
+                Term = 2,
+                Index = 3,
+                LogTerm = 1,
+                Commit = 4,
+            };
+            append.Entries.Add(new Entry
+            {
+                Index = 4,
+                Term = 2,
+                Data = ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)),
+            });
+            await target.Host.ReceiveAsync(append, guard.Token);
+            transport.ReleaseHeartbeat();
+
+            ReadResponse result = await read.WaitAsync(guard.Token);
+            Assert.True(result.Linearizable);
+            Assert.True(result.Found);
+            Assert.Equal("blue", result.Value);
+            Assert.Equal(4UL, result.RequiredIndex);
+            Assert.Equal(4UL, result.PhysicalApplied);
+        }
+        finally
+        {
+            readCancellation.Cancel();
+            transport.ReleaseHeartbeat();
+            try
+            {
+                await StopAndDisposeNodesAsync([target], disposeDirectories: true);
+            }
+            finally
+            {
+                if (read is not null)
+                {
+                    await ((Task)read).WaitAsync(PhaseTimeout).ConfigureAwait(
+                        ConfigureAwaitOptions.ContinueOnCapturedContext | ConfigureAwaitOptions.SuppressThrowing);
+                }
+            }
+        }
+
+        ValueTask SendHeartbeatAsync(byte marker) => target.Host.ReceiveAsync(new Message
+        {
+            Type = MessageType.MsgHeartbeat,
+            From = 2,
+            To = 1,
+            Term = 2,
+            Commit = 3,
+            Context = ByteString.CopyFrom(marker),
+        }, guard.Token);
+
+        async Task ObserveHeartbeatReplyAsync(byte marker)
+        {
+            Message reply = await transport.NextAsync(guard.Token);
+            Assert.Equal(MessageType.MsgHeartbeatResp, reply.Type);
+            Assert.Equal(ByteString.CopyFrom(marker), reply.Context);
+        }
+    }
+
+    [Fact]
     public async Task OversizeSnapshotRetriesAfterThreshold()
     {
         var network = new InMemoryNetwork();
@@ -386,28 +428,9 @@ public sealed class KvClusterIntegrationTests
                     256 * 1024,
                 snapshotThresholdEntries: 3),
         ];
-        foreach (NodeHarness node in nodes)
-        {
-            network.Register(node.Host);
-        }
-
         try
         {
-            foreach (NodeHarness node in nodes)
-            {
-                await node.Host.StartAsync(
-                    CancellationToken.None);
-            }
-
-            await WaitUntilAsync(
-                () => nodes.All(node =>
-                    node.State.PhysicalApplied >= 3));
-            await nodes[0].Host.CampaignAsync(
-                CancellationToken.None);
-            await WaitUntilAsync(async () =>
-                (await nodes[0].Host.GetStatusAsync(
-                    CancellationToken.None)).Role
-                == RaftRole.Leader);
+            await StartAndElectAsync(network, nodes);
 
             string large = new(
                 'x',
@@ -423,10 +446,8 @@ public sealed class KvClusterIntegrationTests
                     CancellationToken.None);
             }
 
-            await WaitUntilAsync(
-                () => nodes.All(node =>
-                    SnapshotAttemptIndex(
-                        node.Host) >= 6));
+            await WaitForStatusAsync(nodes, "all replicas to attempt an oversized snapshot",
+                (node, status) => status.LogicalApplied >= 6 && SnapshotAttemptIndex(node.Host) >= 6);
             Assert.All(
                 nodes,
                 node => Assert.Equal(
@@ -439,22 +460,8 @@ public sealed class KvClusterIntegrationTests
                 "value",
                 Guid.NewGuid(),
                 CancellationToken.None);
-            await WaitUntilAsync(async () =>
-            {
-                foreach (NodeHarness node in nodes)
-                {
-                    ClusterStatusResponse status =
-                        await node.Host
-                            .GetStatusAsync(
-                                CancellationToken.None);
-                    if (status.LogicalApplied < 7)
-                    {
-                        return false;
-                    }
-                }
-
-                return true;
-            });
+            await WaitForStatusAsync(nodes, "all replicas to acknowledge application through index 7",
+                (_, status) => status.LogicalApplied >= 7);
 
             Assert.All(
                 nodes,
@@ -485,98 +492,42 @@ public sealed class KvClusterIntegrationTests
         {
             await node.Host.StartAsync(
                 CancellationToken.None);
-            await WaitUntilAsync(
-                () => node.State.PhysicalApplied >= 3);
+            await WaitForApplicationAsync([node], 3);
 
             for (var tick = 0; tick < 20; tick++)
             {
                 node.TickSource.Tick();
             }
 
-            await WaitUntilAsync(async () =>
-                (await node.Host.GetStatusAsync(
-                    CancellationToken.None)).Role
-                == RaftRole.PreCandidate);
+            await WaitForStatusAsync([node], "manual ticks to trigger pre-vote", (_, status) => status.Role == RaftRole.PreCandidate);
         }
         finally
         {
-            await node.Host.StopAsync(
-                CancellationToken.None);
-            await DisposeNodeAsync(node);
+            await StopAndDisposeNodesAsync([node], disposeDirectories: true);
         }
     }
 
     [Fact]
     public async Task ReadyLoopFaultStopsApplicationAndNode()
     {
-        using var directory =
-            new TemporaryNodeDirectory();
-        ValidatedClusterOptions options =
-            KvClusterComponentTests.Options(
-                    nodeId: 1,
-                    dataDirectory:
-                        directory.Path)
-                .Validate();
-        var lifetime =
-            new TestApplicationLifetime();
-        var tickSource = new ManualTickSource();
+        using var guard = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var transport = new FaultingTransport();
-        var storage = new SqliteStorage(
-            directory.RaftPath);
-        var state =
-            new SqliteKeyValueStateMachine(
-                directory.ApplicationPath,
-                nodeId: 1);
-        var host = new RaftClusterHost(
-            options,
-            storage,
-            state,
-            new PendingProposalRegistry(),
-            new PendingReadRegistry(),
-            tickSource,
-            transport,
-            lifetime,
-            NullLogger<RaftClusterHost>.Instance);
-
+        NodeHarness target = CreateNode(1, new InMemoryNetwork(), transportOverride: transport);
         try
         {
-            await host.StartAsync(
-                CancellationToken.None);
-            await WaitUntilAsync(
-                () => state.PhysicalApplied >= 3);
-            await host.CampaignAsync(
-                CancellationToken.None);
-            await transport.Called.WaitAsync(
-                TimeSpan.FromSeconds(5));
-            await WaitUntilAsync(() =>
-                host.ExecuteTask?.IsCompleted
-                == true);
-
-            Assert.True(
-                lifetime.ApplicationStopping
-                    .IsCancellationRequested);
-            await Assert.ThrowsAsync<
-                InvalidOperationException>(
-                async () => await host.ExecuteTask!);
-            await Assert.ThrowsAnyAsync<Exception>(
-                async () => await host.GetStatusAsync(
-                    CancellationToken.None));
+            await target.Host.StartAsync(guard.Token);
+            await target.Host.CampaignAsync(guard.Token);
+            await transport.Called.WaitAsync(guard.Token);
+            InvalidOperationException fault = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => target.Host.ExecuteTask!.WaitAsync(guard.Token));
+            Assert.Equal("transport fault", fault.Message);
+            Assert.True(target.Lifetime.ApplicationStopping.IsCancellationRequested);
+            await Assert.ThrowsAsync<RaftNodeStoppedException>(
+                () => target.Host.GetStatusAsync(guard.Token).WaitAsync(guard.Token));
         }
         finally
         {
-            try
-            {
-                await host.StopAsync(
-                    CancellationToken.None);
-            }
-            catch (InvalidOperationException)
-            {
-            }
-
-            await tickSource.DisposeAsync();
-            lifetime.Dispose();
-            state.Dispose();
-            storage.Dispose();
+            await StopAndDisposeNodesAsync([target], disposeDirectories: true);
         }
     }
 
@@ -829,20 +780,28 @@ public sealed class KvClusterIntegrationTests
 
     private static async Task StartAndElectAsync(InMemoryNetwork network, NodeHarness[] nodes)
     {
+        await StartNodesAsync(network, nodes);
+        await WaitForApplicationAsync(nodes, 3);
+        await ElectAsync(nodes[0]);
+    }
+
+    private static async Task StartNodesAsync(InMemoryNetwork network, NodeHarness[] nodes)
+    {
         foreach (NodeHarness node in nodes)
         {
             network.Register(node.Host);
         }
 
-        foreach (NodeHarness node in nodes)
-        {
-            await node.Host.StartAsync(CancellationToken.None);
-        }
+        using var timeout = new CancellationTokenSource(PhaseTimeout);
+        await Task.WhenAll(nodes.Select(node => node.Host.StartAsync(timeout.Token))).WaitAsync(timeout.Token);
+    }
 
-        await WaitUntilAsync(() => nodes.All(node => node.State.PhysicalApplied >= 3));
-        await nodes[0].Host.CampaignAsync(CancellationToken.None);
-        await WaitUntilAsync(async () =>
-            (await nodes[0].Host.GetStatusAsync(CancellationToken.None)).Role == RaftRole.Leader);
+    private static async Task ElectAsync(NodeHarness candidate)
+    {
+        using var timeout = new CancellationTokenSource(PhaseTimeout);
+        await candidate.Host.CampaignAsync(timeout.Token).AsTask().WaitAsync(timeout.Token);
+        await WaitForStatusAsync([candidate], $"node {candidate.Host.NodeId} to become leader",
+            (_, status) => status.Role == RaftRole.Leader);
     }
 
     private static NodeHarness CreateNode(
@@ -854,7 +813,8 @@ public sealed class KvClusterIntegrationTests
             64 * 1024 * 1024,
         int snapshotThresholdEntries = 10,
         IRaftMessageTransport? transportOverride = null,
-        PendingProposalRegistry? proposalRegistry = null)
+        PendingProposalRegistry? proposalRegistry = null,
+        PendingReadRegistry? readRegistry = null)
     {
         TemporaryNodeDirectory actualDirectory =
             directory
@@ -880,7 +840,7 @@ public sealed class KvClusterIntegrationTests
                 id);
         var proposals =
             proposalRegistry ?? new PendingProposalRegistry();
-        var reads = new PendingReadRegistry();
+        var reads = readRegistry ?? new PendingReadRegistry();
         var ticks = new ManualTickSource();
         IRaftMessageTransport transport =
             transportOverride ?? network.CreateTransport(id);
@@ -920,38 +880,51 @@ public sealed class KvClusterIntegrationTests
                 ?.GetValue(host));
     }
 
-    private static async Task WaitUntilAsync(
-        Func<bool> condition)
-    {
-        using var timeout =
-            new CancellationTokenSource(
-                TimeSpan.FromSeconds(5));
-        while (!condition())
-        {
-            await Task.Delay(
-                10,
-                timeout.Token);
-        }
-    }
+    private static Task WaitForApplicationAsync(NodeHarness[] nodes, ulong index) =>
+        WaitForStatusAsync(nodes, $"replicas to apply through index {index}", (_, status) => status.PhysicalApplied >= index);
 
-    private static async Task WaitUntilAsync(
-        Func<Task<bool>> condition)
+    private static async Task WaitForStatusAsync(
+        NodeHarness[] nodes,
+        string expectation,
+        Func<NodeHarness, ClusterStatusResponse, bool> condition)
     {
-        using var timeout =
-            new CancellationTokenSource(
-                TimeSpan.FromSeconds(5));
-        while (!await condition())
+        var last = new ConcurrentDictionary<ulong, ClusterStatusResponse>();
+        using var timeout = new CancellationTokenSource(PhaseTimeout);
+        try
         {
-            await Task.Delay(
-                10,
-                timeout.Token);
+            while (true)
+            {
+                bool[] satisfied = await Task.WhenAll(nodes.Select(ObserveAsync)).WaitAsync(timeout.Token);
+                if (satisfied.All(result => result))
+                {
+                    return;
+                }
+
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+        catch (OperationCanceledException exception) when (timeout.IsCancellationRequested)
+        {
+            string observations = string.Join(Environment.NewLine, nodes.Select(node =>
+                last.TryGetValue(node.Host.NodeId, out ClusterStatusResponse? status)
+                    ? status.ToString()
+                    : $"Node {node.Host.NodeId}: no status response (host task: {node.Host.ExecuteTask?.Status})"));
+            throw new TimeoutException($"Timed out waiting for {expectation}. Last observations:\n{observations}", exception);
+        }
+
+        async Task<bool> ObserveAsync(NodeHarness node)
+        {
+            ClusterStatusResponse status = await node.Host.GetStatusAsync(timeout.Token);
+            last[node.Host.NodeId] = status;
+            return condition(node, status);
         }
     }
 
     private static async Task DisposeNodeAsync(
         NodeHarness node,
-        bool disposeDirectory = true)
+        bool disposeDirectory)
     {
+        node.Host.Dispose();
         await node.Transport.DisposeAsync();
         await node.TickSource.DisposeAsync();
         node.State.Dispose();
@@ -967,19 +940,43 @@ public sealed class KvClusterIntegrationTests
         IEnumerable<NodeHarness> nodes,
         bool disposeDirectories)
     {
+        var failures = new List<Exception>();
         foreach (NodeHarness node in nodes.Reverse())
         {
+            using var timeout = new CancellationTokenSource(PhaseTimeout);
             try
             {
-                await node.Host.StopAsync(
-                    CancellationToken.None);
+                await node.Host.StopAsync(timeout.Token).WaitAsync(timeout.Token);
+                if (node.Host.ExecuteTask is { IsCompleted: false })
+                {
+                    throw new TimeoutException("The host returned from StopAsync before its loop stopped.");
+                }
             }
-            finally
+            catch (Exception exception)
             {
-                await DisposeNodeAsync(
-                    node,
-                    disposeDirectories);
+                failures.Add(new InvalidOperationException($"Failed to stop node {node.Host.NodeId} ({node.Directory.Path}).", exception));
             }
+
+            if (node.Host.ExecuteTask is { IsCompleted: false })
+            {
+                // A failed guard does not give the test ownership of live databases.
+                node.Directory.Preserve = true;
+                continue;
+            }
+
+            try
+            {
+                await DisposeNodeAsync(node, disposeDirectories);
+            }
+            catch (Exception exception)
+            {
+                failures.Add(new InvalidOperationException($"Failed to dispose node {node.Host.NodeId} ({node.Directory.Path}).", exception));
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            throw new AggregateException("KV test cleanup failed.", failures);
         }
     }
 
@@ -1005,6 +1002,7 @@ public sealed class KvClusterIntegrationTests
         }
 
         internal string Path { get; }
+        internal bool Preserve { get; set; }
 
         internal string RaftPath =>
             System.IO.Path.Combine(
@@ -1018,7 +1016,7 @@ public sealed class KvClusterIntegrationTests
 
         public void Dispose()
         {
-            if (Directory.Exists(Path))
+            if (!Preserve && Directory.Exists(Path))
             {
                 Directory.Delete(
                     Path,
@@ -1107,6 +1105,31 @@ public sealed class KvClusterIntegrationTests
         {
             entered.TrySetResult(message.Clone());
             await released.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
+            return RaftSendResult.Delivered;
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    // Used by the follower application-barrier schedule. Release tokens apply
+    // only to heartbeat replies, not the forwarded request or append reply.
+    private sealed class ScriptedTransport : IRaftMessageTransport
+    {
+        private readonly Channel<Message> sent = Channel.CreateUnbounded<Message>();
+        private readonly Channel<bool> releases = Channel.CreateUnbounded<bool>();
+
+        internal ValueTask<Message> NextAsync(CancellationToken cancellationToken) => sent.Reader.ReadAsync(cancellationToken);
+
+        internal void ReleaseHeartbeat() => releases.Writer.TryWrite(true);
+
+        public async ValueTask<RaftSendResult> SendAsync(Message message, CancellationToken cancellationToken)
+        {
+            await sent.Writer.WriteAsync(message.Clone(), cancellationToken).ConfigureAwait(false);
+            if (message.Type == MessageType.MsgHeartbeatResp)
+            {
+                await releases.Reader.ReadAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             return RaftSendResult.Delivered;
         }
 

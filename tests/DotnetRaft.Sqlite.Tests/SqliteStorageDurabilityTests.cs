@@ -707,42 +707,59 @@ public sealed class SqliteStorageDurabilityTests
         Assert.Equal(1, command.ExecuteNonQuery());
     }
 
-    [Fact]
-    public void FailedBatchRollsBackEveryCategory()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void FailedBatchRollsBackEveryCategory(bool failAfterMetadataUpdate)
     {
         using TemporaryStorageDirectory directory =
             CreateDirectory();
+        var oldHardState = new HardState { Term = 1, Vote = 1, Commit = 1 };
+        var oldEntry = new Entry { Index = 1, Term = 1, Data = ByteString.CopyFromUtf8("original") };
+        var newHardState = new HardState { Term = 3, Vote = 2, Commit = 3 };
+        Snapshot newSnapshot = SnapshotAt(2, 2, data: "new");
+        var newEntry = new Entry { Index = 3, Term = 3, Data = ByteString.CopyFromUtf8("suffix") };
+        Snapshot oldSnapshot;
         using (SqliteStorage storage =
                CreateStorage(directory))
         {
-            storage.SetHardState(
-                new HardState
-                {
-                    Term = 1,
-                    Vote = 1,
-                });
-            storage.Append(
-                Entries((1, 1)));
-            storage.SetHardState(
-                new HardState
-                {
-                    Term = 1,
-                    Vote = 1,
-                    Commit = 1,
-                });
+            storage.SetHardState(new HardState { Term = 1, Vote = 1 });
+            storage.Append([oldEntry]);
+            storage.SetHardState(oldHardState);
+            oldSnapshot = storage.CreateSnapshot(1, new ConfState { Voters = { 1 } }, ByteString.CopyFromUtf8("old app"));
+            string expectedFailure = failAfterMetadataUpdate ? "injected after metadata" : "injected before insert";
             SqliteConnection connection =
                 GetConnection(storage);
             using (SqliteCommand trigger =
                    connection.CreateCommand())
             {
-                trigger.CommandText =
-                    """
-                    CREATE TRIGGER fail_entry_insert
-                    BEFORE INSERT ON raft_entries
-                    BEGIN
-                        SELECT RAISE(ABORT, 'injected');
-                    END;
-                    """;
+                string boundary = Convert.ToHexString(EncodeIndex(newSnapshot.Metadata.Index));
+                string last = Convert.ToHexString(EncodeIndex(newEntry.Index));
+                trigger.CommandText = failAfterMetadataUpdate
+                    ? $"""
+                      CREATE TRIGGER fail_batch
+                      AFTER UPDATE ON raft_metadata
+                      WHEN NEW.pending_snapshot_index = X'{boundary}'
+                      BEGIN
+                          SELECT RAISE(ABORT, 'metadata did not see the complete new batch')
+                          WHERE NEW.last_index != X'{last}'
+                             OR NEW.hard_state IS NOT X'{Convert.ToHexString(newHardState.ToByteArray())}'
+                             OR NEW.snapshot IS NOT X'{Convert.ToHexString(ProtocolDefaults.EnsureSnapshot(newSnapshot.Clone()).ToByteArray())}'
+                             OR NEW.compacted_index != X'{boundary}'
+                             OR (SELECT COUNT(*) FROM raft_entries) != 2
+                             OR NOT EXISTS (SELECT 1 FROM raft_entries WHERE entry_index = NEW.last_index
+                                 AND payload = X'{Convert.ToHexString(newEntry.ToByteArray())}')
+                             OR NOT EXISTS (SELECT 1 FROM raft_entries WHERE entry_index = NEW.compacted_index);
+                          SELECT RAISE(ABORT, 'injected after metadata');
+                      END;
+                      """
+                    : """
+                      CREATE TRIGGER fail_batch
+                      BEFORE INSERT ON raft_entries
+                      BEGIN
+                          SELECT RAISE(ABORT, 'injected before insert');
+                      END;
+                      """;
                 trigger.ExecuteNonQuery();
             }
 
@@ -754,16 +771,12 @@ public sealed class SqliteStorageDurabilityTests
                 To =
                     RaftLocalMessageTargets
                         .AppendThread,
-                Term = 3,
-                Vote = 1,
-                Commit = 3,
-                Snapshot = SnapshotAt(
-                    2,
-                    2,
-                    data: "new"),
+                Term = newHardState.Term,
+                Vote = newHardState.Vote,
+                Commit = newHardState.Commit,
+                Snapshot = newSnapshot,
             };
-            request.Entries.Add(
-                Entries((3, 3)));
+            request.Entries.Add(newEntry);
 
             StorageException failure =
                 Assert.Throws<StorageException>(
@@ -772,6 +785,8 @@ public sealed class SqliteStorageDurabilityTests
             Assert.Equal(
                 StorageError.Unknown,
                 failure.Error);
+            Assert.Contains(expectedFailure, Assert.IsType<SqliteException>(failure.InnerException).Message,
+                StringComparison.Ordinal);
             StorageException future =
                 Assert.Throws<StorageException>(
                     () => storage.GetLastIndex());
@@ -788,22 +803,17 @@ public sealed class SqliteStorageDurabilityTests
             using SqliteCommand drop =
                 connection.CreateCommand();
             drop.CommandText =
-                "DROP TRIGGER fail_entry_insert;";
+                "DROP TRIGGER fail_batch;";
             drop.ExecuteNonQuery();
         }
 
         using SqliteStorage reopened =
             CreateStorage(directory);
         Assert.Equal(1UL, reopened.GetLastIndex());
-        Assert.Equal(1UL, reopened.GetTerm(1));
-        Assert.Equal(
-            1UL,
-            reopened.GetInitialState()
-                .HardState?.Term);
-        Assert.Equal(
-            0UL,
-            reopened.GetSnapshot()
-                .Metadata.Index);
+        Assert.Equal(1UL, reopened.GetFirstIndex());
+        Assert.Equal(oldEntry, Assert.Single(reopened.GetEntries(1, 2, ulong.MaxValue)));
+        Assert.Equal(oldHardState, reopened.GetInitialState().HardState);
+        Assert.Equal(oldSnapshot, reopened.GetSnapshot());
         Assert.Null(
             reopened.GetPendingApplicationSnapshot());
     }
@@ -896,10 +906,15 @@ public sealed class SqliteStorageDurabilityTests
     {
         using TemporaryStorageDirectory directory =
             CreateDirectory();
-        if (mode == "uncommitted")
+        var oldEntry = new Entry { Index = 1, Term = 3, Data = ByteString.CopyFromUtf8("original") };
+        var oldState = new HardState { Term = 3, Vote = 1, Commit = 1 };
+        var oldVoters = new ConfState { Voters = { 1 } };
+        using (SqliteStorage initialize = CreateStorage(directory))
         {
-            using SqliteStorage initialize =
-                CreateStorage(directory);
+            initialize.SetHardState(new HardState { Term = 3, Vote = 1 });
+            initialize.Append([oldEntry]);
+            initialize.SetHardState(oldState);
+            initialize.CreateSnapshot(1, oldVoters, ByteString.CopyFromUtf8("old application snapshot"));
         }
 
         await RunCrashHarness(
@@ -908,18 +923,30 @@ public sealed class SqliteStorageDurabilityTests
 
         using SqliteStorage reopened =
             CreateStorage(directory);
-        StorageState state =
-            reopened.GetInitialState();
         if (mode == "committed")
         {
-            Assert.Equal(7UL, state.HardState?.Term);
-            Assert.Equal(1UL, reopened.GetLastIndex());
-            Assert.Equal(7UL, reopened.GetTerm(1));
+            var voters = new ConfState { Voters = { 1, 2 } };
+            Snapshot snapshot = SnapshotAt(2, 6, voters, data: "new application snapshot");
+            Assert.Equal(new HardState { Term = 7, Vote = 2, Commit = 3 }, reopened.GetHardState());
+            Assert.Equal(3UL, reopened.GetFirstIndex());
+            Assert.Equal(3UL, reopened.GetLastIndex());
+            Assert.Equal(6UL, reopened.GetTerm(2));
+            Assert.Equal(new Entry { Index = 3, Term = 7, Data = ByteString.CopyFromUtf8("durable") },
+                Assert.Single(reopened.GetEntries(3, 4, ulong.MaxValue)));
+            Assert.Equal(snapshot, reopened.GetSnapshot());
+            Assert.Equal(snapshot, reopened.GetPendingApplicationSnapshot());
+            Assert.Throws<InvalidOperationException>(() => reopened.GetInitialState());
         }
         else
         {
-            Assert.Null(state.HardState);
-            Assert.Equal(0UL, reopened.GetLastIndex());
+            StorageState state = reopened.GetInitialState();
+            Assert.Equal(oldState, state.HardState);
+            Assert.Equal(oldVoters, state.ConfState);
+            Assert.Equal(1UL, reopened.GetFirstIndex());
+            Assert.Equal(1UL, reopened.GetLastIndex());
+            Assert.Equal(oldEntry, Assert.Single(reopened.GetEntries(1, 2, ulong.MaxValue)));
+            Assert.Equal(SnapshotAt(1, 3, oldVoters, data: "old application snapshot"), reopened.GetSnapshot());
+            Assert.Null(reopened.GetPendingApplicationSnapshot());
         }
     }
 
@@ -1070,16 +1097,45 @@ public sealed class SqliteStorageDurabilityTests
             process.StandardOutput.ReadToEndAsync();
         Task<string> error =
             process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync()
-            .WaitAsync(TimeSpan.FromSeconds(10));
+        Task exited = process.WaitForExitAsync();
+        Task streamsClosed = Task.WhenAll(exited, output, error);
+        bool timedOut = false;
+        try
+        {
+            await streamsClosed.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        catch (TimeoutException)
+        {
+            timedOut = true;
+            if (!process.HasExited)
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch (InvalidOperationException) when (process.HasExited)
+                {
+                }
+            }
+
+            try
+            {
+                await streamsClosed.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+            catch (TimeoutException)
+            {
+                throw new TimeoutException($"Crash harness '{mode}' timed out and could not be reaped.");
+            }
+        }
+
         string standardOutput = await output;
-        _ = await error;
-        Assert.NotEqual(0, process.ExitCode);
-        Assert.Contains(
-            mode == "committed"
-                ? "COMMIT_RETURNED"
-                : "UNCOMMITTED_MUTATION_EXECUTED",
-            standardOutput,
-            StringComparison.Ordinal);
+        string standardError = await error;
+        string context = $"Crash harness '{mode}', exit={process.ExitCode}\nstdout:\n{standardOutput}\nstderr:\n{standardError}";
+        Assert.False(timedOut, $"Crash harness timed out. {context}");
+        Assert.True(process.ExitCode != 0, context);
+        string marker = mode == "committed"
+            ? "COMMIT_RETURNED"
+            : "UNCOMMITTED_MUTATION_EXECUTED";
+        Assert.True(standardOutput.Contains(marker, StringComparison.Ordinal), context);
     }
 }

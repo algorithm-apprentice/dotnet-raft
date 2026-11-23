@@ -1,46 +1,37 @@
+using DotnetRaft.Tests.Release;
+
 namespace DotnetRaft.Tests.Interaction;
 
 public sealed class InteractionGoldenTests
 {
-    [Fact]
-    public void InitialGoldenScenariosMatchExactly()
+    private static readonly string SourceDirectory = Path.Combine(
+        ReleaseTestPaths.RepositoryRoot, "tests", "DotnetRaft.Tests", "Interaction");
+    private static readonly string OutputDirectory = Path.Combine(AppContext.BaseDirectory, "Interaction");
+    private static readonly string[] FixtureDirectories = ["TestData", "PinnedTestData"];
+
+    public static TheoryData<string> Scenarios => new(FindScenarios(SourceDirectory));
+
+    [Theory]
+    [MemberData(nameof(Scenarios))]
+    public void GoldenScenarioMatchesExactly(string file)
     {
-        bool rewrite = string.Equals(
-            Environment.GetEnvironmentVariable(
-                "DOTNET_RAFT_REWRITE_INTERACTION"),
-            "1",
-            StringComparison.Ordinal);
-        string directory = rewrite
-            ? Path.GetFullPath(
-                Path.Combine(
-                    AppContext.BaseDirectory,
-                    "..",
-                    "..",
-                    "..",
-                    "Interaction",
-                    "TestData"))
-            : Path.Combine(
-                AppContext.BaseDirectory,
-                "Interaction");
-        string[] files = Directory.GetFiles(
-            directory,
-            "*.txt",
-            SearchOption.AllDirectories);
-        Array.Sort(files, StringComparer.Ordinal);
+        string copied = File.ReadAllText(Path.Combine(OutputDirectory, file));
+        string source = File.ReadAllText(Path.Combine(SourceDirectory, file));
+        Assert.True(string.Equals(source, copied, StringComparison.Ordinal), $"Copied fixture {file} is stale; rebuild the tests.");
+        InteractionScriptRunner.Run(copied, file);
+    }
 
-        Assert.Equal(
-            rewrite ? 6 : 34,
-            files.Length);
-        foreach (string file in files)
-        {
-            if (rewrite)
-            {
-                InteractionScriptRunner.RewriteFile(file);
-                continue;
-            }
+    [Fact]
+    public void OutputContainsExactlyTheCheckoutScenarios()
+    {
+        Assert.Equal(FindScenarios(SourceDirectory), FindScenarios(OutputDirectory));
+    }
 
-            InteractionScriptRunner.RunFile(file);
-            InteractionScriptRunner.RunFile(file);
-        }
+    private static IEnumerable<string> FindScenarios(string root)
+    {
+        return FixtureDirectories
+            .SelectMany(directory => Directory.EnumerateFiles(Path.Combine(root, directory), "*.txt", SearchOption.AllDirectories))
+            .Select(file => Path.GetRelativePath(root, file).Replace(Path.DirectorySeparatorChar, '/'))
+            .Order(StringComparer.Ordinal);
     }
 }

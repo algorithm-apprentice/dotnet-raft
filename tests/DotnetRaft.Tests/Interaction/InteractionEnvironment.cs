@@ -54,6 +54,9 @@ internal sealed class InteractionEnvironment
     internal Predicate<Message>? NetworkLinkIsOpen { get; set; }
 
     internal Action<ulong, Entry>? EntryApplied { get; init; }
+    internal Action<ulong, Entry>? EntryDelivered { get; init; }
+    internal Action<ulong, ReadState>? ReadStateDelivered { get; init; }
+    internal IRaftTraceSink? TraceSink { get; init; }
 
     internal string Handle(
         string directive,
@@ -225,6 +228,7 @@ internal sealed class InteractionEnvironment
             PreVote = options.PreVote,
             ReadOnlyOption = options.ReadOnlyOption,
             Logger = _output,
+            TraceSink = TraceSink,
             DisableConfChangeValidation = options.DisableConfChangeValidation,
             StepDownOnRemoval = options.StepDownOnRemoval,
         };
@@ -282,6 +286,10 @@ internal sealed class InteractionEnvironment
         Ready ready = node.RawNode.Ready();
         _output.Write(
             RaftDescriptions.DescribeReady(ready));
+        foreach (ReadState readState in ready.ReadStates)
+        {
+            ReadStateDelivered?.Invoke(node.Config.Id, readState);
+        }
 
         if (node.Config.AsyncStorageWrites)
         {
@@ -1502,6 +1510,7 @@ internal sealed class InteractionEnvironment
         InteractionNode node,
         Entry entry)
     {
+        EntryDelivered?.Invoke(node.Config.Id, entry.Clone());
         Snapshot previous =
             node.GetApplicationSnapshot();
         if (entry.Index
