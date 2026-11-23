@@ -35,25 +35,26 @@ unstable. This keeps entries after the snapshot from being applied before
 the replacement application prefix is ready. Already delivered work is a
 separate concern: it still needs its own completion or snapshot coverage.
 
-## Why the asynchronous responses carry evidence
+<a name="why-the-asynchronous-responses-carry-evidence"></a>
+
+## Why asynchronous completions carry evidence
 
 Append and apply have independent FIFO completion streams, so `RawNode`
-emits storage requests that carry their own generated responses. Replies
-that require persistence are nested with the append rather than exposed
-early on the network. The core delivers committed apply work only through
-the acknowledged stable prefix. A snapshot can cross the two streams and
-supersede older application work; its completion and an old apply response
-advance the cursor monotonically, but the old response must still release
-its exact accounting.
+issues typed storage work with node-owned `StorageCompletion` receipts when
+it needs an acknowledgement. The append's `MessagesAfterPersist` list holds
+separate replies that cannot go out before persistence. The core delivers
+committed apply work only through the acknowledged stable prefix. A snapshot
+can cover older apply work without regressing the cursor, but the old apply
+receipt must still release its exact accounting.
 
 `UnstableLog.StableTo` checks an entry tuple, but the same tuple can disappear
 and return across term changes while writes are still queued. A delayed
 confirmation for the former copy does not prove which bytes are currently
 durable; entry stabilization also checks the Raft term of the append
-response. FIFO order lets a later current-term response attest the earlier
+receipt. FIFO order lets a later current-term receipt attest the earlier
 writes in that stream. See the
-[ABA walkthrough](../learning/03-ready-and-recovery.md#why-index-entryterm-is-not-enough-for-an-async-append-response)
-and [response tests](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs).
+[ABA walkthrough](../learning/03-ready-and-recovery.md#why-index-entryterm-is-not-enough-for-an-async-append-receipt)
+and [completion tests](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs).
 
 ## Serialize ownership, not client effects
 
@@ -85,9 +86,10 @@ timing.
 
 ## Validation and failure
 
-The host owns peer identity and routing. `RawNode.Step` separates local
-storage responses from peer traffic and checks owned message shapes before
-core mutation. `RaftCore.StepPeerMessage` prepares an owned Append as a
+The host owns peer identity and routing. `RawNode.Step` rejects legacy
+storage-response messages; typed receipts go through `CompleteStorageWork`.
+The node checks peer message shapes before core mutation.
+`RaftCore.StepPeerMessage` prepares an owned Append as a
 [`LogSlice`](../../src/DotnetRaft/Core/LogSlice.cs) and retains the parsed
 changes in a [`ParsedProposal`](../../src/DotnetRaft/Core/ParsedProposal.cs).
 A heartbeat reply becomes a

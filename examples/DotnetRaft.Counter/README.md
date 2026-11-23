@@ -114,10 +114,12 @@ the first leader commit line. The leader's own response only counts when
 processed after the storage write. In async mode, look separately for the
 local `MsgStorageAppendResp` that marks entries stable, the `MsgAppResp`
 that counts toward replication, and the `MsgStorageApplyResp` that
-acknowledges application. Find the point where the apply workers are paused:
-the host may already have received apply work although none of the counters
-has changed. This is a deterministic schedule using memory, not a claim
-about disk durability or the order every cluster will exhibit.
+acknowledges application. The two `MsgStorage*Resp` names are trace labels
+for typed completion receipts, not messages to step or send. Find the point
+where the apply workers are paused: the host may already have received apply
+work although none of the counters has changed. This is a deterministic
+schedule using memory, not a claim about disk durability or the order every
+cluster will exhibit.
 
 Continue with the [source walkthrough](../../docs/internals/README.md#follow-a-write)
 to find the methods that produced these lines.

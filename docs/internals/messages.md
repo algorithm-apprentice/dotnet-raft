@@ -47,10 +47,11 @@ and a remote response finally leave that queue.
 ## Preserve presence and ownership
 
 An absent field and an explicitly present zero are different. The codec
-preserves presence and unknown fields and owns encoded entry measures.
+preserves presence and opaque unknown fields in messages, log entries,
+snapshots, and membership records. It also owns encoded entry measurement.
 Local append work uses `RaftHardState?`: null is no update, not a zero vote.
-[Protocol tests](../../tests/DotnetRaft.Tests/Protocol/ProtocolModelTests.cs)
-verify that the ordinary .NET values round-trip through the unchanged wire format.
+The [wire compatibility tests](../../tests/DotnetRaft.Tests/Protocol/ProtobufWireCompatibilityTests.cs)
+use bytes from the pre-migration codec to check presence and encoding.
 
 The domain messages are mutable. Clone when an operation needs to retain input
 or hand output to another owner. [`ProtocolDefaults`](../../src/DotnetRaft/Protocol/ProtocolDefaults.cs)

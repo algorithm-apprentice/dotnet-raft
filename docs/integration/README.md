@@ -21,7 +21,7 @@ use the library in another project.
 | Protocol | Choose it when… | Completion |
 |---|---|---|
 | [Ready / Advance](ready.md#synchronous-ready-loop) (default) | One ordered Ready loop is enough. Start here unless you need a pipeline. | Finish the required work for one batch before `Advance(ready)` or `AdvanceAsync()`. |
-| [Asynchronous storage writes](ready.md#asynchronous-storage-writes) | You want independent FIFO append and apply workers and multiple batches in flight. | Feed the generated local responses to the emitting node. Do not call `Advance`. |
+| [Asynchronous storage writes](ready.md#asynchronous-storage-writes) | You want independent FIFO append and apply workers and multiple batches in flight. | Return each issued `StorageCompletion` to its node after the required work. Do not call `Advance`. |
 
 Either facade can use either protocol. `AsyncStorageWrites` changes the
 write-completion protocol, not whether the facade has async methods or whether

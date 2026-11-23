@@ -91,8 +91,8 @@ state includes all three values, including an explicit zero vote.
 
 Atomically publish the [batch](storage.md#publishing-a-storage-batch). If
 `MessagesAfterPersist` is nonempty or `Completion` is present, force the
-required durability before releasing either. Backends can provide stronger guarantees, including
-always forcing a commit-only write.
+required durability before releasing either. Backends can provide stronger
+guarantees, including always forcing a commit-only write.
 
 For a snapshot-bearing request, also restore application state, its physical
 cursor, and configuration before responding. Serialize that restoration
@@ -100,13 +100,14 @@ against application work using the **same** application-state lock or
 transaction barrier. An older apply that holds it finishes before the
 restore. If an older apply runs after the restore, skip entries covered by
 the snapshot, including their configuration changes, but return its
-original response to release Raft's outstanding work accounting. The node
+original receipt to release Raft's outstanding work accounting. The node
 does not let an older snapshot completion replace newer consensus membership.
 
 After the write, required durability, and any restoration and storage-specific
-acknowledgement succeed, deliver the listed responses in order. A single
-request can contain a local acknowledgement and replies for remote peers. Do
-not release responses when any required step fails.
+acknowledgement succeed, deliver `MessagesAfterPersist` in order, then return
+`Completion` if present. Step self-addressed replies locally and send the
+other replies to their peers. Do not release replies or the receipt when any
+required step fails.
 
 ```csharp
 foreach (Message response in appendWork.MessagesAfterPersist)

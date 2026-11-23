@@ -91,6 +91,11 @@ threads. Do not modify a Ready payload or a worker request before carrying
 out the effects it describes: detached values do not change the completion
 the node expects.
 
+If you use the built-in [`raftpb` codec](../../src/DotnetRaft.Protobuf/README.md#binary-compatibility),
+call `ProtobufRaftCodec.EncodeMessage` and `DecodeMessage` at the transport
+boundary. Pass the decoded .NET `Message` through peer validation before
+stepping the node. Generated Raft wire types stay inside the adapter.
+
 Authenticate the peer at the connection boundary, limit access to authorized
 peers, and validate that `Message.To` is the exact recipient. `Step` and
 `StepAsync` do not authenticate senders. For messages sent directly or

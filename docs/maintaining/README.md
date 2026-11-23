@@ -53,10 +53,10 @@ for the full test, format, smoke, and package sequence.
   every implementation step. Link an earlier outcome only when it helps
   explain a current choice.
 
-The root and SQLite READMEs ship in NuGet packages, so use absolute HTTPS
-links there. Use relative links elsewhere within the checkout. The release
-tests check local targets, the packaged README links that refer to this
-repository, and whether the docs are reachable from the root README.
+The root README and the Protobuf and SQLite package guides ship in NuGet
+packages, so use absolute HTTPS links there. Use relative links elsewhere
+within the checkout. Run the release metadata tests to check document links
+and reachability from the root README.
 
 If a bookmark no longer matches the layout, use the
 [old path lookup](documentation-history.md).

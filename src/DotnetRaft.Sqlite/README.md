@@ -6,7 +6,7 @@
 It persists:
 
 - Raft log entries;
-- `HardState`;
+- `RaftHardState`;
 - retained snapshots and configuration;
 - prefix compaction; and
 - atomic synchronous `Ready` and asynchronous `StorageAppendWork` batches.
@@ -14,7 +14,7 @@ It persists:
 ## Install
 
 Follow the [local package installation guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/install.md)
-to build both local packages and install `DotnetRaft.Sqlite`. The package
+to build the local packages and install `DotnetRaft.Sqlite`. The package
 targets `net10.0` and uses `Microsoft.Data.Sqlite`.
 
 ## Open and restart
@@ -63,6 +63,15 @@ application database is current. Continue
 with the [host restart contract](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/recovery.md#restart).
 In particular, `SqliteStorage.GetInitialState()` takes `ConfState` from the
 retained snapshot; setting `RaftConfig.Applied` does not update it.
+
+### Restart across the proto3 migration
+
+The [raftpb proto3 migration](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/adr/0012-use-proto3-for-raftpb.md#durable-data-and-rollout)
+did not change the SQLite schema or the encoding of stored Raft records.
+For upgrade or rollback between the two builds covered by that decision,
+reopen the same recovery set, including the corresponding application store
+if separate. No SQL or BLOB conversion is required, and the normal pending
+snapshot procedure above still applies.
 
 ## Persisting Ready and local append work
 

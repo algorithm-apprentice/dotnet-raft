@@ -10,7 +10,7 @@ on a real host, use the [integration contract](../integration/README.md).
 ticks, proposals, peer messages, completions
     -> serialized RawNode call -> RaftCore transition
     -> Ready -> host writes, sends, and applies
-    -> Advance or local storage responses -> next transition
+    -> Advance or typed storage completion -> next transition
 ```
 
 [`RaftNode`](../../src/DotnetRaft/RaftNode.cs) optionally serializes the first
@@ -42,10 +42,10 @@ elected node 1 in term 2 and applied entries through index 4.
 | The counter changes, then Raft's acknowledgement cursor moves. | [`RawNode.CreateReady`](../../src/DotnetRaft/RawNode.cs#L487) marks the delivered slice as `Applying`. [`CounterReplica.Apply`](../../examples/DotnetRaft.Counter/CounterReplica.cs) changes application state and updates its own index. [`RawNode.AdvanceCore`](../../src/DotnetRaft/RawNode.cs#L651) subsequently acknowledges the batch and advances Raft `Applied`. |
 
 The async trace has the same append and quorum decisions. `CreateReady`
-routes work through typed local append and apply requests
-instead, and completed workers return the generated responses. See
-[Ready internals](node.md#delivery-and-acknowledgement) for how the two
-protocols record delivery and completion.
+routes work through typed local append and apply requests instead. Append
+releases any deferred replies before returning its receipt; apply returns
+its own receipt. See [Ready internals](node.md#delivery-and-acknowledgement)
+for how the two protocols record delivery and completion.
 
 Read [`SingletonSelfAppendWaitsForAdvance`](../../tests/DotnetRaft.Tests/RawNode/RawNodeReadyTests.cs)
 to isolate the self-response barrier, then

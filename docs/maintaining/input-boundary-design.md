@@ -8,12 +8,13 @@ them rather than move errors from one layer to another.
 
 ## Problem and goals
 
-Peer messages are mutable generated protobufs. A node can check a field,
-discard the result, and hand the original bytes to another layer to check
-and decode again. That was the path for ReadIndex heartbeat acknowledgements
-and for Append batch geometry. Separately, `RaftNode` used to materialize a
-sorted progress snapshot to answer whether one ID was present. Neither a
-second check of identical data nor an unused representation adds evidence.
+Before this refactor, the core handled peer messages as mutable generated
+protobufs. A node could check a field, discard the result, and hand the
+original input to another layer to check and decode again. That was the path
+for ReadIndex heartbeat acknowledgements and for Append batch geometry.
+Separately, `RaftNode` used to materialize a sorted progress snapshot to
+answer whether one ID was present. Neither a second check of identical data
+nor an unused representation adds evidence.
 
 **Parse, not validate** means a boundary produces usable data that carries
 the invariant it established. It does not mean accepting unchecked bytes
@@ -23,7 +24,9 @@ schema, and synchronous and asynchronous Ready contracts. Do not add a
 second representation of every wire message or a second consensus path.
 Those API constraints describe the original refactor. The intentional 2.0
 domain-model migration in [ADR 0010](../adr/0010-separate-state-from-serialization.md)
-changes managed signatures without changing the existing wire and storage formats.
+changed managed signatures without changing the existing wire and storage formats.
+[ADR 0011](../adr/0011-complete-domain-codec-separation.md) describes the completed
+separation from generated types.
 
 ## Ownership and lifetime
 

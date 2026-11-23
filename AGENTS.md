@@ -11,7 +11,7 @@
   Do not couple independently usable packages through internal binary APIs.
 - `examples/DotnetRaft.KvCluster` owns transport, timers, KV application,
   request identity, and recovery across its two databases. The gRPC envelope
-  carries the generated Raft message; it is not a second protocol model.
+  carries encoded Raft message bytes; it is not a second protocol model.
 
 ## Keep serialization at the boundaries
 

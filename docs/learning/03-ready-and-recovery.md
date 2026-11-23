@@ -116,28 +116,30 @@ ordinary log suffix. A snapshot is different: restoration and physical apply
 share a barrier because old application work must not overwrite the state
 restored from a newer prefix. The apply worker can receive only committed
 entries already acknowledged stable. In async mode there is no `Advance`;
-processing the diagnostic entry/snapshot fields as well as the local worker
-messages would process the work twice. Use the complete
+processing the mirrored entry/snapshot fields as well as the typed worker
+requests would process the work twice. Use the complete
 [append-worker routing example](../integration/ready.md#append-worker) for actual
 host code. In particular network replies in `MessagesAfterPersist` do **not** go
 back to the local node just because the outer request was local.
 
-### Why `(index, entryTerm)` is not enough for an async append response
+<a name="why-index-entryterm-is-not-enough-for-an-async-append-response"></a>
 
-The response carries both a **request generation's Raft term** and the
+### Why `(index, entryTerm)` is not enough for an async append receipt
+
+The receipt binds both a **request generation's Raft term** and the
 acknowledged last entry's tuple. Consider this sequence of unstable tail
 replacements while earlier append confirmations are delayed:
 
 | After the leader change | Unstable entry at index 3 | Old outstanding confirmation |
 |---|---|---|
-| Raft term 1 | `(3, entryTerm=1)` | Append response with Raft term 1 will say `(3, 1)`. |
-| Raft term 2 | `(3, entryTerm=2)` | Another response will say `(3, 2)`. |
+| Raft term 1 | `(3, entryTerm=1)` | Append receipt from Raft term 1 acknowledges `(3, 1)`. |
+| Raft term 2 | `(3, entryTerm=2)` | Another receipt acknowledges `(3, 2)`. |
 | Raft term 3 | `(3, entryTerm=1)` | A new leader can bring back the earlier entry as part of its log. |
 
-A delayed term-1 response would superficially match the unstable tuple in
+A delayed term-1 receipt would superficially match the unstable tuple in
 term 3, but term 2's queued write might have replaced the durable copy since
-the first response was generated. Clearing the unstable suffix on that
-response would mistake an older successful write for the new write. This
+the first receipt was issued. Clearing the unstable suffix on that
+receipt would mistake an older successful write for the new write. This
 is an ABA problem: the current value looks equal to an older value after
 an intervening change.
 
@@ -148,7 +150,7 @@ the unstable tail because earlier append requests run in FIFO order.
 Snapshot completion is different: it can acknowledge a committed snapshot
 across a term change, but must not remove or reinstall a newer unstable
 snapshot's configuration. See the
-[ABA response tests](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs)
+[ABA completion tests](../../tests/DotnetRaft.Tests/AsyncStorage/AsyncStorageResponseTests.cs)
 to step through the stale-acknowledgement execution in C#.
 
 ## Evaluate crashes at boundaries, not at arbitrary source lines
