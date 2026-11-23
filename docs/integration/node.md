@@ -132,6 +132,9 @@ peer listener. See [why transfer uses an election](../learning/04-membership-rea
 
 `RawNode.GetBasicStatus`, `GetStatus`, and `VisitProgress`, and the concurrent
 facade's `GetStatusAsync`, report detached observations.
+`Status.ToString()` renders a compact JSON summary for diagnostics. Use the
+status properties for the full configuration and replica progress; the summary
+is not a transport or storage format.
 `Applied` is the [acknowledgement cursor](application.md#application-progress),
 not a substitute for application progress. `RaftDescriptions` formats
 deterministic invariant-culture text. Set `RaftConfig.TraceSink` for detached

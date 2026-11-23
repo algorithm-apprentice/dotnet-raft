@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Globalization;
+using System.Text.Json;
 
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
@@ -227,7 +228,7 @@ public sealed class RawNodeStatusTests
     }
 
     [Fact]
-    public void StatusJsonIsExactAndCultureInvariant()
+    public void StatusJsonDescribesFollowerUnderNonDefaultCulture()
     {
         MemoryStorage storage =
             CreateStorage(voters: [10]);
@@ -245,9 +246,17 @@ public sealed class RawNodeStatusTests
             CultureInfo.CurrentCulture =
                 CultureInfo.GetCultureInfo("ar-EG");
 
-            Assert.Equal(
-                "{\"id\":\"a\",\"term\":2,\"vote\":\"a\",\"commit\":0,\"lead\":\"0\",\"raftState\":\"Follower\",\"applied\":0,\"progress\":{},\"leadtransferee\":\"0\"}",
-                node.GetStatus().ToString());
+            JsonElement status = JsonSerializer.Deserialize<JsonElement>(node.GetStatus().ToString());
+            Assert.Equal(9, status.GetPropertyCount());
+            Assert.Equal("a", status.GetProperty("id").GetString());
+            Assert.Equal(2UL, status.GetProperty("term").GetUInt64());
+            Assert.Equal("a", status.GetProperty("vote").GetString());
+            Assert.Equal(0UL, status.GetProperty("commit").GetUInt64());
+            Assert.Equal("0", status.GetProperty("lead").GetString());
+            Assert.Equal("Follower", status.GetProperty("raftState").GetString());
+            Assert.Equal(0UL, status.GetProperty("applied").GetUInt64());
+            Assert.Empty(status.GetProperty("progress").EnumerateObject());
+            Assert.Equal("0", status.GetProperty("leadtransferee").GetString());
         }
         finally
         {
@@ -256,27 +265,27 @@ public sealed class RawNodeStatusTests
     }
 
     [Fact]
-    public void LeaderStatusJsonSortsProgressNumerically()
+    public void LeaderStatusJsonIncludesOnlyPeerReplicationSummary()
     {
         var node = CreateNode(
             CreateStorage(voters: [0x10, 2, 1]));
         node.Core.BecomeCandidate();
         node.Core.BecomeLeader();
 
-        string json = node.GetStatus().ToString();
-        int one = json.IndexOf(
-            "\"1\":{",
-            StringComparison.Ordinal);
-        int two = json.IndexOf(
-            "\"2\":{",
-            StringComparison.Ordinal);
-        int sixteen = json.IndexOf(
-            "\"10\":{",
-            StringComparison.Ordinal);
+        Status status = node.GetStatus();
+        JsonElement json = JsonSerializer.Deserialize<JsonElement>(status.ToString());
+        JsonElement progress = json.GetProperty("progress");
+        Assert.Equal(status.Progress.Count, progress.GetPropertyCount());
 
-        Assert.True(one >= 0);
-        Assert.True(one < two);
-        Assert.True(two < sixteen);
+        foreach ((ulong id, ProgressStatus expected) in status.Progress)
+        {
+            string key = id.ToString("x", CultureInfo.InvariantCulture);
+            JsonElement peer = progress.GetProperty(key);
+            Assert.Equal(3, peer.GetPropertyCount());
+            Assert.Equal(expected.Match, peer.GetProperty("match").GetUInt64());
+            Assert.Equal(expected.Next, peer.GetProperty("next").GetUInt64());
+            Assert.Equal(expected.State.ToString(), peer.GetProperty("state").GetString());
+        }
     }
 
     [Fact]

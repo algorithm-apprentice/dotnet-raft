@@ -1,6 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
-using System.Text;
+using System.Text.Json.Nodes;
 
 namespace DotnetRaft;
 
@@ -41,77 +41,45 @@ public sealed class Status
 
     public override string ToString()
     {
-        var builder = new StringBuilder();
-        builder.Append("{\"id\":\"");
-        AppendHex(builder, Basic.Id);
-        builder.Append("\",\"term\":");
-        AppendDecimal(builder, Basic.Term);
-        builder.Append(",\"vote\":\"");
-        AppendHex(builder, Basic.Vote);
-        builder.Append("\",\"commit\":");
-        AppendDecimal(builder, Basic.Commit);
-        builder.Append(",\"lead\":\"");
-        AppendHex(builder, Basic.LeaderId);
-        builder.Append("\",\"raftState\":\"");
-        builder.Append(FormatEnum(Basic.Role));
-        builder.Append("\",\"applied\":");
-        AppendDecimal(builder, Basic.Applied);
-        builder.Append(",\"progress\":{");
-
-        var first = true;
-        foreach ((ulong id, ProgressStatus progress) in
-                 _progress)
+        var summary = new JsonObject
         {
-            if (!first)
-            {
-                builder.Append(',');
-            }
+            ["id"] = FormatNodeId(Basic.Id),
+            ["term"] = Basic.Term,
+            ["vote"] = FormatNodeId(Basic.Vote),
+            ["commit"] = Basic.Commit,
+            ["lead"] = FormatNodeId(Basic.LeaderId),
+            ["raftState"] = FormatEnum(Basic.Role),
+            ["applied"] = Basic.Applied,
+            ["progress"] = CreateProgressSummary(),
+            ["leadtransferee"] = FormatNodeId(Basic.LeaderTransferee),
+        };
+        return summary.ToJsonString();
+    }
 
-            first = false;
-            builder.Append('"');
-            AppendHex(builder, id);
-            builder.Append("\":{\"match\":");
-            AppendDecimal(builder, progress.Match);
-            builder.Append(",\"next\":");
-            AppendDecimal(builder, progress.Next);
-            builder.Append(",\"state\":\"");
-            builder.Append(FormatEnum(progress.State));
-            builder.Append("\"}");
+    private JsonObject CreateProgressSummary()
+    {
+        var peers = new JsonObject();
+        foreach ((ulong id, ProgressStatus progress) in _progress)
+        {
+            peers.Add(FormatNodeId(id), new JsonObject
+            {
+                ["match"] = progress.Match,
+                ["next"] = progress.Next,
+                ["state"] = FormatEnum(progress.State),
+            });
         }
 
-        builder.Append("},\"leadtransferee\":\"");
-        AppendHex(builder, Basic.LeaderTransferee);
-        builder.Append("\"}");
-        return builder.ToString();
+        return peers;
     }
 
-    private static void AppendDecimal(
-        StringBuilder builder,
-        ulong value)
-    {
-        builder.Append(
-            value.ToString(
-                CultureInfo.InvariantCulture));
-    }
-
-    private static void AppendHex(
-        StringBuilder builder,
-        ulong value)
-    {
-        builder.Append(
-            value.ToString(
-                "x",
-                CultureInfo.InvariantCulture));
-    }
+    private static string FormatNodeId(ulong id) =>
+        id.ToString("x", CultureInfo.InvariantCulture);
 
     private static string FormatEnum<T>(T value)
         where T : struct, Enum
     {
-        return Enum.IsDefined(value)
-            ? value.ToString()
-            : Convert.ToInt64(
-                    value,
-                    CultureInfo.InvariantCulture)
+        return Enum.GetName(value)
+            ?? Convert.ToInt64(value, CultureInfo.InvariantCulture)
                 .ToString(CultureInfo.InvariantCulture);
     }
 }

@@ -23,6 +23,9 @@
   implementations when their contracts, invariants, and owner are the same.
   Similar-looking code with different durability, error, or lifetime semantics
   is not the same operation.
+- Prefer .NET standard library APIs for general-purpose operations, such as
+  JSON encoding and parsing. Keep domain-specific field selection and value
+  mapping in the owner; do not reimplement the format or its escaping rules.
 - Keep required ordering and atomicity visible in the enclosing workflow.
   Small helpers must not split a transaction or lock boundary, duplicate a
   consensus transition, or hide when Ready work is acknowledged. A function's
@@ -49,6 +52,9 @@
 
 Search for existing helpers and tests before adding another implementation.
 Exercise both synchronous and asynchronous paths when the rule is shared.
+For structured output such as JSON, deserialize it and assert the resulting
+data. Check exact text or bytes only when the representation is itself part
+of the contract.
 Use the deterministic tests under `tests/DotnetRaft.Tests` for the core,
 facades, and host; `tests/DotnetRaft.Sqlite.Tests` for durable storage and
 reopen; and `eng/smoke-durable-kv-cluster.sh` for the real-process example.
