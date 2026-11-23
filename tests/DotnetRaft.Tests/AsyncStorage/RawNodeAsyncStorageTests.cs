@@ -144,7 +144,7 @@ public sealed class RawNodeAsyncStorageTests
         apply.Entries[0].Index = index + 12;
         Assert.Equal(index, completion.Entries[0].Index);
 
-        node.Step(completion);
+        node.StepFixture(completion);
         Assert.Equal(index, node.GetBasicStatus().Applied);
     }
 
@@ -166,10 +166,10 @@ public sealed class RawNodeAsyncStorageTests
             firstEntry.Index + 1,
             secondEntry.Index);
         Assert.Equal(
-            ByteString.CopyFromUtf8("one"),
+            RaftBytes.CopyFromUtf8("one"),
             firstEntry.Data);
         Assert.Equal(
-            ByteString.CopyFromUtf8("two"),
+            RaftBytes.CopyFromUtf8("two"),
             secondEntry.Data);
         Assert.Throws<NotSupportedException>(
             () => node.Advance(first));
@@ -189,28 +189,28 @@ public sealed class RawNodeAsyncStorageTests
         Message stable = append.Responses[1];
 
         PersistAppend(storage, append);
-        node.Step(selfAppend);
+        node.StepFixture(selfAppend);
         Ready committedButUnstable = node.Ready();
 
         Assert.Single(
-            committedButUnstable.Messages,
+            committedButUnstable.FixtureMessages(),
             message =>
                 message.Type
                 == MessageType.MsgStorageAppend);
         Assert.DoesNotContain(
-            committedButUnstable.Messages,
+            committedButUnstable.FixtureMessages(),
             message =>
                 message.Type
                 == MessageType.MsgStorageApply);
 
-        node.Step(stable);
+        node.StepFixture(stable);
         Ready applicable = node.Ready();
 
         Message apply = StorageMessage(
             applicable,
             MessageType.MsgStorageApply);
         Assert.Equal(
-            ByteString.CopyFromUtf8("value"),
+            RaftBytes.CopyFromUtf8("value"),
             Assert.Single(apply.Entries).Data);
     }
 
@@ -226,12 +226,12 @@ public sealed class RawNodeAsyncStorageTests
             ready,
             MessageType.MsgStorageAppend);
         ready.Entries[0].Data =
-            ByteString.CopyFromUtf8("mutated");
+            RaftBytes.CopyFromUtf8("mutated");
         append.Entries[0].Data =
-            ByteString.CopyFromUtf8("request");
+            RaftBytes.CopyFromUtf8("request");
 
         Assert.Equal(
-            ByteString.CopyFromUtf8("request"),
+            RaftBytes.CopyFromUtf8("request"),
             append.Entries[0].Data);
         Assert.NotEqual(
             ready.Entries[0].Data,
@@ -256,7 +256,7 @@ public sealed class RawNodeAsyncStorageTests
             PersistAppend(storage, append);
         foreach (Message response in responses)
         {
-            node.Step(response);
+            node.StepFixture(response);
         }
 
         var indexes = new List<ulong>();
@@ -273,7 +273,7 @@ public sealed class RawNodeAsyncStorageTests
                 Assert.False(node.HasReady());
             }
 
-            node.Step(
+            node.StepFixture(
                 Assert.Single(
                     apply.Responses));
         }

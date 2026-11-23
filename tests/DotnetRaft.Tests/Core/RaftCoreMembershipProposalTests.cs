@@ -25,7 +25,7 @@ public sealed class RaftCoreMembershipProposalTests
             {
                 Type = ConfChangeType.ConfChangeAddNode,
                 NodeId = 2,
-                Context = ByteString.CopyFromUtf8("v1"),
+                Context = RaftBytes.CopyFromUtf8("v1"),
             }));
         Message original = proposal.Clone();
 
@@ -226,10 +226,10 @@ public sealed class RaftCoreMembershipProposalTests
             var proposal = Proposal(new Entry
             {
                 Type = type,
-                Data = ByteString.CopyFrom(0xff),
+                Data = RaftBytes.CopyFrom([0xff]),
             });
 
-            Assert.Throws<InvalidProtocolBufferException>(
+            Assert.Throws<InvalidDataException>(
                 () => core.Step(proposal));
 
             Assert.Equal(lastIndex, core.Log.LastIndex);
@@ -277,7 +277,7 @@ public sealed class RaftCoreMembershipProposalTests
             maxUncommittedEntriesSize: 1);
         core.Step(Proposal(new Entry
         {
-            Data = ByteString.CopyFromUtf8("x"),
+            Data = RaftBytes.CopyFromUtf8("x"),
         }));
         core.TakeMessages();
         core.TakeMessagesAfterAppend();
@@ -380,7 +380,7 @@ public sealed class RaftCoreMembershipProposalTests
             To = 1,
             Type = MessageType.MsgProp,
         };
-        message.Entries.Add(entries);
+        message.Entries.AddRange(entries);
         return message;
     }
 

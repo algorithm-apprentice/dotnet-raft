@@ -74,7 +74,7 @@ internal static class RaftCoreReadIndexTestSupport
         };
         request.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(context),
+            Data = RaftBytes.CopyFromUtf8(context),
         });
         return request;
     }
@@ -97,7 +97,7 @@ internal static class RaftCoreReadIndexTestSupport
     internal static Message HeartbeatResponse(
         RaftCore core,
         ulong from,
-        ByteString context,
+        RaftBytes context,
         ulong? term = null)
     {
         return new Message
@@ -110,7 +110,7 @@ internal static class RaftCoreReadIndexTestSupport
         };
     }
 
-    internal static ByteString LatestHeartbeatContext(
+    internal static RaftBytes LatestHeartbeatContext(
         IEnumerable<Message> messages)
     {
         return messages

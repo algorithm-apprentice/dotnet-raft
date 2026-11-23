@@ -10,6 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\DotnetRaft\DotnetRaft.csproj" />
+    <ProjectReference Include="..\..\src\DotnetRaft.Protobuf\DotnetRaft.Protobuf.csproj" />
   </ItemGroup>
 
 </Project>

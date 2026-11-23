@@ -25,7 +25,7 @@ public sealed class RawNodeReadyTests
 
         Assert.True(ready.MustSync);
         Assert.Single(ready.Entries);
-        Assert.Empty(ready.Messages);
+        Assert.Empty(ready.FixtureMessages());
         Assert.Equal(0UL, node.Core.Log.Committed);
 
         Persist(storage, ready);
@@ -83,7 +83,7 @@ public sealed class RawNodeReadyTests
             entry =>
                 entry.Index == 2
                 && entry.Data ==
-                    ByteString.CopyFromUtf8("later"));
+                    RaftBytes.CopyFromUtf8("later"));
         Assert.Contains(
             later.CommittedEntries,
             entry => entry.Index == 1);
@@ -122,7 +122,7 @@ public sealed class RawNodeReadyTests
     {
         MemoryStorage storage = CreateStorage(voters: [1, 2]);
         var node = CreateNode(storage);
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
@@ -144,12 +144,12 @@ public sealed class RawNodeReadyTests
             Commit = 1,
         };
         append.Entries.Add(EntryAt(1, 1, "committed"));
-        node.Step(append);
+        node.StepFixture(append);
 
         Ready ready = node.Ready();
 
         Assert.Collection(
-            ready.Messages,
+            ready.FixtureMessages(),
             message =>
                 Assert.Equal(
                     MessageType.MsgProp,
@@ -166,7 +166,7 @@ public sealed class RawNodeReadyTests
         var node = CreateNode(CreateStorage(voters: [1, 2]));
         var append = new Message { From = 2, To = 1, Type = MessageType.MsgApp, Term = 1, Commit = 1 };
         append.Entries.Add(EntryAt(1, 1, "command"));
-        node.Step(append);
+        node.StepFixture(append);
 
         Ready ready = node.Ready();
         Entry pending = Assert.Single(ready.Entries);
@@ -184,7 +184,7 @@ public sealed class RawNodeReadyTests
     {
         MemoryStorage storage = CreateStorage(voters: [1, 2]);
         var node = CreateNode(storage);
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
@@ -192,7 +192,7 @@ public sealed class RawNodeReadyTests
             Type = MessageType.MsgSnap,
             Snapshot = new Snapshot
             {
-                Data = ByteString.CopyFromUtf8("state"),
+                Data = RaftBytes.CopyFromUtf8("state"),
                 Metadata = new SnapshotMetadata
                 {
                     Index = 5,
@@ -209,7 +209,7 @@ public sealed class RawNodeReadyTests
 
         Assert.Equal(5UL, ready.Snapshot?.Metadata.Index);
         Assert.Contains(
-            ready.Messages,
+            ready.FixtureMessages(),
             message =>
                 message.Type == MessageType.MsgAppResp
                 && message.To == 2
@@ -231,11 +231,11 @@ public sealed class RawNodeReadyTests
         bool asyncStorageWrites,
         bool earlierEntryLeavesJoint)
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         var initial = new ConfState { Voters = { 1, 2 } };
         if (earlierEntryLeavesJoint)
         {
-            initial.VotersOutgoing.Add([1UL, 2UL, 3UL]);
+            initial.VotersOutgoing.AddRange([1UL, 2UL, 3UL]);
         }
         else
         {
@@ -266,7 +266,7 @@ public sealed class RawNodeReadyTests
         var node = CreateNode(storage, asyncStorageWrites: asyncStorageWrites);
         Ready earlier = node.Ready();
         Message? apply = asyncStorageWrites
-            ? Assert.Single(earlier.Messages, message =>
+            ? Assert.Single(earlier.FixtureMessages(), message =>
                 message.Type == MessageType.MsgStorageApply)
             : null;
         Entry entry = Assert.Single(apply is null
@@ -278,8 +278,8 @@ public sealed class RawNodeReadyTests
         ulong[] snapshotVoters = earlierEntryLeavesJoint ? [1, 2, 4] : [1, 2, 3];
         ReceiveSnapshot(node, 2, snapshotVoters);
         ConfState applied = earlierEntryLeavesJoint
-            ? node.ApplyConfChange(ConfChangeV2.Parser.ParseFrom(entry.Data))
-            : node.ApplyConfChange(ProtocolConfChange.Parser.ParseFrom(entry.Data));
+            ? node.ApplyConfChange(ProtobufFixtureEncoding.DecodeV2(entry.Data))
+            : node.ApplyConfChange(ProtobufFixtureEncoding.DecodeLegacy(entry.Data));
         ulong[] earlierVoters = earlierEntryLeavesJoint ? [1, 2] : [1, 2, 3, 4];
         Assert.Equal(earlierVoters, applied.Voters);
         Assert.Empty(applied.VotersOutgoing);
@@ -290,7 +290,7 @@ public sealed class RawNodeReadyTests
         }
         else
         {
-            node.Step(Assert.Single(apply.Responses));
+            node.StepFixture(Assert.Single(apply.Responses));
         }
 
         Ready snapshot = node.Ready();
@@ -348,8 +348,8 @@ public sealed class RawNodeReadyTests
         ulong[] voters)
     {
         var configuration = new ConfState();
-        configuration.Voters.Add(voters);
-        node.Step(new Message
+        configuration.Voters.AddRange(voters);
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
@@ -381,6 +381,6 @@ public sealed class RawNodeReadyTests
         Message append = AsyncStorageTestSupport.StorageMessage(
             ready, MessageType.MsgStorageAppend);
         Message[] responses = AsyncStorageTestSupport.PersistAppend(storage, append);
-        node.Step(Assert.Single(responses, response => response.To == 1));
+        node.StepFixture(Assert.Single(responses, response => response.To == 1));
     }
 }

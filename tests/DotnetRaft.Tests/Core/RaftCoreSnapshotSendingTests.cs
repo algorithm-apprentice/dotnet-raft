@@ -25,7 +25,7 @@ public sealed class RaftCoreSnapshotSendingTests
         Assert.Equal(MessageType.MsgSnap, snapshotMessage.Type);
         Assert.Equal(2UL, snapshotMessage.To);
         Assert.Equal(core.Term, snapshotMessage.Term);
-        Assert.Equal(5UL, snapshotMessage.Snapshot.Metadata.Index);
+        Assert.Equal(5UL, snapshotMessage.Snapshot!.Metadata.Index);
         Assert.Equal(1UL, snapshotMessage.Snapshot.Metadata.Term);
         Assert.Equal("snapshot", snapshotMessage.Snapshot.Data.ToStringUtf8());
         Assert.Equal(ProgressState.Snapshot, progress.State);
@@ -35,7 +35,7 @@ public sealed class RaftCoreSnapshotSendingTests
 
         snapshotMessage.Snapshot.Metadata.Index = 99;
         snapshotMessage.Snapshot.Data =
-            ByteString.CopyFromUtf8("changed");
+            RaftBytes.CopyFromUtf8("changed");
         Snapshot stored = fixture.Storage.LogStorage.GetSnapshot();
         Assert.Equal(5UL, stored.Metadata.Index);
         Assert.Equal("snapshot", stored.Data.ToStringUtf8());
@@ -273,7 +273,7 @@ public sealed class RaftCoreSnapshotSendingTests
         };
         storage.LogStorage.ApplySnapshot(new Snapshot
         {
-            Data = ByteString.CopyFromUtf8("snapshot"),
+            Data = RaftBytes.CopyFromUtf8("snapshot"),
             Metadata = new SnapshotMetadata
             {
                 Index = 5,
@@ -389,7 +389,7 @@ public sealed class RaftCoreSnapshotSendingTests
         };
         message.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(data),
+            Data = RaftBytes.CopyFromUtf8(data),
         });
         return message;
     }

@@ -7,8 +7,6 @@ using DotnetRaft.Read;
 using DotnetRaft.Storage;
 using DotnetRaft.Tracker;
 
-using Google.Protobuf;
-
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Core;
@@ -264,8 +262,8 @@ internal sealed partial class RaftCore
             HandlesLeaderResponse(message));
         PreparedInput input = message.Type switch
         {
-            MessageType.MsgApp => new(Append: LogSlice.ParseOwnedPeerAppend(message)),
-            MessageType.MsgProp => new(Proposal: ParsedProposal.Parse(message.Entries, fromPeer: true)),
+            MessageType.MsgApp => new(Append: LogSlice.ParseOwnedPeerAppend(message, Log.Format)),
+            MessageType.MsgProp => new(Proposal: ParsedProposal.Parse(message.Entries, fromPeer: true, Log.Format)),
             MessageType.MsgSnap when handlesLeaderMessages => new(Snapshot: PrepareSnapshot(message.Snapshot, fromPeer: true)),
             MessageType.MsgHeartbeatResp => new(ReadAcknowledgement: PrepareReadAcknowledgement(message, fromPeer: true)),
             _ => default,
@@ -365,7 +363,7 @@ internal sealed partial class RaftCore
                 Type = EntryType.EntryConfChange,
                 Term = 1,
                 Index = (ulong)offset + 1,
-                Data = change.ToByteString(),
+                Data = Log.Format.EncodeConfigurationChange(change),
             };
         }
 
@@ -665,19 +663,27 @@ internal sealed partial class RaftCore
     private void HandleStorageAppendResponse(
         Message message,
         bool acknowledgeEntries)
+        => AcknowledgeStableWork(
+            acknowledgeEntries && message.Index != 0 ? new EntryId(message.LogTerm, message.Index) : null,
+            message.Snapshot?.Metadata?.Index);
+
+    internal void CompleteStorageAppend(ulong issuedTerm, EntryId? stableEntry, ulong? snapshotIndex)
     {
-        if (acknowledgeEntries
-            && message.Index != 0)
+        // An older term's write cannot stabilize a new log suffix. Its
+        // installed snapshot can still be acknowledged at its own index.
+        AcknowledgeStableWork(issuedTerm == 0 || issuedTerm == Term ? stableEntry : null, snapshotIndex);
+    }
+
+    private void AcknowledgeStableWork(EntryId? stableEntry, ulong? snapshotIndex)
+    {
+        if (stableEntry is { } entry)
         {
-            Log.StableTo(
-                new EntryId(
-                    message.LogTerm,
-                    message.Index));
+            Log.StableTo(entry);
         }
 
-        if (message.Snapshot?.Metadata is SnapshotMetadata metadata)
+        if (snapshotIndex is { } index)
         {
-            AcknowledgeSnapshot(metadata.Index);
+            AcknowledgeSnapshot(index);
         }
     }
 
@@ -694,9 +700,14 @@ internal sealed partial class RaftCore
             .. message.Entries.Select(
                 entry => entry.Clone()),
         ];
+        CompleteStorageApply(entries);
+    }
+
+    internal void CompleteStorageApply(Entry[] entries)
+    {
         AppliedTo(
             entries[^1].Index,
-            EntrySizing.EncodedSize(entries));
+            EntrySizing.EncodedSize(Log.Format, entries));
         ReduceUncommittedSize(
             EntrySizing.PayloadSize(entries));
     }

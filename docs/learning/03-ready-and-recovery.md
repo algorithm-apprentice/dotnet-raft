@@ -100,17 +100,15 @@ substitute for the host's Ready consumer.
 
 With `AsyncStorageWrites`, append and apply are independent FIFO workers.
 The host can accept more Ready batches without waiting for an earlier local
-write. To see the change, compare `CreateStorageAppendMessage` and
-`CreateStorageApplyMessage` in `RawNode`:
+write. `RawNode.CreateReady` exposes the workers separately:
 
 ```text
-Ready.Messages (async)
-    immediate protocol messages       -> transport
-    MsgStorageAppend                   -> append worker
-        nested network replies        -> their remote destination
-        nested local append response  -> the same node
-    MsgStorageApply                    -> application worker
-        nested local apply response   -> the same node
+Ready.Messages                      -> transport
+Ready.AppendWork                    -> append worker
+    MessagesAfterPersist            -> their destination
+    Completion                      -> the issuing node
+Ready.ApplyWork                     -> application worker
+    Completion                      -> the issuing node
 ```
 
 The append worker need not wait for the apply worker simply to persist an
@@ -121,7 +119,7 @@ entries already acknowledged stable. In async mode there is no `Advance`;
 processing the diagnostic entry/snapshot fields as well as the local worker
 messages would process the work twice. Use the complete
 [append-worker routing example](../integration/ready.md#append-worker) for actual
-host code. In particular network replies in `request.Responses` do **not** go
+host code. In particular network replies in `MessagesAfterPersist` do **not** go
 back to the local node just because the outer request was local.
 
 ### Why `(index, entryTerm)` is not enough for an async append response
@@ -143,7 +141,7 @@ response would mistake an older successful write for the new write. This
 is an ABA problem: the current value looks equal to an older value after
 an intervening change.
 
-`RaftCore.HandleStorageAppendResponse` checks the current response term for
+`RaftCore.CompleteStorageAppend` checks the issuing term for
 entry stabilization, and `UnstableLog.StableTo` checks the entry tuple. Even
 a later hard-state-only append request can provide current-term evidence for
 the unstable tail because earlier append requests run in FIFO order.

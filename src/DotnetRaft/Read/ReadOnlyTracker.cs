@@ -4,8 +4,6 @@ using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 using DotnetRaft.Quorum;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Read;
 
 internal sealed class ReadOnlyTracker : IAckedIndexer
@@ -54,7 +52,7 @@ internal sealed class ReadOnlyTracker : IAckedIndexer
         }
     }
 
-    internal ReadAcknowledgement? ParseAcknowledgement(ByteString context, bool fromPeer)
+    internal ReadAcknowledgement? ParseAcknowledgement(RaftBytes context, bool fromPeer)
     {
         return ReadAcknowledgement.Parse(context, GetCurrentPosition(), fromPeer);
     }
@@ -89,18 +87,18 @@ internal sealed class ReadOnlyTracker : IAckedIndexer
         return confirmed;
     }
 
-    internal ByteString GetHeartbeatContext()
+    internal RaftBytes GetHeartbeatContext()
     {
         if (pendingRequests.Count == 0)
         {
-            return ByteString.Empty;
+            return RaftBytes.Empty;
         }
 
         var context = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64LittleEndian(
             context,
             GetCurrentPosition());
-        return ByteString.CopyFrom(context);
+        return RaftBytes.CopyFrom(context);
     }
 
     bool IAckedIndexer.TryGetAckedIndex(

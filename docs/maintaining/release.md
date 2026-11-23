@@ -10,13 +10,14 @@ not publish anything to NuGet.org.
 | Contract | Mechanically checked by |
 |---|---|
 | Core and SQLite managed API | [`PublicApi.approved.txt`](../../tests/DotnetRaft.Tests/Release/PublicApi.approved.txt), [`SqlitePublicApi.approved.txt`](../../tests/DotnetRaft.Tests/Release/SqlitePublicApi.approved.txt) |
+| Codec managed API | [`ProtobufPublicApi.approved.txt`](../../tests/DotnetRaft.Tests/Release/ProtobufPublicApi.approved.txt) |
 | Protobuf wire numbers, types, cardinality, and enums | [`ProtocolDescriptor.approved.txt`](../../tests/DotnetRaft.Tests/Release/ProtocolDescriptor.approved.txt) |
 | SQLite persisted format | [`SqliteSchema.approved.sql`](../../tests/DotnetRaft.Sqlite.Tests/Schema/SqliteSchema.approved.sql) and [reopen/recovery tests](../../tests/DotnetRaft.Sqlite.Tests/SqliteStorageDurabilityTests.cs) |
 | Ready, durability, and host recovery behavior | The [integration contract](../integration/README.md) and [host boundary tests](testing.md) |
 | Packaged files, dependencies, and symbols | [Release verifier](../../tools/DotnetRaft.ReleaseVerifier/Program.cs) and a consumer restore for each package |
 
 Keep SQLite and its native assets out of the core package. `Grpc.Tools` is
-build-only; `Google.Protobuf` is a core runtime dependency. Both packages
+build-only; `Google.Protobuf` is a codec runtime dependency, never a core dependency. All packages
 include license and attribution files and their own README.
 
 ## Rehearse the release locally
@@ -28,11 +29,11 @@ to verify against Git, use a clean committed checkout. From its root:
 commit=$(git rev-parse HEAD)
 ./eng/pack-release.sh "$PWD" "$commit"
 ./eng/verify-package.sh \
-  artifacts/package/DotnetRaft.2.0.0.nupkg \
-  artifacts/package/DotnetRaft.2.0.0.snupkg "$PWD" "$commit"
+  artifacts/package/DotnetRaft.3.0.0.nupkg \
+  artifacts/package/DotnetRaft.3.0.0.snupkg "$PWD" "$commit"
 ./eng/verify-sqlite-package.sh \
-  artifacts/package/DotnetRaft.Sqlite.2.0.0.nupkg \
-  artifacts/package/DotnetRaft.Sqlite.2.0.0.snupkg "$PWD" "$commit"
+  artifacts/package/DotnetRaft.Sqlite.3.0.0.nupkg \
+  artifacts/package/DotnetRaft.Sqlite.3.0.0.snupkg "$PWD" "$commit"
 ./eng/verify-reproducible-pack.sh "$PWD" "$commit"
 ```
 

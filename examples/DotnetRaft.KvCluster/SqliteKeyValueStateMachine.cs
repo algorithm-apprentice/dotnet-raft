@@ -1,8 +1,7 @@
 using System.Buffers.Binary;
 
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
-
-using Google.Protobuf;
 
 using Microsoft.Data.Sqlite;
 
@@ -342,7 +341,7 @@ public sealed partial class SqliteKeyValueStateMachine
         AddBlob(
             command,
             "$confState",
-            configuration.ToByteArray());
+            ProtobufRaftCodec.EncodeMembership(configuration));
         if (command.ExecuteNonQuery() != 1)
         {
             throw new InvalidDataException(

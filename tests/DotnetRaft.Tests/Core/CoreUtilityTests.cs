@@ -14,7 +14,7 @@ public sealed class CoreUtilityTests
         {
             Term = 10,
             Index = 123,
-            Data = ByteString.CopyFromUtf8("data"),
+            Data = RaftBytes.CopyFromUtf8("data"),
         };
 
         Assert.Equal(new EntryId(10, 123), EntryId.From(entry));
@@ -77,9 +77,9 @@ public sealed class CoreUtilityTests
         var entries = Entries((4, 4), (5, 5), (6, 6));
         var firstTwoSize = (ulong)(entries[0].CalculateSize() + entries[1].CalculateSize());
 
-        Assert.Equal([entries[0]], EntrySizing.LimitSize(entries, 0));
-        Assert.Equal([entries[0], entries[1]], EntrySizing.LimitSize(entries, firstTwoSize));
-        Assert.Equal(entries, EntrySizing.LimitSize(entries, ulong.MaxValue));
+        Assert.Equal([entries[0]], EntrySizing.LimitSize(ProtobufRaftCodec.Instance, entries, 0));
+        Assert.Equal([entries[0], entries[1]], EntrySizing.LimitSize(ProtobufRaftCodec.Instance, entries, firstTwoSize));
+        Assert.Equal(entries, EntrySizing.LimitSize(ProtobufRaftCodec.Instance, entries, ulong.MaxValue));
     }
 
     [Fact]
@@ -92,11 +92,11 @@ public sealed class CoreUtilityTests
     public void CloneEntriesDoesNotShareMessages()
     {
         var original = Entries((1, 1));
-        original[0].Data = ByteString.CopyFromUtf8("original");
+        original[0].Data = RaftBytes.CopyFromUtf8("original");
 
         var clone = ProtocolCloning.CloneEntries(original);
         clone[0].Term = 2;
-        clone[0].Data = ByteString.CopyFromUtf8("clone");
+        clone[0].Data = RaftBytes.CopyFromUtf8("clone");
 
         Assert.Equal(1UL, original[0].Term);
         Assert.Equal("original", original[0].Data.ToStringUtf8());

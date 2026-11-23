@@ -254,8 +254,8 @@ public sealed class DurableKvComponentTests
         using var directory =
             new TemporaryDirectory();
         var confState = new ConfState();
-        confState.Voters.Add([1, 2, 3]);
-        ByteString snapshot;
+        confState.Voters.AddRange([1, 2, 3]);
+        RaftBytes snapshot;
         using (var state =
                new SqliteKeyValueStateMachine(
                    directory.ApplicationPath,
@@ -308,7 +308,7 @@ public sealed class DurableKvComponentTests
             new TemporaryDirectory();
         var configuration = new ConfState();
         configuration.Voters.Add(1);
-        ByteString snapshot;
+        RaftBytes snapshot;
         using (var state =
                new SqliteKeyValueStateMachine(
                    directory.ApplicationPath,
@@ -399,7 +399,7 @@ public sealed class DurableKvComponentTests
             new TemporaryDirectory();
         var configuration = new ConfState();
         configuration.Voters.Add(1);
-        ByteString snapshot;
+        RaftBytes snapshot;
         using (var source =
                new SqliteKeyValueStateMachine(
                    sourceDirectory.ApplicationPath,
@@ -456,7 +456,7 @@ public sealed class DurableKvComponentTests
         Assert.Throws<InvalidDataException>(
             () => versionTarget.Restore(
                 1,
-                ByteString.CopyFromUtf8(
+                RaftBytes.CopyFromUtf8(
                     wrongVersion),
                 configuration));
     }
@@ -747,7 +747,7 @@ public sealed class DurableKvComponentTests
                 1,
                 first);
             var second = new ConfState();
-            second.Voters.Add([1, 2]);
+            second.Voters.AddRange([1, 2]);
             application.ApplyConfiguration(
                 2,
                 second);
@@ -788,8 +788,8 @@ public sealed class DurableKvComponentTests
         var first = new ConfState();
         first.Voters.Add(1);
         var confState = new ConfState();
-        confState.Voters.Add([1, 2]);
-        ByteString data;
+        confState.Voters.AddRange([1, 2]);
+        RaftBytes data;
         using (var donor =
                new SqliteKeyValueStateMachine(
                    donorDirectory.ApplicationPath,
@@ -1041,7 +1041,7 @@ public sealed class DurableKvComponentTests
         var first = new ConfState();
         first.Voters.Add(1);
         var second = new ConfState();
-        second.Voters.Add([1, 2]);
+        second.Voters.AddRange([1, 2]);
         using (var application =
                new SqliteKeyValueStateMachine(
                    directory.ApplicationPath,
@@ -1101,10 +1101,10 @@ public sealed class DurableKvComponentTests
         var first = new ConfState();
         first.Voters.Add(1);
         var second = new ConfState();
-        second.Voters.Add([1, 2]);
+        second.Voters.AddRange([1, 2]);
         var third = new ConfState();
-        third.Voters.Add([1, 2, 3]);
-        ByteString snapshotAtThree;
+        third.Voters.AddRange([1, 2, 3]);
+        RaftBytes snapshotAtThree;
         using (var application =
                new SqliteKeyValueStateMachine(
                    directory.ApplicationPath,
@@ -1211,10 +1211,10 @@ public sealed class DurableKvComponentTests
         var first = new ConfState();
         first.Voters.Add(1);
         var second = new ConfState();
-        second.Voters.Add([1, 2]);
+        second.Voters.AddRange([1, 2]);
         var third = new ConfState();
-        third.Voters.Add([1, 2, 3]);
-        ByteString data;
+        third.Voters.AddRange([1, 2, 3]);
+        RaftBytes data;
         using (var donor =
                    new SqliteKeyValueStateMachine(
                        donorDirectory.ApplicationPath,

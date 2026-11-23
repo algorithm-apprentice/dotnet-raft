@@ -4,8 +4,6 @@ using System.Text;
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 
-using Google.Protobuf;
-
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Diagnostics;
@@ -79,7 +77,8 @@ public static class RaftDescriptions
 
     public static string DescribeReady(
         Ready ready,
-        EntryFormatter? formatter = null)
+        EntryFormatter? formatter = null,
+        IRaftLogFormat? format = null)
     {
         ArgumentNullException.ThrowIfNull(ready);
         var body = new StringBuilder();
@@ -125,7 +124,8 @@ public static class RaftDescriptions
             body,
             "Entries",
             ready.Entries,
-            formatter);
+            formatter,
+            format);
         if (ready.Snapshot is not null
             && IsNonempty(ready.Snapshot))
         {
@@ -139,16 +139,18 @@ public static class RaftDescriptions
             body,
             "CommittedEntries",
             ready.CommittedEntries,
-            formatter);
-        if (ready.Messages.Count > 0)
+            formatter,
+            format);
+        if (ready.Messages.Count > 0 || ready.AppendWork is not null || ready.ApplyWork is not null)
         {
             body.Append("Messages:\n");
-            foreach (Message message in ready.Messages)
+            foreach (Message message in ready.DescribeMessages())
             {
                 body.Append(
                     DescribeMessage(
                         message,
-                        formatter));
+                        formatter,
+                        format));
                 body.Append('\n');
             }
         }
@@ -168,18 +170,21 @@ public static class RaftDescriptions
 
     public static string DescribeMessage(
         Message message,
-        EntryFormatter? formatter = null)
+        EntryFormatter? formatter = null,
+        IRaftLogFormat? format = null)
     {
         ArgumentNullException.ThrowIfNull(message);
         return DescribeMessage(
             string.Empty,
             message,
-            formatter);
+            formatter,
+            format);
     }
 
     public static string DescribeEntry(
         Entry entry,
-        EntryFormatter? formatter = null)
+        EntryFormatter? formatter = null,
+        IRaftLogFormat? format = null)
     {
         ArgumentNullException.ThrowIfNull(entry);
         string? formatted = entry.Type switch
@@ -188,14 +193,17 @@ public static class RaftDescriptions
                 formatter is null
                     ? QuoteBytes(entry.Data.Span)
                     : formatter(entry.Data.Span),
-            EntryType.EntryConfChange =>
+            EntryType.EntryConfChange when format is not null =>
                 DescribeConfigurationPayload(
                     entry.Data,
+                    format,
                     v2: false),
-            EntryType.EntryConfChangeV2 =>
+            EntryType.EntryConfChangeV2 when format is not null =>
                 DescribeConfigurationPayload(
                     entry.Data,
+                    format,
                     v2: true),
+            EntryType.EntryConfChange or EntryType.EntryConfChangeV2 => ToLowerHex(entry.Data.Span),
             _ => null,
         };
 
@@ -216,7 +224,8 @@ public static class RaftDescriptions
 
     public static string DescribeEntries(
         IEnumerable<Entry> entries,
-        EntryFormatter? formatter = null)
+        EntryFormatter? formatter = null,
+        IRaftLogFormat? format = null)
     {
         ArgumentNullException.ThrowIfNull(entries);
         var builder = new StringBuilder();
@@ -230,7 +239,7 @@ public static class RaftDescriptions
             }
 
             builder.Append(
-                DescribeEntry(entry, formatter));
+                DescribeEntry(entry, formatter, format));
             builder.Append('\n');
         }
 
@@ -286,7 +295,8 @@ public static class RaftDescriptions
     private static string DescribeMessage(
         string indent,
         Message message,
-        EntryFormatter? formatter)
+        EntryFormatter? formatter,
+        IRaftLogFormat? format)
     {
         var builder = new StringBuilder();
         builder.Append(indent);
@@ -327,7 +337,8 @@ public static class RaftDescriptions
             builder.Append(
                 DescribeEntry(
                     message.Entries[0],
-                    formatter));
+                    formatter,
+                    format));
             builder.Append(']');
         }
         else if (message.Entries.Count > 1)
@@ -339,7 +350,7 @@ public static class RaftDescriptions
                 builder.Append(indent);
                 builder.Append("  ");
                 builder.Append(
-                    DescribeEntry(entry, formatter));
+                    DescribeEntry(entry, formatter, format));
             }
 
             builder.Append('\n');
@@ -368,7 +379,8 @@ public static class RaftDescriptions
                     DescribeMessage(
                         indent + "  ",
                         response,
-                        formatter));
+                        formatter,
+                        format));
             }
 
             builder.Append('\n');
@@ -380,18 +392,19 @@ public static class RaftDescriptions
     }
 
     private static string DescribeConfigurationPayload(
-        ByteString data,
+        RaftBytes data,
+        IRaftLogFormat format,
         bool v2)
     {
         try
         {
             ConfChangeV2 change = v2
-                ? ConfChangeV2.Parser.ParseFrom(data)
+                ? format.DecodeConfigurationChangeV2(data.Span)
                 : Convert(
-                    ProtocolConfChange.Parser.ParseFrom(data));
+                    format.DecodeConfigurationChange(data.Span));
             return CompactChanges(change.Changes);
         }
-        catch (InvalidProtocolBufferException)
+        catch (InvalidDataException)
         {
             string type = v2
                 ? "ConfChangeV2"
@@ -447,7 +460,8 @@ public static class RaftDescriptions
         StringBuilder builder,
         string label,
         IReadOnlyList<Entry> entries,
-        EntryFormatter? formatter)
+        EntryFormatter? formatter,
+        IRaftLogFormat? format)
     {
         if (entries.Count == 0)
         {
@@ -457,7 +471,7 @@ public static class RaftDescriptions
         builder.Append(label);
         builder.Append(":\n");
         builder.Append(
-            DescribeEntries(entries, formatter));
+            DescribeEntries(entries, formatter, format));
     }
 
     private static void AppendIds(

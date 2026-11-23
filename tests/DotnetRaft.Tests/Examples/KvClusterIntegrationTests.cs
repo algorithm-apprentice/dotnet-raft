@@ -355,7 +355,7 @@ public sealed class KvClusterIntegrationTests
             {
                 Index = 4,
                 Term = 2,
-                Data = ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)),
+                Data = RaftBytes.CopyFrom(DurableKvCommandCodec.Encode(command)),
             });
             await target.Host.ReceiveAsync(append, guard.Token);
             transport.ReleaseHeartbeat();
@@ -392,14 +392,14 @@ public sealed class KvClusterIntegrationTests
             To = 1,
             Term = 2,
             Commit = 3,
-            Context = ByteString.CopyFrom(marker),
+            Context = RaftBytes.CopyFrom([marker]),
         }, guard.Token);
 
         async Task ObserveHeartbeatReplyAsync(byte marker)
         {
             Message reply = await transport.NextAsync(guard.Token);
             Assert.Equal(MessageType.MsgHeartbeatResp, reply.Type);
-            Assert.Equal(ByteString.CopyFrom(marker), reply.Context);
+            Assert.Equal(RaftBytes.CopyFrom([marker]), reply.Context);
         }
     }
 
@@ -574,7 +574,7 @@ public sealed class KvClusterIntegrationTests
                         Term = snapshotTerm,
                         ConfState = donor.ConfState,
                     },
-                    Data = validPayload ? donor.CreateSnapshotData() : ByteString.CopyFromUtf8("not JSON"),
+                    Data = validPayload ? donor.CreateSnapshotData() : RaftBytes.CopyFromUtf8("not JSON"),
                 },
             }, guard.Token);
 
@@ -648,26 +648,26 @@ public sealed class KvClusterIntegrationTests
             {
                 Index = 4,
                 Term = 2,
-                Data = ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)),
+                Data = RaftBytes.CopyFrom(DurableKvCommandCodec.Encode(command)),
             });
             append.Entries.Add(new Entry
             {
                 Index = 5,
                 Term = 2,
-                Data = malformed ? ByteString.CopyFromUtf8("not JSON") : ByteString.CopyFrom(DurableKvCommandCodec.Encode(last)),
+                Data = malformed ? RaftBytes.CopyFromUtf8("not JSON") : RaftBytes.CopyFrom(DurableKvCommandCodec.Encode(last)),
             });
             if (!malformed)
             {
                 // Later spellings of the same request ID cannot replace its
                 // winner, including when they are in the same transaction.
                 string encoded = System.Text.Encoding.UTF8.GetString(DurableKvCommandCodec.Encode(command));
-                append.Entries.Add(new Entry { Index = 6, Term = 2, Data = ByteString.CopyFromUtf8($" {encoded} ") });
+                append.Entries.Add(new Entry { Index = 6, Term = 2, Data = RaftBytes.CopyFromUtf8($" {encoded} ") });
                 append.Entries.Add(new Entry { Index = 7, Term = 2 });
                 append.Entries.Add(new Entry
                 {
                     Index = 8,
                     Term = 2,
-                    Data = ByteString.CopyFrom(DurableKvCommandCodec.Encode(command with { Value = "red" })),
+                    Data = RaftBytes.CopyFrom(DurableKvCommandCodec.Encode(command with { Value = "red" })),
                 });
                 append.Commit = 8;
             }
@@ -760,7 +760,7 @@ public sealed class KvClusterIntegrationTests
                     Index = index,
                     Term = 2,
                     Type = index == 69 ? EntryType.EntryConfChangeV2 : EntryType.EntryNormal,
-                    Data = command is null ? ByteString.Empty : ByteString.CopyFrom(DurableKvCommandCodec.Encode(command)),
+                    Data = command is null ? RaftBytes.Empty : RaftBytes.CopyFrom(DurableKvCommandCodec.Encode(command)),
                 });
             }
 

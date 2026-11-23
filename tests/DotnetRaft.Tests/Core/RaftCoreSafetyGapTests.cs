@@ -72,7 +72,7 @@ public sealed class RaftCoreSafetyGapTests
             new Entry
             {
                 Data =
-                    ByteString.CopyFromUtf8("read"),
+                    RaftBytes.CopyFromUtf8("read"),
             });
         core.Step(request);
         core.TakeMessages();
@@ -225,8 +225,8 @@ public sealed class RaftCoreSafetyGapTests
         IRaftLogger? logger = null)
     {
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL, 3UL]);
-        var storage = new MemoryStorage();
+        state.Voters.AddRange([1UL, 2UL, 3UL]);
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(
             new Snapshot
             {

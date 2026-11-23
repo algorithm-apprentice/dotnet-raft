@@ -78,7 +78,7 @@ public sealed class RaftCoreReadIndexTests
             index: core.Log.LastIndex));
 
         Message[] released = core.TakeMessages();
-        ByteString context =
+        RaftBytes context =
             LatestHeartbeatContext(released);
         Assert.False(context.IsEmpty);
         Assert.Equal(1UL, core.Log.Committed);
@@ -103,7 +103,7 @@ public sealed class RaftCoreReadIndexTests
     {
         RaftCore core = NewLeader(voters: [1, 2, 3]);
         core.Step(ReadRequest("stable"));
-        ByteString context = LatestHeartbeatContext(
+        RaftBytes context = LatestHeartbeatContext(
             core.TakeMessages());
 
         core.Step(Proposal("later"));
@@ -141,13 +141,13 @@ public sealed class RaftCoreReadIndexTests
 
         core.Step(request);
         request.Entries[0].Data =
-            ByteString.CopyFromUtf8("changed");
+            RaftBytes.CopyFromUtf8("changed");
 
         core.Step(AppResponse(
             core,
             from: 2,
             index: core.Log.LastIndex));
-        ByteString context = LatestHeartbeatContext(
+        RaftBytes context = LatestHeartbeatContext(
             core.TakeMessages());
         core.Step(HeartbeatResponse(
             core,
@@ -176,7 +176,7 @@ public sealed class RaftCoreReadIndexTests
         {
             request.Entries.Add(new Entry
             {
-                Data = ByteString.CopyFromUtf8("entry"),
+                Data = RaftBytes.CopyFromUtf8("entry"),
             });
         }
 
@@ -195,7 +195,7 @@ public sealed class RaftCoreReadIndexTests
         core.Step(ReadRequest("duplicate"));
         core.TakeMessages();
         core.Step(ReadRequest("duplicate"));
-        ByteString latest = LatestHeartbeatContext(
+        RaftBytes latest = LatestHeartbeatContext(
             core.TakeMessages());
 
         core.Step(HeartbeatResponse(
@@ -246,7 +246,7 @@ public sealed class RaftCoreReadIndexTests
         };
         proposal.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(context),
+            Data = RaftBytes.CopyFromUtf8(context),
         });
         return proposal;
     }

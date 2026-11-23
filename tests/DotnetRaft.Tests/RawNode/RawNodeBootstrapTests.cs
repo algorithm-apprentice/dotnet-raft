@@ -21,10 +21,10 @@ public sealed class RawNodeBootstrapTests
         [
             new Peer(
                 2,
-                ByteString.CopyFromUtf8("local")),
+                RaftBytes.CopyFromUtf8("local")),
             new Peer(
                 1,
-                ByteString.CopyFromUtf8("remote")),
+                RaftBytes.CopyFromUtf8("remote")),
         ];
 
         node.Bootstrap(peers);
@@ -38,7 +38,7 @@ public sealed class RawNodeBootstrapTests
             },
             ready.HardState);
         Assert.True(ready.MustSync);
-        Assert.Empty(ready.Messages);
+        Assert.Empty(ready.FixtureMessages());
         Assert.Equal(2, ready.Entries.Count);
         Assert.Equal(2, ready.CommittedEntries.Count);
         for (var offset = 0; offset < peers.Length; offset++)
@@ -51,7 +51,7 @@ public sealed class RawNodeBootstrapTests
                 entry.Type);
 
             ProtocolConfChange change =
-                ProtocolConfChange.Parser.ParseFrom(
+                ProtobufFixtureEncoding.DecodeLegacy(
                     entry.Data);
             Assert.Equal(
                 ConfChangeType.ConfChangeAddNode,
@@ -80,13 +80,13 @@ public sealed class RawNodeBootstrapTests
             new Peer(1),
             new Peer(
                 2,
-                ByteString.CopyFromUtf8("ctx")),
+                RaftBytes.CopyFromUtf8("ctx")),
         ]);
 
         Ready ready = node.Ready();
 
         Assert.Equal(
-            ByteString.CopyFrom(
+            RaftBytes.CopyFrom(
             [
                 0x10,
                 0x00,
@@ -95,7 +95,7 @@ public sealed class RawNodeBootstrapTests
             ]),
             ready.Entries[0].Data);
         Assert.Equal(
-            ByteString.CopyFrom(
+            RaftBytes.CopyFrom(
             [
                 0x10,
                 0x00,
@@ -148,7 +148,7 @@ public sealed class RawNodeBootstrapTests
             foreach (Entry entry in ready.CommittedEntries)
             {
                 ProtocolConfChange change =
-                    ProtocolConfChange.Parser.ParseFrom(
+                    ProtobufFixtureEncoding.DecodeLegacy(
                         entry.Data);
                 node.ApplyConfChange(change);
                 appliedIndexes.Add(entry.Index);

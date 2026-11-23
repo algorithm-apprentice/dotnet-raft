@@ -50,16 +50,16 @@ jobs:
       - name: Verify package
         run: >-
           ./eng/verify-package.sh
-          artifacts/package/DotnetRaft.2.0.0.nupkg
-          artifacts/package/DotnetRaft.2.0.0.snupkg
+          artifacts/package/DotnetRaft.3.0.0.nupkg
+          artifacts/package/DotnetRaft.3.0.0.snupkg
           "$GITHUB_WORKSPACE"
           "${{ github.sha }}"
 
       - name: Verify SQLite package
         run: >-
           ./eng/verify-sqlite-package.sh
-          artifacts/package/DotnetRaft.Sqlite.2.0.0.nupkg
-          artifacts/package/DotnetRaft.Sqlite.2.0.0.snupkg
+          artifacts/package/DotnetRaft.Sqlite.3.0.0.nupkg
+          artifacts/package/DotnetRaft.Sqlite.3.0.0.snupkg
           "$GITHUB_WORKSPACE"
           "${{ github.sha }}"
 

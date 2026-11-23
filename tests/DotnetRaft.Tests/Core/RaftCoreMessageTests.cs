@@ -18,13 +18,13 @@ public sealed class RaftCoreMessageTests
         {
             To = 2,
             Type = MessageType.MsgHeartbeat,
-            Context = ByteString.CopyFromUtf8("original"),
+            Context = RaftBytes.CopyFromUtf8("original"),
         };
 
         core.Send(original);
 
         original.To = 3;
-        original.Context = ByteString.CopyFromUtf8("changed");
+        original.Context = RaftBytes.CopyFromUtf8("changed");
         Message sent = Assert.Single(core.TakeMessages());
 
         Assert.NotSame(original, sent);
@@ -207,14 +207,14 @@ public sealed class RaftCoreMessageTests
         {
             To = 2,
             Type = MessageType.MsgHeartbeat,
-            Context = ByteString.CopyFromUtf8("immediate"),
+            Context = RaftBytes.CopyFromUtf8("immediate"),
         });
         core.Send(new Message
         {
             To = 2,
             Type = MessageType.MsgVoteResp,
             Term = 5,
-            Context = ByteString.CopyFromUtf8("durable"),
+            Context = RaftBytes.CopyFromUtf8("durable"),
         });
 
         core.BecomeFollower(5, 2);

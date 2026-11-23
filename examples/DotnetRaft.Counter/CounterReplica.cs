@@ -1,17 +1,15 @@
+using DotnetRaft.Protobuf;
+
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
-
-using Google.Protobuf;
-
-using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Examples.Counter;
 
 internal sealed class CounterReplica
 {
-    internal static ByteString IncrementCommand { get; } = ByteString.CopyFromUtf8("increment");
+    internal static RaftBytes IncrementCommand { get; } = RaftBytes.CopyFromUtf8("increment");
 
-    private readonly MemoryStorage _storage = new();
+    private readonly MemoryStorage _storage = new(ProtobufRaftCodec.Instance);
 
     internal CounterReplica(ulong id, Peer[] peers, bool asyncStorage, CounterWriteTrace? trace)
     {
@@ -29,8 +27,8 @@ internal sealed class CounterReplica
     internal RawNode Node { get; }
     internal ulong Applied { get; private set; }
     internal int Count { get; private set; }
-    internal Queue<Message> AppendWork { get; } = new();
-    internal Queue<Message> ApplyWork { get; } = new();
+    internal Queue<StorageAppendWork> AppendWork { get; } = new();
+    internal Queue<StorageApplyWork> ApplyWork { get; } = new();
 
     internal void Persist(Snapshot? snapshot, IReadOnlyList<Entry> entries, RaftHardState? hardState)
     {
@@ -61,7 +59,7 @@ internal sealed class CounterReplica
             {
                 case EntryType.EntryConfChange:
                     // Apply the fixed bootstrap membership through the public API.
-                    Node.ApplyConfChange(ProtocolConfChange.Parser.ParseFrom(entry.Data));
+                    Node.ApplyConfChange(_storage.LogFormat.DecodeConfigurationChange(entry.Data.Span));
                     break;
                 case EntryType.EntryNormal when entry.Data.IsEmpty:
                     // The leader's no-op occupies an index but does not change the counter.

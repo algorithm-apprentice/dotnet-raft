@@ -30,7 +30,7 @@ public sealed class RaftLogTests
     [Fact]
     public void FindConflictMatchesReferenceMatrix()
     {
-        var log = new RaftLog(new MemoryStorage(), NullRaftLogger.Instance);
+        var log = new RaftLog(new MemoryStorage(ProtobufRaftCodec.Instance), NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 2), (3, 3)));
         var cases = new[]
         {
@@ -102,7 +102,7 @@ public sealed class RaftLogTests
     [Fact]
     public void IsUpToDateComparesTermBeforeIndex()
     {
-        var log = new RaftLog(new MemoryStorage(), NullRaftLogger.Instance);
+        var log = new RaftLog(new MemoryStorage(ProtobufRaftCodec.Instance), NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 2), (3, 3)));
 
         Assert.True(log.IsUpToDate(new EntryId(Term: 4, Index: 2)));
@@ -126,7 +126,7 @@ public sealed class RaftLogTests
 
         foreach (AppendCase testCase in cases)
         {
-            var storage = new MemoryStorage();
+            var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
             storage.Append(Entries((1, 1), (2, 2)));
             var log = new RaftLog(storage, NullRaftLogger.Instance);
 
@@ -141,7 +141,7 @@ public sealed class RaftLogTests
     [Fact]
     public void MaybeAppendEntriesMatchesWithoutAdvancingCommit()
     {
-        var log = new RaftLog(new MemoryStorage(), NullRaftLogger.Instance);
+        var log = new RaftLog(new MemoryStorage(ProtobufRaftCodec.Instance), NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 2), (3, 3)));
         log.CommitTo(1);
 
@@ -177,7 +177,7 @@ public sealed class RaftLogTests
     [Fact]
     public void MaybeAppendEntriesRejectsConflictsWithCommittedEntries()
     {
-        var log = new RaftLog(new MemoryStorage(), NullRaftLogger.Instance);
+        var log = new RaftLog(new MemoryStorage(ProtobufRaftCodec.Instance), NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 2), (3, 3)));
         log.CommitTo(3);
 
@@ -196,7 +196,7 @@ public sealed class RaftLogTests
     [Fact]
     public void CommitAndCurrentTermChecksNeverRegress()
     {
-        var log = new RaftLog(new MemoryStorage(), NullRaftLogger.Instance);
+        var log = new RaftLog(new MemoryStorage(ProtobufRaftCodec.Instance), NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 2), (3, 3)));
         log.CommitTo(2);
 
@@ -274,7 +274,7 @@ public sealed class RaftLogTests
     [Fact]
     public void NextUnstableEntriesTrackStabilization()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.Append(Entries((1, 1)));
         var log = new RaftLog(storage, NullRaftLogger.Instance);
         log.Append(Entries((2, 2), (3, 2)));
@@ -345,7 +345,7 @@ public sealed class RaftLogTests
         Assert.Single(firstBatch);
         Assert.Equal(4UL, firstBatch[0].Index);
 
-        ulong firstSize = EntrySizing.EncodedSize(firstBatch);
+        ulong firstSize = EntrySizing.EncodedSize(ProtobufRaftCodec.Instance, firstBatch);
         log.AcceptApplying(4, firstSize, allowUnstable: true);
 
         Assert.True(log.ApplyingEntriesPaused);
@@ -379,7 +379,7 @@ public sealed class RaftLogTests
         Assert.Single(firstBatch);
         Assert.Equal(4UL, firstBatch[0].Index);
 
-        ulong firstSize = EntrySizing.EncodedSize(firstBatch);
+        ulong firstSize = EntrySizing.EncodedSize(ProtobufRaftCodec.Instance, firstBatch);
         log.AcceptApplying(4, firstSize, allowUnstable: true);
         Assert.True(log.ApplyingEntriesPaused);
 
@@ -437,6 +437,7 @@ public sealed class RaftLogTests
             log.Slice(103, 107, 0));
 
         ulong stableTwoSize = EntrySizing.EncodedSize(
+            ProtobufRaftCodec.Instance,
             Entries((103, 103), (104, 104)));
         AssertEntries(
             Entries((103, 103), (104, 104)),
@@ -460,7 +461,7 @@ public sealed class RaftLogTests
             Entries((4, 1), (5, 1)));
         var log = new RaftLog(storage, NullRaftLogger.Instance);
         log.Append(Entries((6, 1), (7, 1)));
-        ulong pageSize = EntrySizing.EncodedSize(Entries((4, 1), (5, 1)));
+        ulong pageSize = EntrySizing.EncodedSize(ProtobufRaftCodec.Instance, Entries((4, 1), (5, 1)));
         var scanned = new List<Entry>();
 
         log.Scan(4, 8, pageSize, page => scanned.AddRange(page));
@@ -540,7 +541,7 @@ public sealed class RaftLogTests
         ulong term,
         params Entry[] entries)
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(SnapshotAt(index, term));
         storage.Append(entries);
         return storage;
@@ -602,6 +603,8 @@ public sealed class RaftLogTests
 
     private sealed class SharedStorage : IStorage
     {
+        public IRaftLogFormat LogFormat => ProtobufRaftCodec.Instance;
+
         internal Entry SharedEntry { get; } = new()
         {
             Index = 1,
@@ -655,6 +658,8 @@ public sealed class RaftLogTests
 
     private sealed class TemporarilyUnavailableSnapshotStorage : IStorage
     {
+        public IRaftLogFormat LogFormat => ProtobufRaftCodec.Instance;
+
         public StorageState GetInitialState()
         {
             return new StorageState(null, new ConfState());

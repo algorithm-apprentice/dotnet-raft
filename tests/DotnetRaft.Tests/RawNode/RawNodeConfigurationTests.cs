@@ -23,7 +23,7 @@ public sealed class RawNodeConfigurationTests
         {
             Type = ConfChangeType.ConfChangeAddNode,
             NodeId = 2,
-            Context = ByteString.CopyFromUtf8("v1"),
+            Context = RaftBytes.CopyFromUtf8("v1"),
         };
         ProtocolConfChange original = change.Clone();
 
@@ -46,7 +46,7 @@ public sealed class RawNodeConfigurationTests
         {
             Transition =
                 ConfChangeTransition.JointExplicit,
-            Context = ByteString.CopyFromUtf8("v2"),
+            Context = RaftBytes.CopyFromUtf8("v2"),
         };
         change.Changes.Add(new ConfChangeSingle
         {
@@ -132,7 +132,7 @@ public sealed class RawNodeConfigurationTests
         Entry entry = Assert.Single(
             node.Ready().Entries);
         ConfState state = node.ApplyConfChange(
-            ProtocolConfChange.Parser.ParseFrom(
+            ProtobufFixtureEncoding.DecodeLegacy(
                 entry.Data));
         Assert.Equal(
             [1UL],
@@ -206,7 +206,7 @@ public sealed class RawNodeConfigurationTests
         Snapshot snapshot = application.CreateSnapshot(
             storage,
             entry.Index,
-            ByteString.CopyFromUtf8("state"));
+            RaftBytes.CopyFromUtf8("state"));
         Assert.Contains(
             2UL,
             snapshot.Metadata.ConfState.Voters);
@@ -341,8 +341,7 @@ public sealed class RawNodeConfigurationTests
             EntryType.EntryConfChangeV2,
             leaveEntry.Type);
         Assert.Empty(
-            ConfChangeV2.Parser
-                .ParseFrom(leaveEntry.Data)
+            ProtobufFixtureEncoding.DecodeV2(leaveEntry.Data)
                 .Changes);
         Assert.True(leaveEntry.Index > committed.Index);
         PersistAndAdvance(node, storage, leave);
@@ -350,7 +349,7 @@ public sealed class RawNodeConfigurationTests
         Ready leaveApply = node.Ready();
         Persist(storage, leaveApply);
         ConfChangeV2 leaveChange =
-            ConfChangeV2.Parser.ParseFrom(
+            ProtobufFixtureEncoding.DecodeV2(
                 Assert.Single(
                     leaveApply.CommittedEntries).Data);
         ConfState final =

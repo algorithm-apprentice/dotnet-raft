@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 
 using DotnetRaft.Core;
 
-using Google.Protobuf;
+using DotnetRaft.Protocol;
 
 namespace DotnetRaft.Read;
 
@@ -25,11 +25,10 @@ internal readonly struct ReadAcknowledgement
     internal bool IsPresent => position != 0;
 
     internal static ReadAcknowledgement? Parse(
-        ByteString context,
+        RaftBytes context,
         ulong latestPosition,
         bool fromPeer)
     {
-        ArgumentNullException.ThrowIfNull(context);
         if (context.IsEmpty)
         {
             return null;

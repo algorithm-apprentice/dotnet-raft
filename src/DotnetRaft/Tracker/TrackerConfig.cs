@@ -55,10 +55,10 @@ internal sealed class TrackerConfig
         {
             AutoLeave = AutoLeave,
         };
-        state.Voters.Add(Voters.Incoming.Order());
-        state.VotersOutgoing.Add(Voters.Outgoing.Order());
-        state.Learners.Add(Learners.Order());
-        state.LearnersNext.Add(LearnersNext.Order());
+        state.Voters.AddRange(Voters.Incoming.Order());
+        state.VotersOutgoing.AddRange(Voters.Outgoing.Order());
+        state.Learners.AddRange(Learners.Order());
+        state.LearnersNext.AddRange(LearnersNext.Order());
         return state;
     }
 

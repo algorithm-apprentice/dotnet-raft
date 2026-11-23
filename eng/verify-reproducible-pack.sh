@@ -16,10 +16,12 @@ fi
 
 candidate="$repo/artifacts/package"
 packages=(
-  DotnetRaft.2.0.0.nupkg
-  DotnetRaft.2.0.0.snupkg
-  DotnetRaft.Sqlite.2.0.0.nupkg
-  DotnetRaft.Sqlite.2.0.0.snupkg
+  DotnetRaft.3.0.0.nupkg
+  DotnetRaft.3.0.0.snupkg
+  DotnetRaft.Protobuf.3.0.0.nupkg
+  DotnetRaft.Protobuf.3.0.0.snupkg
+  DotnetRaft.Sqlite.3.0.0.nupkg
+  DotnetRaft.Sqlite.3.0.0.snupkg
 )
 for package in "${packages[@]}"; do
   test -f "$candidate/$package"

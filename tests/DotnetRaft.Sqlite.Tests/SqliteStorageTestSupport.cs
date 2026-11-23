@@ -56,8 +56,8 @@ internal static class SqliteStorageTestSupport
                     ?? new ConfState(),
             },
             Data = data is null
-                ? ByteString.Empty
-                : ByteString.CopyFromUtf8(data),
+                ? RaftBytes.Empty
+                : RaftBytes.CopyFromUtf8(data),
         };
     }
 

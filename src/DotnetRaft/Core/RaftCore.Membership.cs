@@ -2,8 +2,6 @@ using DotnetRaft.ConfChange;
 using DotnetRaft.Protocol;
 using DotnetRaft.Tracker;
 
-using Google.Protobuf;
-
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Core;
@@ -146,10 +144,10 @@ internal sealed partial class RaftCore
     }
 
     internal void ProposeConfiguration(ProtocolConfChange owned) =>
-        ProposeConfiguration(new Entry { Type = EntryType.EntryConfChange, Data = owned.ToByteString() }, owned.AsV2());
+        ProposeConfiguration(new Entry { Type = EntryType.EntryConfChange, Data = Log.Format.EncodeConfigurationChange(owned) }, owned.AsV2());
 
     internal void ProposeConfiguration(ConfChangeV2 owned) =>
-        ProposeConfiguration(new Entry { Type = EntryType.EntryConfChangeV2, Data = owned.ToByteString() }, owned);
+        ProposeConfiguration(new Entry { Type = EntryType.EntryConfChangeV2, Data = Log.Format.EncodeConfigurationChange(owned) }, owned);
 
     private void ProposeConfiguration(Entry entry, ConfChangeV2 change)
     {

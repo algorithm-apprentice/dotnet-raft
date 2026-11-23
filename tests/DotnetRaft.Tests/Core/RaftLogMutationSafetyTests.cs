@@ -11,7 +11,7 @@ public sealed class RaftLogMutationSafetyTests
     public void AppendAtCommittedBoundaryIsRejectedAtomically()
     {
         var log = new RaftLog(
-            new MemoryStorage(),
+            new MemoryStorage(ProtobufRaftCodec.Instance),
             NullRaftLogger.Instance);
         log.Append(Entries((1, 1), (2, 1)));
         log.CommitTo(2);
@@ -28,7 +28,7 @@ public sealed class RaftLogMutationSafetyTests
     public void ApplyingPauseTracksBacklogAndExactBudgetIndependently()
     {
         var backlog = new RaftLog(
-            new MemoryStorage(),
+            new MemoryStorage(ProtobufRaftCodec.Instance),
             NullRaftLogger.Instance,
             maxApplyingEntriesSize: 100);
         backlog.Append(Entries((1, 1), (2, 1)));
@@ -42,7 +42,7 @@ public sealed class RaftLogMutationSafetyTests
         Assert.True(backlog.ApplyingEntriesPaused);
 
         var exactBudget = new RaftLog(
-            new MemoryStorage(),
+            new MemoryStorage(ProtobufRaftCodec.Instance),
             NullRaftLogger.Instance,
             maxApplyingEntriesSize: 100);
         exactBudget.Append(Entries((1, 1)));
@@ -60,7 +60,7 @@ public sealed class RaftLogMutationSafetyTests
     public void ApplyingAccountingSubtractsPartialAcknowledgement()
     {
         var log = new RaftLog(
-            new MemoryStorage(),
+            new MemoryStorage(ProtobufRaftCodec.Instance),
             NullRaftLogger.Instance,
             maxApplyingEntriesSize: 1_000);
         log.Append(Entries((1, 1), (2, 1), (3, 1)));
@@ -80,7 +80,7 @@ public sealed class RaftLogMutationSafetyTests
     public void ApplyingAccountingRejectsOverflow()
     {
         var log = new RaftLog(
-            new MemoryStorage(),
+            new MemoryStorage(ProtobufRaftCodec.Instance),
             NullRaftLogger.Instance);
         log.Append(Entries((1, 1)));
         log.CommitTo(1);
@@ -118,7 +118,7 @@ public sealed class RaftLogMutationSafetyTests
     public void EmptySliceAtBoundaryIsAllowed()
     {
         var log = new RaftLog(
-            new MemoryStorage(),
+            new MemoryStorage(ProtobufRaftCodec.Instance),
             NullRaftLogger.Instance);
         log.Append(Entries((1, 1)));
 
@@ -161,8 +161,8 @@ public sealed class RaftLogMutationSafetyTests
             NullRaftLogger.Instance);
         log.Append([unstable]);
         ulong maxSize =
-            EntrySizing.EncodedSize(stable)
-            + EntrySizing.EncodedSize([unstable]);
+            EntrySizing.EncodedSize(ProtobufRaftCodec.Instance, stable)
+            + EntrySizing.EncodedSize(ProtobufRaftCodec.Instance, [unstable]);
 
         IReadOnlyList<Entry> entries =
             log.Slice(1, 4, maxSize);
@@ -248,6 +248,8 @@ public sealed class RaftLogMutationSafetyTests
 
     private sealed class ContractStorage : IStorage
     {
+        public IRaftLogFormat LogFormat => ProtobufRaftCodec.Instance;
+
         private readonly IReadOnlyList<Entry> entries;
         private readonly ulong lastIndex;
         private readonly Func<ulong, ulong> term;

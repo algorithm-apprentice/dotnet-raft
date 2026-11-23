@@ -54,46 +54,44 @@ separately, and stop the host if admitted work fails.
 
 ## Asynchronous storage writes
 
-With `AsyncStorageWrites = true`, drive persistence, application, and
-transport from `Ready.Messages`, not the mirrored fields `HardState`,
-`Entries`, `Snapshot`, `CommittedEntries`, or `MustSync`. Do not call
-`Advance` or `AdvanceAsync`. Still consume `Ready.ReadStates` for reads.
+With `AsyncStorageWrites = true`, queue `Ready.AppendWork` and
+`Ready.ApplyWork` on separate FIFO workers when present. `Ready.Messages`
+contains only peer traffic ready to send. Do not write the mirrored fields
+`HardState`, `Entries`, `Snapshot`, or `CommittedEntries` a second time.
+Return the work's completion instead of calling `Advance` or `AdvanceAsync`.
+Still consume `Ready.ReadStates` for reads.
 
-You can accept more Ready work while earlier requests are in flight. Route
-by `Message.To`. Each local worker queue must be FIFO and lossless.
+You can accept more Ready work while earlier requests are in flight.
+Each local worker queue must be FIFO and lossless.
 For bounded channels, use `BoundedChannelFullMode.Wait`; dropping modes can
 report a successful `WriteAsync` for work that will never execute. Treat a
 closed or faulted worker queue as a host failure, not as permission to drop
 a request. For example, the Ready dispatcher can route messages this way:
 
 ```csharp
+if (ready.AppendWork is { } append)
+{
+    await appendQueue.Writer.WriteAsync(append, cancellationToken);
+}
+if (ready.ApplyWork is { } apply)
+{
+    await applyQueue.Writer.WriteAsync(apply, cancellationToken);
+}
 foreach (Message message in ready.Messages)
 {
-    switch (message.To)
-    {
-        case RaftLocalMessageTargets.AppendThread:
-            await appendQueue.Writer.WriteAsync(message, cancellationToken);
-            break;
-        case RaftLocalMessageTargets.ApplyThread:
-            await applyQueue.Writer.WriteAsync(message, cancellationToken);
-            break;
-        default:
-            await transport.SendAsync(message, cancellationToken);
-            break;
-    }
+    await transport.SendAsync(message, cancellationToken);
 }
 ```
 
 ### Append worker
 
-`MsgStorageAppend` carries entries, an optional snapshot, and optional hard
-state. `StorageAppendHardState.Read` converts the request to a `RaftHardState?`.
-It requires all three `Term`, `Vote`, and `Commit` fields or none, including
-present zero values. A null result leaves stored hard state unchanged.
+`StorageAppendWork` carries entries, an optional snapshot, and a
+`RaftHardState?`. A null state leaves the stored state unchanged; a present
+state includes all three values, including an explicit zero vote.
 
-Atomically publish the [batch](storage.md#publishing-a-storage-batch). A
-nonempty `Responses` list requires a forced durable write before any listed
-response is delivered. Backends can provide stronger guarantees, including
+Atomically publish the [batch](storage.md#publishing-a-storage-batch). If
+`MessagesAfterPersist` is nonempty or `Completion` is present, force the
+required durability before releasing either. Backends can provide stronger guarantees, including
 always forcing a commit-only write.
 
 For a snapshot-bearing request, also restore application state, its physical
@@ -111,7 +109,7 @@ request can contain a local acknowledgement and replies for remote peers. Do
 not release responses when any required step fails.
 
 ```csharp
-foreach (Message response in appendRequest.Responses)
+foreach (Message response in appendWork.MessagesAfterPersist)
 {
     if (response.To == localNodeId)
     {
@@ -122,10 +120,15 @@ foreach (Message response in appendRequest.Responses)
         await transport.SendAsync(response, cancellationToken);
     }
 }
+if (appendWork.Completion is { } completion)
+{
+    await node.CompleteStorageWorkAsync(completion, cancellationToken);
+}
 ```
 
-With `RawNode`, schedule local responses back to its serialized owner and
-call `Step` there. Keep that path runnable even while a worker queue is full:
+With `RawNode`, schedule local responses and the completion back to its
+serialized owner. Call `Step` for self-addressed replies and `CompleteStorageWork`
+for the receipt. Keep that path runnable even while a worker queue is full:
 an owner waiting for queue space can deadlock if the worker is waiting for
 the same owner to process its previous completion. The
 [counter](../../examples/DotnetRaft.Counter/README.md#asynchronous-storage-writes)
@@ -135,15 +138,16 @@ checks an append that releases responses to both destinations.
 
 ### Apply worker
 
-`MsgStorageApply` carries committed entries already acknowledged as stable.
+`StorageApplyWork` carries committed entries already acknowledged as stable.
 Apply them in order under the application-state barrier, including the
-[configuration rules](application.md#configuration-entries), then step its
-response on the originating node. Do not acknowledge a failed apply. Append
+[configuration rules](application.md#configuration-entries), then return its
+receipt using `CompleteStorageWork` or `CompleteStorageWorkAsync`. Do not
+acknowledge a failed apply. Append
 and apply each maintain their own order; apply may finish while a separate
 commit-only write is still outstanding. Recovery must therefore reconcile
 the physical cursor and durable commit, not assume they were one write.
 
-Deliver each generated local response once and in worker order. Do not
-change it or step it into a replacement instance, even if sender, term, and
-index still match. Use the [shutdown barrier](recovery.md#fault-handling)
+Return each receipt once, in worker order, to the instance that issued it.
+The node rejects another instance's or a previously consumed receipt. Use the
+[shutdown barrier](recovery.md#fault-handling)
 before reading a new recovery point.

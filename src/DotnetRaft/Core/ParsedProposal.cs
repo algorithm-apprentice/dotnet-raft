@@ -2,8 +2,6 @@ using DotnetRaft.ConfChange;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 
-using Google.Protobuf;
-
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft.Core;
@@ -36,7 +34,7 @@ internal sealed class ParsedProposal
     internal static ParsedProposal FromLocalConfiguration(Entry entry, ConfChangeV2 change) =>
         new([entry], [change]);
 
-    internal static ParsedProposal Parse(IReadOnlyList<Entry> entries, bool fromPeer)
+    internal static ParsedProposal Parse(IReadOnlyList<Entry> entries, bool fromPeer, IRaftLogFormat format)
     {
         if (entries.Count == 0)
         {
@@ -47,7 +45,7 @@ internal sealed class ParsedProposal
         ConfChangeV2?[]? changes = null;
         for (int index = 0; index < entries.Count; index++)
         {
-            ConfChangeV2? change = ParseEntry(entries[index], fromPeer);
+            ConfChangeV2? change = ParseEntry(entries[index], fromPeer, format);
             if (change is not null)
             {
                 changes ??= new ConfChangeV2?[entries.Count];
@@ -66,10 +64,10 @@ internal sealed class ParsedProposal
         }
     }
 
-    internal static void CheckReplicatedEntry(Entry entry) =>
-        _ = ParseEntry(entry, fromPeer: true, retainChange: false);
+    internal static void CheckReplicatedEntry(Entry entry, IRaftLogFormat format) =>
+        _ = ParseEntry(entry, fromPeer: true, format, retainChange: false);
 
-    private static ConfChangeV2? ParseEntry(Entry entry, bool fromPeer, bool retainChange = true)
+    private static ConfChangeV2? ParseEntry(Entry entry, bool fromPeer, IRaftLogFormat format, bool retainChange = true)
     {
         if (fromPeer && !Enum.IsDefined(entry.Type))
         {
@@ -81,7 +79,7 @@ internal sealed class ParsedProposal
             switch (entry.Type)
             {
                 case EntryType.EntryConfChange:
-                    ProtocolConfChange legacy = ProtocolConfChange.Parser.ParseFrom(entry.Data);
+                    ProtocolConfChange legacy = format.DecodeConfigurationChange(entry.Data.Span);
                     if (fromPeer)
                     {
                         ConfigurationChangeValidation.ValidateProposal(legacy, nameof(entry));
@@ -89,7 +87,7 @@ internal sealed class ParsedProposal
 
                     return retainChange ? legacy.AsV2() : null;
                 case EntryType.EntryConfChangeV2:
-                    ConfChangeV2 change = ConfChangeV2.Parser.ParseFrom(entry.Data);
+                    ConfChangeV2 change = format.DecodeConfigurationChangeV2(entry.Data.Span);
                     if (fromPeer)
                     {
                         ConfigurationChangeValidation.ValidateProposal(change, nameof(entry));
@@ -100,7 +98,7 @@ internal sealed class ParsedProposal
                     return null;
             }
         }
-        catch (InvalidProtocolBufferException exception) when (fromPeer)
+        catch (InvalidDataException exception) when (fromPeer)
         {
             throw new ArgumentException(
                 $"Configuration entry payload is malformed: {exception.Message}",

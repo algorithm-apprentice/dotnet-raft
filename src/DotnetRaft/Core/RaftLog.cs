@@ -64,6 +64,8 @@ internal sealed class RaftLog
 
     internal UnstableLog Unstable { get; }
 
+    internal IRaftLogFormat Format => _storage.LogFormat;
+
     internal ulong FirstIndex
     {
         get
@@ -485,6 +487,7 @@ internal sealed class RaftLog
         if (lowInclusive >= Unstable.Offset)
         {
             return EntrySizing.LimitSize(
+                Format,
                 Unstable.Slice(lowInclusive, highExclusive),
                 maxSize);
         }
@@ -514,7 +517,7 @@ internal sealed class RaftLog
             storageEntries,
             lowInclusive,
             stableHigh);
-        stableEntries = EntrySizing.LimitSize(stableEntries, maxSize).ToArray();
+        stableEntries = EntrySizing.LimitSize(Format, stableEntries, maxSize).ToArray();
         if (highExclusive <= Unstable.Offset)
         {
             return stableEntries;
@@ -526,16 +529,17 @@ internal sealed class RaftLog
             return stableEntries;
         }
 
-        ulong stableSize = EntrySizing.EncodedSize(stableEntries);
+        ulong stableSize = EntrySizing.EncodedSize(Format, stableEntries);
         if (stableSize >= maxSize)
         {
             return stableEntries;
         }
 
         IReadOnlyList<Entry> unstableEntries = EntrySizing.LimitSize(
+            Format,
             Unstable.Slice(Unstable.Offset, highExclusive),
             maxSize - stableSize);
-        ulong unstableSize = EntrySizing.EncodedSize(unstableEntries);
+        ulong unstableSize = EntrySizing.EncodedSize(Format, unstableEntries);
         if (unstableEntries.Count == 1
             && unstableSize > maxSize - stableSize)
         {

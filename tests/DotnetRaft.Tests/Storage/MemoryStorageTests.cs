@@ -11,7 +11,7 @@ public sealed class MemoryStorageTests
     [Fact]
     public void EmptyStorageHasExpectedInitialStateAndIndexes()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
 
         StorageState state = storage.GetInitialState();
         Snapshot snapshot = storage.GetSnapshot();
@@ -112,7 +112,7 @@ public sealed class MemoryStorageTests
         Assert.Throws<RaftInvariantException>(
             () => storage.GetEntries(4, 8, ulong.MaxValue));
 
-        var emptyStorage = new MemoryStorage();
+        var emptyStorage = new MemoryStorage(ProtobufRaftCodec.Instance);
         AssertStorageError(
             StorageError.Unavailable,
             () => emptyStorage.GetEntries(1, 1, ulong.MaxValue));
@@ -211,7 +211,7 @@ public sealed class MemoryStorageTests
     [Fact]
     public void AppendValidatesInputAndRejectsGaps()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         IEnumerable<Entry> entriesWithNull = new Entry[] { null! };
 
         storage.Append([]);
@@ -229,8 +229,8 @@ public sealed class MemoryStorageTests
     public void CreateSnapshotMatchesReferenceMatrix()
     {
         var configuration = new ConfState();
-        configuration.Voters.Add([1, 2, 3]);
-        ByteString data = ByteString.CopyFromUtf8("data");
+        configuration.Voters.AddRange([1, 2, 3]);
+        RaftBytes data = RaftBytes.CopyFromUtf8("data");
 
         foreach ((ulong index, ulong term) in new[] { (4UL, 4UL), (5UL, 5UL) })
         {
@@ -251,18 +251,18 @@ public sealed class MemoryStorageTests
         var storage = CreateStorage(Entries((3, 3), (4, 4), (5, 5)));
 
         Assert.Throws<RaftInvariantException>(
-            () => storage.CreateSnapshot(2, null, ByteString.Empty));
+            () => storage.CreateSnapshot(2, null, RaftBytes.Empty));
         Assert.Throws<RaftInvariantException>(
-            () => storage.CreateSnapshot(6, null, ByteString.Empty));
+            () => storage.CreateSnapshot(6, null, RaftBytes.Empty));
 
-        storage.CreateSnapshot(4, null, ByteString.Empty);
+        storage.CreateSnapshot(4, null, RaftBytes.Empty);
 
         AssertStorageError(
             StorageError.SnapshotOutOfDate,
-            () => storage.CreateSnapshot(4, null, ByteString.Empty));
+            () => storage.CreateSnapshot(4, null, RaftBytes.Empty));
         AssertStorageError(
             StorageError.SnapshotOutOfDate,
-            () => storage.CreateSnapshot(2, null, ByteString.Empty));
+            () => storage.CreateSnapshot(2, null, RaftBytes.Empty));
     }
 
     [Fact]
@@ -270,12 +270,12 @@ public sealed class MemoryStorageTests
     {
         var storage = CreateStorage(Entries((3, 3), (4, 4), (5, 5)));
         var configuration = new ConfState();
-        configuration.Voters.Add([1, 2, 3]);
+        configuration.Voters.AddRange([1, 2, 3]);
 
         Snapshot created = storage.CreateSnapshot(
             4,
             configuration,
-            ByteString.CopyFromUtf8("first"));
+            RaftBytes.CopyFromUtf8("first"));
         configuration.Voters.Clear();
         created.Metadata.ConfState.Voters.Clear();
         created.Metadata.Term = 99;
@@ -287,7 +287,7 @@ public sealed class MemoryStorageTests
         Snapshot next = storage.CreateSnapshot(
             5,
             null,
-            ByteString.CopyFromUtf8("second"));
+            RaftBytes.CopyFromUtf8("second"));
         next.Metadata.ConfState.Voters.Clear();
 
         Assert.Equal([1UL, 2UL, 3UL], storage.GetSnapshot().Metadata.ConfState.Voters);
@@ -297,8 +297,8 @@ public sealed class MemoryStorageTests
     public void ApplySnapshotMatchesReferenceBehavior()
     {
         var configuration = new ConfState();
-        configuration.Voters.Add([1, 2, 3]);
-        var storage = new MemoryStorage();
+        configuration.Voters.AddRange([1, 2, 3]);
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
 
         storage.ApplySnapshot(SnapshotAt(4, 4, configuration));
 
@@ -325,8 +325,8 @@ public sealed class MemoryStorageTests
     public void ApplySnapshotAllowsZeroIndexBootstrapOnFreshStorage()
     {
         var configuration = new ConfState();
-        configuration.Voters.Add([1, 2, 3]);
-        var storage = new MemoryStorage();
+        configuration.Voters.AddRange([1, 2, 3]);
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
 
         storage.ApplySnapshot(SnapshotAt(0, 0, configuration));
 
@@ -339,7 +339,7 @@ public sealed class MemoryStorageTests
     public void ApplySnapshotClonesBeforeNormalizingOrRetaining()
     {
         var emptySnapshot = new Snapshot();
-        var emptyStorage = new MemoryStorage();
+        var emptyStorage = new MemoryStorage(ProtobufRaftCodec.Instance);
 
         emptyStorage.ApplySnapshot(emptySnapshot);
 
@@ -350,7 +350,7 @@ public sealed class MemoryStorageTests
         var configuration = new ConfState();
         configuration.Voters.Add(1);
         Snapshot input = SnapshotAt(4, 4, configuration);
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
 
         storage.ApplySnapshot(input);
         input.Metadata.Index = 9;
@@ -369,7 +369,7 @@ public sealed class MemoryStorageTests
     [Fact]
     public void HardStateReadsCaptureTheStoredValue()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         var first = new RaftHardState(Term: 2, Vote: 1, Commit: 3);
         storage.SetHardState(first);
         StorageState firstRead = storage.GetInitialState();
@@ -383,7 +383,7 @@ public sealed class MemoryStorageTests
     [Fact]
     public void EntriesAreClonedOnInputAndOutput()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         Entry[] input = Entries((1, 1), (2, 1));
 
         storage.Append(input);
@@ -399,14 +399,14 @@ public sealed class MemoryStorageTests
     [Fact]
     public void MaximumIndexIsRejectedWithoutMutatingStorage()
     {
-        var snapshotStorage = new MemoryStorage();
+        var snapshotStorage = new MemoryStorage(ProtobufRaftCodec.Instance);
 
         Assert.Throws<RaftInvariantException>(
             () => snapshotStorage.ApplySnapshot(SnapshotAt(ulong.MaxValue, 1)));
         Assert.Equal(0UL, snapshotStorage.GetLastIndex());
         Assert.Equal(1UL, snapshotStorage.GetFirstIndex());
 
-        var appendStorage = new MemoryStorage();
+        var appendStorage = new MemoryStorage(ProtobufRaftCodec.Instance);
         appendStorage.ApplySnapshot(SnapshotAt(ulong.MaxValue - 1, 1));
 
         Assert.Throws<RaftInvariantException>(
@@ -419,7 +419,7 @@ public sealed class MemoryStorageTests
     [Fact]
     public async Task ConcurrentReadersAndWriterObserveAtomicEntryBatches()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.Append(Entries((1, 1), (2, 1), (3, 1)));
         using var barrier = new Barrier(3);
 
@@ -455,7 +455,7 @@ public sealed class MemoryStorageTests
     {
         Assert.NotEmpty(retainedEntries);
 
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         Entry dummyEntry = retainedEntries[0];
 
         if (dummyEntry.Index == 0)

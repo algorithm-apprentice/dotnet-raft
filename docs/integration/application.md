@@ -8,7 +8,7 @@ barriers; only the application knows when the effects and results exist.
 | Event | What it establishes |
 |---|---|
 | `Propose` or `ProposeAsync` returns | Submission was processed, possibly by forwarding. It does not prove commit or application. A dropped proposal can raise `ProposalDroppedException`. |
-| A committed entry is delivered | The entry is selected for ordered application. In synchronous mode it is in `Ready.CommittedEntries`; in async mode it is in `MsgStorageApply.Entries`. |
+| A committed entry is delivered | The entry is selected for ordered application. In synchronous mode it is in `Ready.CommittedEntries`; in async mode it is in `Ready.ApplyWork.Entries`. |
 | Your state machine finishes applying the entry | The result exists locally. Acknowledge the matching client only when the application's durability and retry policy permits it. |
 | `ReadIndex` or `ReadIndexAsync` returns | Submission was processed. The index, if confirmed, comes later in `Ready.ReadStates`. |
 

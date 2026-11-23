@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 
 using DotnetRaft.Examples.KvCluster.Transport;
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 
 using Google.Protobuf;
@@ -63,7 +64,7 @@ public sealed partial class GrpcRaftMessageTransport
     private RaftEnvelope? EncodeEnvelope(Message message)
     {
         ByteString payload =
-            message.ToByteString();
+            ByteString.CopyFrom(ProtobufRaftCodec.EncodeMessage(message));
         if (payload.Length
             > options.MaxTransportMessageBytes)
         {

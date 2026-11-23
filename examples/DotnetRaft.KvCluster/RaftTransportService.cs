@@ -1,4 +1,5 @@
 using DotnetRaft.Examples.KvCluster.Transport;
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 
 using Google.Protobuf;
@@ -55,9 +56,9 @@ public sealed class RaftTransportService
 
         try
         {
-            return Message.Parser.ParseFrom(payload);
+            return ProtobufRaftCodec.DecodeMessage(payload.Span);
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw InvalidArgument(
                 $"Raft payload is malformed: {exception.Message}");

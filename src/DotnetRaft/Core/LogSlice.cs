@@ -40,27 +40,28 @@ internal sealed class LogSlice
 
     // The two facades already detach the message from their caller. Borrow
     // its entries only for this serialized transition; never retain them in the log.
-    internal static LogSlice ParseOwnedPeerAppend(Message owned) => Parse(
+    internal static LogSlice ParseOwnedPeerAppend(Message owned, IRaftLogFormat format) => Parse(
         owned.Term,
         new EntryId(owned.LogTerm, owned.Index),
         owned.Entries,
-        fromPeer: true);
+        format);
 
     internal static LogSlice ParseInternal(ulong term, EntryId previous, IReadOnlyList<Entry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
         Entry[] detached = ProtocolCloning.CloneEntries(entries);
-        return Parse(term, previous, detached, fromPeer: false);
+        return Parse(term, previous, detached, peerFormat: null);
     }
 
-    private static LogSlice Parse(ulong term, EntryId previous, IReadOnlyList<Entry> entries, bool fromPeer)
+    private static LogSlice Parse(ulong term, EntryId previous, IReadOnlyList<Entry> entries, IRaftLogFormat? peerFormat)
     {
+        bool fromPeer = peerFormat is not null;
         EntryId preceding = previous;
         foreach (var entry in entries)
         {
-            if (fromPeer)
+            if (peerFormat is not null)
             {
-                ParsedProposal.CheckReplicatedEntry(entry);
+                ParsedProposal.CheckReplicatedEntry(entry, peerFormat);
             }
 
             var current = new EntryId(entry.Term, entry.Index);

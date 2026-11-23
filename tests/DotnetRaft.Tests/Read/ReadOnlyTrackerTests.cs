@@ -22,7 +22,7 @@ public sealed class ReadOnlyTrackerTests
         Assert.Equal(option, tracker.Option);
         Assert.Equal(0, tracker.PendingCount);
         Assert.Equal(0UL, tracker.ConfirmedCount);
-        Assert.Equal(ByteString.Empty, tracker.GetHeartbeatContext());
+        Assert.Equal(RaftBytes.Empty, tracker.GetHeartbeatContext());
     }
 
     [Fact]
@@ -34,7 +34,7 @@ public sealed class ReadOnlyTrackerTests
         tracker.AddRequest(10, Request("first"));
         tracker.AddRequest(20, Request("second"));
 
-        ByteString context = tracker.GetHeartbeatContext();
+        RaftBytes context = tracker.GetHeartbeatContext();
         Assert.Equal(8, context.Length);
         Assert.Equal(2UL, Decode(context));
 
@@ -54,19 +54,19 @@ public sealed class ReadOnlyTrackerTests
         var original = new Message
         {
             Type = MessageType.MsgReadIndex,
-            Context = ByteString.CopyFromUtf8("message-context"),
+            Context = RaftBytes.CopyFromUtf8("message-context"),
         };
         original.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8("request-context"),
+            Data = RaftBytes.CopyFromUtf8("request-context"),
         });
 
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         ReadAcknowledgement local = tracker.AddRequest(42, original);
 
         original.Type = MessageType.MsgProp;
-        original.Context = ByteString.CopyFromUtf8("changed-message");
-        original.Entries[0].Data = ByteString.CopyFromUtf8("changed-request");
+        original.Context = RaftBytes.CopyFromUtf8("changed-message");
+        original.Entries[0].Data = RaftBytes.CopyFromUtf8("changed-request");
         original.Entries.Clear();
 
         tracker.ReceiveAcknowledgement(1, local);
@@ -105,7 +105,7 @@ public sealed class ReadOnlyTrackerTests
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         tracker.AddRequest(10, Request("first"));
 
-        Assert.Null(tracker.ParseAcknowledgement(ByteString.Empty, fromPeer: true));
+        Assert.Null(tracker.ParseAcknowledgement(RaftBytes.Empty, fromPeer: true));
 
         Assert.Empty(tracker.Advance(Voters(1)));
         Assert.Equal(1, tracker.PendingCount);
@@ -120,7 +120,7 @@ public sealed class ReadOnlyTrackerTests
     {
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         tracker.AddRequest(10, Request("first"));
-        ByteString malformed = ByteString.CopyFrom(new byte[length]);
+        RaftBytes malformed = RaftBytes.CopyFrom(new byte[length]);
 
         ArgumentException input = Assert.Throws<ArgumentException>("context",
             () => tracker.ParseAcknowledgement(malformed, fromPeer: true));
@@ -140,7 +140,7 @@ public sealed class ReadOnlyTrackerTests
         var tracker = new ReadOnlyTracker(ReadOnlyOption.Safe);
         tracker.AddRequest(10, Request("first"));
 
-        ByteString invalid = Encode(position);
+        RaftBytes invalid = Encode(position);
         ArgumentException input = Assert.Throws<ArgumentException>("context",
             () => tracker.ParseAcknowledgement(invalid, fromPeer: true));
         RaftInvariantException invariant = Assert.Throws<RaftInvariantException>(
@@ -220,7 +220,7 @@ public sealed class ReadOnlyTrackerTests
             remainder.Select(item => RequestContext(item.Request)));
         Assert.Equal(0, tracker.PendingCount);
         Assert.Equal(3UL, tracker.ConfirmedCount);
-        Assert.Equal(ByteString.Empty, tracker.GetHeartbeatContext());
+        Assert.Equal(RaftBytes.Empty, tracker.GetHeartbeatContext());
         Assert.Empty(tracker.Advance(voters));
     }
 
@@ -329,8 +329,7 @@ public sealed class ReadOnlyTrackerTests
 
         Assert.Throws<ArgumentNullException>(
             () => tracker.AddRequest(0, null!));
-        Assert.Throws<ArgumentNullException>("context",
-            () => tracker.ParseAcknowledgement(null!, fromPeer: true));
+        Assert.Null(tracker.ParseAcknowledgement(RaftBytes.Empty, fromPeer: true));
         Assert.Throws<ArgumentNullException>(
             () => tracker.Advance(null!));
     }
@@ -365,7 +364,7 @@ public sealed class ReadOnlyTrackerTests
         };
         message.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(context),
+            Data = RaftBytes.CopyFromUtf8(context),
         });
         return message;
     }
@@ -375,14 +374,14 @@ public sealed class ReadOnlyTrackerTests
         return request.Entries[0].Data.ToStringUtf8();
     }
 
-    private static ByteString Encode(ulong position)
+    private static RaftBytes Encode(ulong position)
     {
         var bytes = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64LittleEndian(bytes, position);
-        return ByteString.CopyFrom(bytes);
+        return RaftBytes.CopyFrom(bytes);
     }
 
-    private static ulong Decode(ByteString context)
+    private static ulong Decode(RaftBytes context)
     {
         return BinaryPrimitives.ReadUInt64LittleEndian(context.Span);
     }

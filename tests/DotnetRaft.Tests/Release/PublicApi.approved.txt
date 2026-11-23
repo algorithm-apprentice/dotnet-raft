@@ -48,11 +48,11 @@ type public static class DotnetRaft.Diagnostics.RaftDescriptions
   public static string DescribeConfChange(DotnetRaft.Protocol.ConfChange change)
   public static string DescribeConfChange(DotnetRaft.Protocol.ConfChangeV2 change)
   public static string DescribeConfState(DotnetRaft.Protocol.ConfState state)
-  public static string DescribeEntries(System.Collections.Generic.IEnumerable<DotnetRaft.Protocol.Entry> entries, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
-  public static string DescribeEntry(DotnetRaft.Protocol.Entry entry, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
+  public static string DescribeEntries(System.Collections.Generic.IEnumerable<DotnetRaft.Protocol.Entry> entries, DotnetRaft.Diagnostics.EntryFormatter? formatter = null, DotnetRaft.Protocol.IRaftLogFormat? format = null)
+  public static string DescribeEntry(DotnetRaft.Protocol.Entry entry, DotnetRaft.Diagnostics.EntryFormatter? formatter = null, DotnetRaft.Protocol.IRaftLogFormat? format = null)
   public static string DescribeHardState(DotnetRaft.RaftHardState state)
-  public static string DescribeMessage(DotnetRaft.Protocol.Message message, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
-  public static string DescribeReady(DotnetRaft.Ready ready, DotnetRaft.Diagnostics.EntryFormatter? formatter = null)
+  public static string DescribeMessage(DotnetRaft.Protocol.Message message, DotnetRaft.Diagnostics.EntryFormatter? formatter = null, DotnetRaft.Protocol.IRaftLogFormat? format = null)
+  public static string DescribeReady(DotnetRaft.Ready ready, DotnetRaft.Diagnostics.EntryFormatter? formatter = null, DotnetRaft.Protocol.IRaftLogFormat? format = null)
   public static string DescribeSnapshot(DotnetRaft.Protocol.Snapshot snapshot)
   public static string DescribeSoftState(DotnetRaft.SoftState state)
 
@@ -116,6 +116,7 @@ type public interface DotnetRaft.IRaftNode : System.IAsyncDisposable
   public System.Threading.Tasks.Task Completion { get; }
   public abstract System.Threading.Tasks.ValueTask AdvanceAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
   public abstract System.Threading.Tasks.ValueTask CampaignAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+  public abstract System.Threading.Tasks.ValueTask CompleteStorageWorkAsync(DotnetRaft.StorageCompletion completion, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
   public abstract System.Threading.Tasks.ValueTask ForgetLeaderAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
   public abstract System.Threading.Tasks.ValueTask ProposeAsync(System.ReadOnlyMemory<byte> data, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
   public abstract System.Threading.Tasks.ValueTask ProposeConfChangeAsync(DotnetRaft.Protocol.ConfChange change, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
@@ -134,9 +135,9 @@ type public interface DotnetRaft.IRaftNode : System.IAsyncDisposable
 
 type public sealed class DotnetRaft.Peer : System.IEquatable<DotnetRaft.Peer>
   public DotnetRaft.Peer <Clone>$()
-  public Google.Protobuf.ByteString Context { get; }
+  public DotnetRaft.Protocol.RaftBytes Context { get; }
   public Peer(ulong id)
-  public Peer(ulong id, Google.Protobuf.ByteString context)
+  public Peer(ulong id, DotnetRaft.Protocol.RaftBytes context)
   public sealed virtual bool Equals(DotnetRaft.Peer? other)
   public static bool op_Equality(DotnetRaft.Peer? left, DotnetRaft.Peer? right)
   public static bool op_Inequality(DotnetRaft.Peer? left, DotnetRaft.Peer? right)
@@ -168,59 +169,33 @@ type public struct DotnetRaft.ProgressStatus : System.IEquatable<DotnetRaft.Prog
   public virtual string ToString()
   public void Deconstruct(out ulong Match, out ulong Next, out ulong LastSentCommit, out DotnetRaft.ReplicationState State, out ulong PendingSnapshot, out bool RecentActive, out bool AppendFlowPaused, out bool IsPaused, out bool IsLearner, out int InflightCount, out ulong InflightBytes, out int InflightCapacity, out ulong MaxInflightBytes)
 
-type public sealed class DotnetRaft.Protocol.ConfChange : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.ConfChange>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.ConfChange>, System.IEquatable<DotnetRaft.Protocol.ConfChange>
+type public sealed class DotnetRaft.Protocol.ConfChange : System.IEquatable<DotnetRaft.Protocol.ConfChange>
   public ConfChange()
-  public ConfChange(DotnetRaft.Protocol.ConfChange other)
+  public DotnetRaft.Protocol.ConfChange Clone()
   public DotnetRaft.Protocol.ConfChangeType Type { get; set; }
-  public Google.Protobuf.ByteString Context { get; set; }
+  public DotnetRaft.Protocol.RaftBytes Context { get; set; }
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
   public bool HasContext { get; }
   public bool HasId { get; }
   public bool HasNodeId { get; }
   public bool HasType { get; }
-  public const int ContextFieldNumber = 4
-  public const int IdFieldNumber = 1
-  public const int NodeIdFieldNumber = 3
-  public const int TypeFieldNumber = 2
-  public sealed virtual DotnetRaft.Protocol.ConfChange Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfChange other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.ConfChange other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.ConfChange> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
+  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfChange? other)
   public ulong Id { get; set; }
   public ulong NodeId { get; set; }
-  public virtual bool Equals(object other)
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearContext()
-  public void ClearId()
-  public void ClearNodeId()
-  public void ClearType()
 
-type public sealed class DotnetRaft.Protocol.ConfChangeSingle : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.ConfChangeSingle>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.ConfChangeSingle>, System.IEquatable<DotnetRaft.Protocol.ConfChangeSingle>
+type public sealed class DotnetRaft.Protocol.ConfChangeSingle : System.IEquatable<DotnetRaft.Protocol.ConfChangeSingle>
   public ConfChangeSingle()
-  public ConfChangeSingle(DotnetRaft.Protocol.ConfChangeSingle other)
+  public DotnetRaft.Protocol.ConfChangeSingle Clone()
   public DotnetRaft.Protocol.ConfChangeType Type { get; set; }
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
   public bool HasNodeId { get; }
   public bool HasType { get; }
-  public const int NodeIdFieldNumber = 2
-  public const int TypeFieldNumber = 1
-  public sealed virtual DotnetRaft.Protocol.ConfChangeSingle Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfChangeSingle other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.ConfChangeSingle other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.ConfChangeSingle> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
+  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfChangeSingle? other)
   public ulong NodeId { get; set; }
-  public virtual bool Equals(object other)
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearNodeId()
-  public void ClearType()
 
 type public enum DotnetRaft.Protocol.ConfChangeTransition : System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
   public const DotnetRaft.Protocol.ConfChangeTransition Auto = 0
@@ -235,88 +210,48 @@ type public enum DotnetRaft.Protocol.ConfChangeType : System.IComparable, System
   public const DotnetRaft.Protocol.ConfChangeType ConfChangeUpdateNode = 2
   public int value__
 
-type public sealed class DotnetRaft.Protocol.ConfChangeV2 : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.ConfChangeV2>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.ConfChangeV2>, System.IEquatable<DotnetRaft.Protocol.ConfChangeV2>
+type public sealed class DotnetRaft.Protocol.ConfChangeV2 : System.IEquatable<DotnetRaft.Protocol.ConfChangeV2>
   public ConfChangeV2()
-  public ConfChangeV2(DotnetRaft.Protocol.ConfChangeV2 other)
   public DotnetRaft.Protocol.ConfChangeTransition Transition { get; set; }
-  public Google.Protobuf.ByteString Context { get; set; }
-  public Google.Protobuf.Collections.RepeatedField<DotnetRaft.Protocol.ConfChangeSingle> Changes { get; }
+  public DotnetRaft.Protocol.ConfChangeV2 Clone()
+  public DotnetRaft.Protocol.RaftBytes Context { get; set; }
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
+  public System.Collections.Generic.List<DotnetRaft.Protocol.ConfChangeSingle> Changes { get; }
   public bool HasContext { get; }
   public bool HasTransition { get; }
-  public const int ChangesFieldNumber = 2
-  public const int ContextFieldNumber = 3
-  public const int TransitionFieldNumber = 1
-  public sealed virtual DotnetRaft.Protocol.ConfChangeV2 Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfChangeV2 other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.ConfChangeV2 other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.ConfChangeV2> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
-  public virtual bool Equals(object other)
+  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfChangeV2? other)
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearContext()
-  public void ClearTransition()
 
-type public sealed class DotnetRaft.Protocol.ConfState : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.ConfState>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.ConfState>, System.IEquatable<DotnetRaft.Protocol.ConfState>
+type public sealed class DotnetRaft.Protocol.ConfState : System.IEquatable<DotnetRaft.Protocol.ConfState>
   public ConfState()
-  public ConfState(DotnetRaft.Protocol.ConfState other)
-  public Google.Protobuf.Collections.RepeatedField<ulong> Learners { get; }
-  public Google.Protobuf.Collections.RepeatedField<ulong> LearnersNext { get; }
-  public Google.Protobuf.Collections.RepeatedField<ulong> Voters { get; }
-  public Google.Protobuf.Collections.RepeatedField<ulong> VotersOutgoing { get; }
+  public DotnetRaft.Protocol.ConfState Clone()
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
+  public System.Collections.Generic.List<ulong> Learners { get; }
+  public System.Collections.Generic.List<ulong> LearnersNext { get; }
+  public System.Collections.Generic.List<ulong> Voters { get; }
+  public System.Collections.Generic.List<ulong> VotersOutgoing { get; }
   public bool AutoLeave { get; set; }
   public bool HasAutoLeave { get; }
-  public const int AutoLeaveFieldNumber = 5
-  public const int LearnersFieldNumber = 2
-  public const int LearnersNextFieldNumber = 4
-  public const int VotersFieldNumber = 1
-  public const int VotersOutgoingFieldNumber = 3
-  public sealed virtual DotnetRaft.Protocol.ConfState Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfState other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.ConfState other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.ConfState> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
-  public virtual bool Equals(object other)
+  public sealed virtual bool Equals(DotnetRaft.Protocol.ConfState? other)
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearAutoLeave()
 
-type public sealed class DotnetRaft.Protocol.Entry : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.Entry>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.Entry>, System.IEquatable<DotnetRaft.Protocol.Entry>
+type public sealed class DotnetRaft.Protocol.Entry : System.IEquatable<DotnetRaft.Protocol.Entry>
+  public DotnetRaft.Protocol.Entry Clone()
   public DotnetRaft.Protocol.EntryType Type { get; set; }
+  public DotnetRaft.Protocol.RaftBytes Data { get; set; }
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
   public Entry()
-  public Entry(DotnetRaft.Protocol.Entry other)
-  public Google.Protobuf.ByteString Data { get; set; }
   public bool HasData { get; }
   public bool HasIndex { get; }
   public bool HasTerm { get; }
   public bool HasType { get; }
-  public const int DataFieldNumber = 4
-  public const int IndexFieldNumber = 3
-  public const int TermFieldNumber = 2
-  public const int TypeFieldNumber = 1
-  public sealed virtual DotnetRaft.Protocol.Entry Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.Entry other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.Entry other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.Entry> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
+  public sealed virtual bool Equals(DotnetRaft.Protocol.Entry? other)
   public ulong Index { get; set; }
   public ulong Term { get; set; }
-  public virtual bool Equals(object other)
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearData()
-  public void ClearIndex()
-  public void ClearTerm()
-  public void ClearType()
 
 type public enum DotnetRaft.Protocol.EntryType : System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
   public const DotnetRaft.Protocol.EntryType EntryConfChange = 1
@@ -324,41 +259,22 @@ type public enum DotnetRaft.Protocol.EntryType : System.IComparable, System.ICon
   public const DotnetRaft.Protocol.EntryType EntryNormal = 0
   public int value__
 
-type public sealed class DotnetRaft.Protocol.HardState : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.HardState>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.HardState>, System.IEquatable<DotnetRaft.Protocol.HardState>
-  public HardState()
-  public HardState(DotnetRaft.Protocol.HardState other)
-  public bool HasCommit { get; }
-  public bool HasTerm { get; }
-  public bool HasVote { get; }
-  public const int CommitFieldNumber = 3
-  public const int TermFieldNumber = 1
-  public const int VoteFieldNumber = 2
-  public sealed virtual DotnetRaft.Protocol.HardState Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.HardState other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.HardState other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.HardState> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
-  public ulong Commit { get; set; }
-  public ulong Term { get; set; }
-  public ulong Vote { get; set; }
-  public virtual bool Equals(object other)
-  public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearCommit()
-  public void ClearTerm()
-  public void ClearVote()
+type public interface DotnetRaft.Protocol.IRaftLogFormat
+  public abstract DotnetRaft.Protocol.ConfChange DecodeConfigurationChange(System.ReadOnlySpan<byte> payload)
+  public abstract DotnetRaft.Protocol.ConfChangeV2 DecodeConfigurationChangeV2(System.ReadOnlySpan<byte> payload)
+  public abstract DotnetRaft.Protocol.RaftBytes EncodeConfigurationChange(DotnetRaft.Protocol.ConfChange change)
+  public abstract DotnetRaft.Protocol.RaftBytes EncodeConfigurationChange(DotnetRaft.Protocol.ConfChangeV2 change)
+  public abstract ulong MeasureEntry(DotnetRaft.Protocol.Entry entry)
 
-type public sealed class DotnetRaft.Protocol.Message : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.Message>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.Message>, System.IEquatable<DotnetRaft.Protocol.Message>
+type public sealed class DotnetRaft.Protocol.Message : System.IEquatable<DotnetRaft.Protocol.Message>
+  public DotnetRaft.Protocol.Message Clone()
   public DotnetRaft.Protocol.MessageType Type { get; set; }
-  public DotnetRaft.Protocol.Snapshot Snapshot { get; set; }
-  public Google.Protobuf.ByteString Context { get; set; }
-  public Google.Protobuf.Collections.RepeatedField<DotnetRaft.Protocol.Entry> Entries { get; }
-  public Google.Protobuf.Collections.RepeatedField<DotnetRaft.Protocol.Message> Responses { get; }
+  public DotnetRaft.Protocol.RaftBytes Context { get; set; }
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
+  public DotnetRaft.Protocol.Snapshot? Snapshot { get; set; }
   public Message()
-  public Message(DotnetRaft.Protocol.Message other)
+  public System.Collections.Generic.List<DotnetRaft.Protocol.Entry> Entries { get; }
+  public System.Collections.Generic.List<DotnetRaft.Protocol.Message> Responses { get; }
   public bool HasCommit { get; }
   public bool HasContext { get; }
   public bool HasFrom { get; }
@@ -371,28 +287,7 @@ type public sealed class DotnetRaft.Protocol.Message : Google.Protobuf.IBufferMe
   public bool HasType { get; }
   public bool HasVote { get; }
   public bool Reject { get; set; }
-  public const int CommitFieldNumber = 8
-  public const int ContextFieldNumber = 12
-  public const int EntriesFieldNumber = 7
-  public const int FromFieldNumber = 3
-  public const int IndexFieldNumber = 6
-  public const int LogTermFieldNumber = 5
-  public const int RejectFieldNumber = 10
-  public const int RejectHintFieldNumber = 11
-  public const int ResponsesFieldNumber = 14
-  public const int SnapshotFieldNumber = 9
-  public const int TermFieldNumber = 4
-  public const int ToFieldNumber = 2
-  public const int TypeFieldNumber = 1
-  public const int VoteFieldNumber = 13
-  public sealed virtual DotnetRaft.Protocol.Message Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.Message other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.Message other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.Message> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
+  public sealed virtual bool Equals(DotnetRaft.Protocol.Message? other)
   public ulong Commit { get; set; }
   public ulong From { get; set; }
   public ulong Index { get; set; }
@@ -401,20 +296,8 @@ type public sealed class DotnetRaft.Protocol.Message : Google.Protobuf.IBufferMe
   public ulong Term { get; set; }
   public ulong To { get; set; }
   public ulong Vote { get; set; }
-  public virtual bool Equals(object other)
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearCommit()
-  public void ClearContext()
-  public void ClearFrom()
-  public void ClearIndex()
-  public void ClearLogTerm()
-  public void ClearReject()
-  public void ClearRejectHint()
-  public void ClearTerm()
-  public void ClearTo()
-  public void ClearType()
-  public void ClearVote()
 
 type public enum DotnetRaft.Protocol.MessageType : System.IComparable, System.IConvertible, System.IFormattable, System.ISpanFormattable
   public const DotnetRaft.Protocol.MessageType MsgApp = 3
@@ -449,54 +332,45 @@ type [System.Runtime.CompilerServices.ExtensionAttribute] public static class Do
   public static DotnetRaft.Protocol.Snapshot EnsureSnapshot(DotnetRaft.Protocol.Snapshot? snapshot)
   public static DotnetRaft.Protocol.SnapshotMetadata EnsureSnapshotMetadata(DotnetRaft.Protocol.SnapshotMetadata? metadata)
 
-type public static class DotnetRaft.Protocol.RaftReflection
-  public static Google.Protobuf.Reflection.FileDescriptor Descriptor { get; }
-
-type public sealed class DotnetRaft.Protocol.Snapshot : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.Snapshot>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.Snapshot>, System.IEquatable<DotnetRaft.Protocol.Snapshot>
-  public DotnetRaft.Protocol.SnapshotMetadata Metadata { get; set; }
-  public Google.Protobuf.ByteString Data { get; set; }
-  public Snapshot()
-  public Snapshot(DotnetRaft.Protocol.Snapshot other)
-  public bool HasData { get; }
-  public const int DataFieldNumber = 1
-  public const int MetadataFieldNumber = 2
-  public sealed virtual DotnetRaft.Protocol.Snapshot Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.Snapshot other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.Snapshot other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.Snapshot> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
-  public virtual bool Equals(object other)
+type public struct DotnetRaft.Protocol.RaftBytes : System.IEquatable<DotnetRaft.Protocol.RaftBytes>
+  public System.ReadOnlyMemory<byte> Memory { get; }
+  public System.ReadOnlySpan<byte> Span { get; }
+  public bool IsEmpty { get; }
+  public byte[] ToByteArray()
+  public int Length { get; }
+  public sealed virtual bool Equals(DotnetRaft.Protocol.RaftBytes other)
+  public static DotnetRaft.Protocol.RaftBytes CopyFrom(System.ReadOnlySpan<byte> bytes)
+  public static DotnetRaft.Protocol.RaftBytes CopyFromUtf8(string text)
+  public static DotnetRaft.Protocol.RaftBytes Empty { get; }
+  public static bool op_Equality(DotnetRaft.Protocol.RaftBytes left, DotnetRaft.Protocol.RaftBytes right)
+  public static bool op_Inequality(DotnetRaft.Protocol.RaftBytes left, DotnetRaft.Protocol.RaftBytes right)
+  public string ToStringUtf8()
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearData()
 
-type public sealed class DotnetRaft.Protocol.SnapshotMetadata : Google.Protobuf.IBufferMessage, Google.Protobuf.IDeepCloneable<DotnetRaft.Protocol.SnapshotMetadata>, Google.Protobuf.IMessage, Google.Protobuf.IMessage<DotnetRaft.Protocol.SnapshotMetadata>, System.IEquatable<DotnetRaft.Protocol.SnapshotMetadata>
+type public sealed class DotnetRaft.Protocol.Snapshot : System.IEquatable<DotnetRaft.Protocol.Snapshot>
+  public DotnetRaft.Protocol.RaftBytes Data { get; set; }
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
+  public DotnetRaft.Protocol.Snapshot Clone()
+  public DotnetRaft.Protocol.SnapshotMetadata Metadata { get; set; }
+  public Snapshot()
+  public bool HasData { get; }
+  public sealed virtual bool Equals(DotnetRaft.Protocol.Snapshot? other)
+  public virtual bool Equals(object? obj)
+  public virtual int GetHashCode()
+
+type public sealed class DotnetRaft.Protocol.SnapshotMetadata : System.IEquatable<DotnetRaft.Protocol.SnapshotMetadata>
   public DotnetRaft.Protocol.ConfState ConfState { get; set; }
+  public DotnetRaft.Protocol.RaftBytes ExtensionData { get; init; }
+  public DotnetRaft.Protocol.SnapshotMetadata Clone()
   public SnapshotMetadata()
-  public SnapshotMetadata(DotnetRaft.Protocol.SnapshotMetadata other)
   public bool HasIndex { get; }
   public bool HasTerm { get; }
-  public const int ConfStateFieldNumber = 1
-  public const int IndexFieldNumber = 2
-  public const int TermFieldNumber = 3
-  public sealed virtual DotnetRaft.Protocol.SnapshotMetadata Clone()
-  public sealed virtual bool Equals(DotnetRaft.Protocol.SnapshotMetadata other)
-  public sealed virtual int CalculateSize()
-  public sealed virtual void MergeFrom(DotnetRaft.Protocol.SnapshotMetadata other)
-  public sealed virtual void MergeFrom(Google.Protobuf.CodedInputStream input)
-  public sealed virtual void WriteTo(Google.Protobuf.CodedOutputStream output)
-  public static Google.Protobuf.MessageParser<DotnetRaft.Protocol.SnapshotMetadata> Parser { get; }
-  public static Google.Protobuf.Reflection.MessageDescriptor Descriptor { get; }
+  public sealed virtual bool Equals(DotnetRaft.Protocol.SnapshotMetadata? other)
   public ulong Index { get; set; }
   public ulong Term { get; set; }
-  public virtual bool Equals(object other)
+  public virtual bool Equals(object? obj)
   public virtual int GetHashCode()
-  public virtual string ToString()
-  public void ClearIndex()
-  public void ClearTerm()
 
 type public static class DotnetRaft.Protocol.StorageAppendHardState
   public static DotnetRaft.RaftHardState? Read(DotnetRaft.Protocol.Message request)
@@ -546,6 +420,7 @@ type public sealed class DotnetRaft.RaftNode : DotnetRaft.IRaftNode, System.IAsy
   public System.Threading.Tasks.Task Completion { get; }
   public sealed virtual System.Threading.Tasks.ValueTask AdvanceAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
   public sealed virtual System.Threading.Tasks.ValueTask CampaignAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
+  public sealed virtual System.Threading.Tasks.ValueTask CompleteStorageWorkAsync(DotnetRaft.StorageCompletion completion, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
   public sealed virtual System.Threading.Tasks.ValueTask DisposeAsync()
   public sealed virtual System.Threading.Tasks.ValueTask ForgetLeaderAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
   public sealed virtual System.Threading.Tasks.ValueTask ProposeAsync(System.ReadOnlyMemory<byte> data, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken))
@@ -593,6 +468,7 @@ type public sealed class DotnetRaft.RawNode
   public void Advance(DotnetRaft.Ready ready)
   public void Bootstrap(System.Collections.Generic.IEnumerable<DotnetRaft.Peer> peers)
   public void Campaign()
+  public void CompleteStorageWork(DotnetRaft.StorageCompletion completion)
   public void ForgetLeader()
   public void Propose(System.ReadOnlySpan<byte> data)
   public void ProposeConfChange(DotnetRaft.Protocol.ConfChange change)
@@ -626,6 +502,8 @@ type public sealed class DotnetRaft.Ready
   public DotnetRaft.Protocol.Snapshot? Snapshot { get; }
   public DotnetRaft.RaftHardState? HardState { get; }
   public DotnetRaft.SoftState? SoftState { get; }
+  public DotnetRaft.StorageAppendWork? AppendWork { get; }
+  public DotnetRaft.StorageApplyWork? ApplyWork { get; }
   public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> CommittedEntries { get; }
   public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> Entries { get; }
   public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Message> Messages { get; }
@@ -663,6 +541,7 @@ type public sealed class DotnetRaft.Status
   public virtual string ToString()
 
 type public interface DotnetRaft.Storage.IStorage
+  public DotnetRaft.Protocol.IRaftLogFormat LogFormat { get; }
   public abstract DotnetRaft.Protocol.Snapshot GetSnapshot()
   public abstract DotnetRaft.Storage.StorageState GetInitialState()
   public abstract System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> GetEntries(ulong lowInclusive, ulong highExclusive, ulong maxSize)
@@ -671,8 +550,9 @@ type public interface DotnetRaft.Storage.IStorage
   public abstract ulong GetTerm(ulong index)
 
 type public sealed class DotnetRaft.Storage.MemoryStorage : DotnetRaft.Storage.IStorage
-  public DotnetRaft.Protocol.Snapshot CreateSnapshot(ulong index, DotnetRaft.Protocol.ConfState? confState, Google.Protobuf.ByteString data)
-  public MemoryStorage()
+  public DotnetRaft.Protocol.IRaftLogFormat LogFormat { get; }
+  public DotnetRaft.Protocol.Snapshot CreateSnapshot(ulong index, DotnetRaft.Protocol.ConfState? confState, DotnetRaft.Protocol.RaftBytes data)
+  public MemoryStorage(DotnetRaft.Protocol.IRaftLogFormat logFormat)
   public sealed virtual DotnetRaft.Protocol.Snapshot GetSnapshot()
   public sealed virtual DotnetRaft.Storage.StorageState GetInitialState()
   public sealed virtual System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> GetEntries(ulong lowInclusive, ulong highExclusive, ulong maxSize)
@@ -709,3 +589,15 @@ type public sealed class DotnetRaft.Storage.StorageState : System.IEquatable<Dot
   public virtual string ToString()
   public void Deconstruct(out DotnetRaft.RaftHardState? HardState, out DotnetRaft.Protocol.ConfState ConfState)
 
+type public sealed class DotnetRaft.StorageAppendWork
+  public DotnetRaft.Protocol.Snapshot? Snapshot { get; }
+  public DotnetRaft.RaftHardState? HardState { get; }
+  public DotnetRaft.StorageCompletion? Completion { get; }
+  public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> Entries { get; }
+  public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Message> MessagesAfterPersist { get; }
+
+type public sealed class DotnetRaft.StorageApplyWork
+  public DotnetRaft.StorageCompletion Completion { get; }
+  public System.Collections.Generic.IReadOnlyList<DotnetRaft.Protocol.Entry> Entries { get; }
+
+type public abstract class DotnetRaft.StorageCompletion

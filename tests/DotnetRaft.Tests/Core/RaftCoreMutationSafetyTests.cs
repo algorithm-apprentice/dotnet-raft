@@ -147,7 +147,7 @@ public sealed class RaftCoreMutationSafetyTests
             commit: 3,
             applied: 3);
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
         trace.Events.Clear();
 
         core.Step(new Message
@@ -354,7 +354,7 @@ public sealed class RaftCoreMutationSafetyTests
     public void TemporarySnapshotUnavailabilityStopsRetryLoop()
     {
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
         var storage = new CoreTestStorage();
         storage.LogStorage.ApplySnapshot(
             new Snapshot
@@ -417,7 +417,7 @@ public sealed class RaftCoreMutationSafetyTests
             term: 1).Core;
         core.Tracker.RecordVote(1, granted: true);
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
 
         core.Step(new Message
         {
@@ -443,7 +443,7 @@ public sealed class RaftCoreMutationSafetyTests
     public void StorageApplyResponseReleasesUncommittedQuota()
     {
         Entry applied = EntryAt(3, 1);
-        applied.Data = ByteString.CopyFromUtf8("applied");
+        applied.Data = RaftBytes.CopyFromUtf8("applied");
         RaftCore core = Create(
             voters: [1],
             entries:
@@ -527,7 +527,7 @@ public sealed class RaftCoreMutationSafetyTests
         ulong applied)
     {
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
         var storage = new CoreTestStorage
         {
             InitialState =

@@ -1,6 +1,5 @@
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
-
-using Google.Protobuf;
 
 using ProtocolConfChange =
     DotnetRaft.Protocol.ConfChange;
@@ -49,7 +48,7 @@ public sealed class FixedMembershipConfiguration
                 (int)Math.Min(
                     physicalApplied,
                     (ulong)peerIds.Length));
-        result.Voters.Add(
+        result.Voters.AddRange(
             peerIds.Take(voterCount));
         return result;
     }
@@ -96,10 +95,9 @@ public sealed class FixedMembershipConfiguration
         try
         {
             change =
-                ProtocolConfChange.Parser.ParseFrom(
-                    entry.Data);
+                ProtobufRaftCodec.Instance.DecodeConfigurationChange(entry.Data.Span);
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw new InvalidDataException(
                 $"Bootstrap configuration entry {entry.Index} is malformed.",

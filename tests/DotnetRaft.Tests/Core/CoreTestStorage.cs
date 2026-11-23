@@ -5,12 +5,14 @@ namespace DotnetRaft.Tests.Core;
 
 internal sealed class CoreTestStorage : IStorage
 {
+    public IRaftLogFormat LogFormat => ProtobufRaftCodec.Instance;
+
     internal CoreTestStorage()
     {
         InitialState = new StorageState(null, new ConfState());
     }
 
-    internal MemoryStorage LogStorage { get; } = new();
+    internal MemoryStorage LogStorage { get; } = new(ProtobufRaftCodec.Instance);
 
     internal StorageState? InitialState { get; set; }
 

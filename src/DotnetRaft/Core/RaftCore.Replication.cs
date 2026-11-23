@@ -3,8 +3,6 @@ using DotnetRaft.Read;
 using DotnetRaft.Storage;
 using DotnetRaft.Tracker;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Core;
 
 internal sealed partial class RaftCore
@@ -57,7 +55,7 @@ internal sealed partial class RaftCore
                 "The leader is transferring leadership.");
         }
 
-        proposal ??= ParsedProposal.Parse(message.Entries, fromPeer: false);
+        proposal ??= ParsedProposal.Parse(message.Entries, fromPeer: false, Log.Format);
         (
             Entry[] entries,
             ulong pendingConfigurationIndex) =
@@ -254,7 +252,7 @@ internal sealed partial class RaftCore
             LogTerm = previousTerm,
             Commit = Log.Committed,
         };
-        message.Entries.Add(entries);
+        message.Entries.AddRange(entries);
         Send(message);
         progress.SentEntries(entries.Count, payloadSize);
         progress.RecordSentCommit(Log.Committed);
@@ -453,7 +451,7 @@ internal sealed partial class RaftCore
 
     private void BroadcastHeartbeat()
     {
-        ByteString context =
+        RaftBytes context =
             reads.GetHeartbeatContext();
         Tracker.Visit((id, progress) =>
         {

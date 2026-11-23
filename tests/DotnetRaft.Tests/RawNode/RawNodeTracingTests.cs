@@ -161,7 +161,7 @@ public sealed class RawNodeTracingTests
             Commit = 3,
         };
 
-        node.Step(message);
+        node.StepFixture(message);
         RaftTraceMessage received =
             sink.Events.Single(
                 traceEvent =>
@@ -203,7 +203,7 @@ public sealed class RawNodeTracingTests
             }
         };
 
-        node.Step(message);
+        node.StepFixture(message);
 
         BasicStatus status = node.GetBasicStatus();
         Assert.Equal(RaftRole.Follower, status.Role);
@@ -293,14 +293,14 @@ public sealed class RawNodeTracingTests
 
         var legacy = new ProtocolConfChange { Type = ConfChangeType.ConfChangeAddLearnerNode, NodeId = 3 };
         var v2 = new ConfChangeV2 { Changes = { new ConfChangeSingle { Type = legacy.Type, NodeId = legacy.NodeId } } };
-        ByteString bytes = ByteString.CopyFrom((useV2 ? v2.ToByteArray() : legacy.ToByteArray()).Concat(new byte[] { 0x78, 0x01 }).ToArray());
+        RaftBytes bytes = RaftBytes.CopyFrom((useV2 ? v2.ToByteArray() : legacy.ToByteArray()).Concat(new byte[] { 0x78, 0x01 }).ToArray());
         EntryType type = useV2 ? EntryType.EntryConfChangeV2 : EntryType.EntryConfChange;
         var proposal = new Message { Type = MessageType.MsgProp, From = 2, To = 1 };
         proposal.Entries.Add(new Entry { Type = type, Data = bytes });
         proposal.Entries.Add(new Entry { Type = type, Data = bytes });
 
-        node.Step(proposal);
-        proposal.Entries[0].Data = ByteString.Empty;
+        node.StepFixture(proposal);
+        proposal.Entries[0].Data = RaftBytes.Empty;
 
         Assert.Equal(RaftDescriptions.DescribeConfChange(v2), Assert.Single(sink.Events,
             trace => trace.Type == RaftTraceEventType.ConfigurationProposed).Detail);
@@ -325,13 +325,13 @@ public sealed class RawNodeTracingTests
         var sink = new RecordingTraceSink();
         MemoryStorage storage = CreateStorage(voters: [1, 2, 3]);
         var node = CreateNode(storage, traceSink: sink);
-        node.Step(new Message { Type = MessageType.MsgHeartbeat, From = 2, To = 1, Term = 1 });
+        node.StepFixture(new Message { Type = MessageType.MsgHeartbeat, From = 2, To = 1, Term = 1 });
         PersistAndAdvance(node, storage, node.Ready());
         sink.Events.Clear();
 
         // Unknown fields and an explicitly present default are part of the
         // received bytes, not something to reconstruct from the parsed view.
-        ByteString bytes = ByteString.CopyFrom(0x08, 0x00, 0x78, 0x01);
+        RaftBytes bytes = RaftBytes.CopyFrom([0x08, 0x00, 0x78, 0x01]);
         var proposal = new Message { Type = MessageType.MsgProp, From = 3, To = 1 };
         proposal.Entries.Add(new Entry
         {
@@ -341,10 +341,10 @@ public sealed class RawNodeTracingTests
         Message expected = proposal.Clone();
         expected.To = 2;
 
-        node.Step(proposal);
+        node.StepFixture(proposal);
         proposal.Entries.Clear();
 
-        Assert.Equal(expected, Assert.Single(node.Ready().Messages));
+        Assert.Equal(expected, Assert.Single(node.Ready().FixtureMessages()));
         Assert.DoesNotContain(sink.Events, trace => trace.Type == RaftTraceEventType.ConfigurationProposed);
     }
 
@@ -370,7 +370,7 @@ public sealed class RawNodeTracingTests
             Index = 1,
         });
 
-        node.Step(append);
+        node.StepFixture(append);
 
         RaftTraceEvent appended =
             sink.Events.Single(
@@ -398,9 +398,9 @@ public sealed class RawNodeTracingTests
             traceSink: sink);
         sink.Events.Clear();
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
 
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
@@ -498,7 +498,7 @@ public sealed class RawNodeTracingTests
         };
 
         Assert.Throws<RaftTracingException>(
-            () => node.Step(new Message
+            () => node.StepFixture(new Message
             {
                 From = 2,
                 To = 1,
@@ -752,8 +752,8 @@ public sealed class RawNodeTracingTests
             plainReady.CommittedEntries,
             tracedReady.CommittedEntries);
         Assert.Equal(
-            plainReady.Messages,
-            tracedReady.Messages);
+            plainReady.FixtureMessages(),
+            tracedReady.FixtureMessages());
         Assert.Equal(
             plainReady.MustSync,
             tracedReady.MustSync);

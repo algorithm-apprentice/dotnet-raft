@@ -19,7 +19,7 @@ public sealed class ProposalAdmissionTests
             new Entry
             {
                 Data =
-                    ByteString.CopyFrom([1, 2, 3]),
+                    RaftBytes.CopyFrom([1, 2, 3]),
             },
         ];
 
@@ -186,7 +186,7 @@ public sealed class ProposalAdmissionTests
     {
         return new Entry
         {
-            Data = ByteString.CopyFrom(
+            Data = RaftBytes.CopyFrom(
                 new byte[length]),
         };
     }

@@ -182,7 +182,7 @@ public sealed class KvClusterComponentTests
         message.Entries.Add(
             new Entry
             {
-                Data = ByteString.CopyFrom(
+                Data = RaftBytes.CopyFrom(
                     new byte[300 * 1024]),
             });
 

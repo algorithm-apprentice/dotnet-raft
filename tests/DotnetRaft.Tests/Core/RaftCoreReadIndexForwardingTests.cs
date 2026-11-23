@@ -102,7 +102,7 @@ public sealed class RaftCoreReadIndexForwardingTests
                 new Entry
                 {
                     Data =
-                        ByteString.CopyFromUtf8("ignored"),
+                        RaftBytes.CopyFromUtf8("ignored"),
                 },
             },
         });
@@ -129,12 +129,12 @@ public sealed class RaftCoreReadIndexForwardingTests
         };
         response.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8("response"),
+            Data = RaftBytes.CopyFromUtf8("response"),
         });
 
         core.Step(response);
         response.Entries[0].Data =
-            ByteString.CopyFromUtf8("changed");
+            RaftBytes.CopyFromUtf8("changed");
 
         ReadState state = Assert.Single(
             core.TakeReadStates());
@@ -191,8 +191,8 @@ public sealed class RaftCoreReadIndexForwardingTests
             id: 2,
             voters: [1, 2, 3],
             term: 5).Core;
-        ByteString context =
-            ByteString.CopyFromUtf8("context");
+        RaftBytes context =
+            RaftBytes.CopyFromUtf8("context");
 
         core.Step(new Message
         {
@@ -220,7 +220,7 @@ public sealed class RaftCoreReadIndexForwardingTests
 
         core.Step(request);
         request.Entries[0].Data =
-            ByteString.CopyFromUtf8("changed");
+            RaftBytes.CopyFromUtf8("changed");
 
         Message response = Assert.Single(
             core.TakeMessages());

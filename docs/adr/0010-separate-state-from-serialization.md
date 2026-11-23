@@ -1,6 +1,6 @@
 # ADR 0010: Separate domain state from its encoding
 
-- **Status:** Accepted; migration in progress
+- **Status:** Accepted; the remainder is implemented by [ADR 0011](0011-complete-domain-codec-separation.md)
 - **Date:** 2026-11-23
 
 ## Context

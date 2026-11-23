@@ -57,13 +57,13 @@ internal static class RaftNodeTestSupport
         IEnumerable<ulong>? learners = null)
     {
         var state = new ConfState();
-        state.Voters.Add(voters);
+        state.Voters.AddRange(voters);
         if (learners is not null)
         {
-            state.Learners.Add(learners);
+            state.Learners.AddRange(learners);
         }
 
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(
             new Snapshot
             {
@@ -119,12 +119,12 @@ internal static class RaftNodeTestSupport
             {
                 case EntryType.EntryConfChange:
                     await node.ApplyConfChangeAsync(
-                        ProtocolConfChange.Parser.ParseFrom(
+                        ProtobufFixtureEncoding.DecodeLegacy(
                             entry.Data));
                     break;
                 case EntryType.EntryConfChangeV2:
                     await node.ApplyConfChangeAsync(
-                        ConfChangeV2.Parser.ParseFrom(
+                        ProtobufFixtureEncoding.DecodeV2(
                             entry.Data));
                     break;
             }

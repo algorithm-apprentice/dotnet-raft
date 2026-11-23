@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DotnetRaft\DotnetRaft.csproj" />
+    <ProjectReference Include="..\DotnetRaft.Protobuf\DotnetRaft.Protobuf.csproj" />
     <!-- Share the rules without adding a binary dependency on core internals. -->
     <Compile Include="..\DotnetRaft\Core\EntrySequence.cs" Link="EntrySequence.cs" />
     <Compile Include="..\DotnetRaft\Core\EntrySizing.cs" Link="EntrySizing.cs" />
@@ -17,7 +18,7 @@
     <IsPackable>true</IsPackable>
     <Nullable>enable</Nullable>
     <PackageId>DotnetRaft.Sqlite</PackageId>
-    <Version>2.0.0</Version>
+    <Version>3.0.0</Version>
     <Authors>algorithm-apprentice</Authors>
     <Title>dotnet-raft SQLite storage</Title>
     <Description>Durable SQLite consensus storage for DotnetRaft.</Description>

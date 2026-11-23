@@ -22,7 +22,7 @@ public sealed class RaftCoreMembershipApplicationTests
         {
             Type = ConfChangeType.ConfChangeAddNode,
             NodeId = 2,
-            Context = ByteString.CopyFromUtf8("context"),
+            Context = RaftBytes.CopyFromUtf8("context"),
         };
         ProtocolConfChange original = change.Clone();
 
@@ -204,7 +204,7 @@ public sealed class RaftCoreMembershipApplicationTests
         };
         request.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8("read"),
+            Data = RaftBytes.CopyFromUtf8("read"),
         });
         core.Step(request);
         core.TakeMessages();
@@ -409,7 +409,7 @@ public sealed class RaftCoreMembershipApplicationTests
         };
         message.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(data),
+            Data = RaftBytes.CopyFromUtf8(data),
         });
         return message;
     }

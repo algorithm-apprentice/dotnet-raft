@@ -255,7 +255,7 @@ public sealed class RaftCoreFollowerReplicationTests
             commit: 1,
             applied: 1).Core;
         core.BecomeFollower(4, 2);
-        ByteString context = ByteString.CopyFromUtf8("read-context");
+        RaftBytes context = RaftBytes.CopyFromUtf8("read-context");
         var heartbeat = new Message
         {
             From = 2,
@@ -388,7 +388,7 @@ public sealed class RaftCoreFollowerReplicationTests
             LogTerm = previousTerm,
             Commit = leaderCommit,
         };
-        message.Entries.Add(entries);
+        message.Entries.AddRange(entries);
         return message;
     }
 }

@@ -43,7 +43,7 @@ public sealed class InteractionCommandTests
                 string.Empty));
 
         Assert.Equal(
-            ByteString.CopyFromUtf8("\"foo\""),
+            RaftBytes.CopyFromUtf8("\"foo\""),
             environment.Nodes[0]
                 .GetApplicationSnapshot()
                 .Data);

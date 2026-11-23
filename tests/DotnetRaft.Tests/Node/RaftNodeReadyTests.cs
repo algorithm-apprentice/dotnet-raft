@@ -15,7 +15,7 @@ public sealed class RaftNodeReadyTests
     [Fact]
     public async Task StartDeliversBootstrapReady()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         var node = RaftNode.Start(
             new RaftConfig
             {
@@ -39,7 +39,7 @@ public sealed class RaftNodeReadyTests
             storage.Append(ready.Entries);
             storage.SetHardState(Assert.IsType<RaftHardState>(ready.HardState));
             await node.ApplyConfChangeAsync(
-                ProtocolConfChange.Parser.ParseFrom(
+                ProtobufFixtureEncoding.DecodeLegacy(
                     committed.Data));
             await node.AdvanceAsync();
         }
@@ -59,7 +59,7 @@ public sealed class RaftNodeReadyTests
             {
                 Index = 3,
                 Term = 1,
-                Data = ByteString.CopyFromUtf8("value"),
+                Data = RaftBytes.CopyFromUtf8("value"),
             },
         ]);
         storage.SetHardState(

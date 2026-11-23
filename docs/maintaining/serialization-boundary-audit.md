@@ -12,22 +12,16 @@ named property does not satisfy the rule.
 |---|---|---|
 | Hard state | **Migrated.** [`RaftHardState`](../../src/DotnetRaft/RaftHardState.cs) is used by the core, Ready, memory and SQLite storage, diagnostics, and recovery. Only the disk/async append adapters use protobuf for these values. | Nullable update versus an explicit zero vote; term and commit ordering; skipped flush for a commit-only change; old SQLite blob/read compatibility. |
 | KV commands and deduplication | **Migrated for ordinary commands.** [`RaftClusterHost.Ready`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) maps committed entries to `CommittedKvEntry` before application; the request registry and results use `KvCommandFingerprint`, not `ByteString`. Snapshot and membership work is covered below. | Ordered application, no-op cursor advance, stable request digest bytes, batch rollback, and deduplication after restart/snapshot. |
-| Entry and log | **Open.** [`RaftLog`](../../src/DotnetRaft/Core/RaftLog.cs), [`EntrySizing`](../../src/DotnetRaft/Core/EntrySizing.cs), [`Ready`](../../src/DotnetRaft/Ready.cs), and [`IStorage`](../../src/DotnetRaft/Storage/IStorage.cs) still use generated entries. Define owned domain entries and carry encoding evidence from the adapter. | Entries forwarded or persisted must retain presence and unknown fields. Byte quotas have distinct encoded-entry and payload meanings; retain budget and oversize-first-entry tests. |
-| Snapshot and membership | **Open.** Generated snapshots and `ConfState` still cross the storage API and enter [configuration and restore](../../src/DotnetRaft/Core/RaftCore.Membership.cs). `ParsedProposal` and the configuration code use generated changes, and KV stores protobuf configuration metadata. | Snapshot boundary and pending marker ordering; exact membership prefix; joint quorum and deterministic bootstrap; compatibility of `.proto` and both SQLite schemas. |
-| Peer protocol | **Open.** `RawNode.Step`, `RaftNode.StepAsync`, the role dispatch, and outgoing messages still consume/produce generated `Message`. gRPC envelope encoding/decoding belongs at the adapter and is not a violation. | Parse once and reject malformed input before mutation; preserve term/role gates, peer routing, local-only message isolation, and unknown-field forwarding. |
-| Local work and read barriers | **Partly migrated.** [`ReadState`](../../src/DotnetRaft/ReadState.cs) exposes detached .NET bytes, but internal ReadIndex tracking still uses protobuf for peer context. Async append/apply work and completions still use `Message`, although they never travel on the network. | Represent local work and completions explicitly while preserving both Ready modes, durable reply release, cursor reconciliation, and byte-wise context identity. |
+| Entry and log | **Migrated.** `RaftLog`, `Ready`, and `IStorage` use owned domain [`Entry`](../../src/DotnetRaft/Protocol/Entry.cs) values. `IStorage.LogFormat` measures encoded entries. | Forwarding and storage keep presence and extensions. The encoded-size budget remains distinct from the command payload budget. |
+| Snapshot and membership | **Migrated.** Snapshot, configuration, and change objects are domain types. `DotnetRaft.Protobuf` owns the original membership and snapshot encoding for storage and transport. | Snapshot and pending marker ordering, joint quorum and bootstrap, the descriptor, and both SQLite schemas stay unchanged. |
+| Peer protocol | **Migrated.** `Step`, `StepAsync`, and role dispatch consume domain [`Message`](../../src/DotnetRaft/Protocol/Message.cs) values. The gRPC adapter decodes and encodes them. | Reject malformed input before mutation. Keep term gates, local-work isolation, and forwarded extensions. |
+| Local work and read barriers | **Migrated.** `Ready` has typed append and apply work; completion receipts return to the issuing node separately from peer traffic. Internal request contexts use [`RaftBytes`](../../src/DotnetRaft/Protocol/RaftBytes.cs). | Separate queues, durable reply release, nonreplayable receipts, and byte-wise context identity. |
 | Tests, examples, and tools | Protocol fixtures, raw compatibility tests, and `Sqlite.CrashHarness` may construct protobufs to test encoding. Consensus simulations, benchmark work, and teaching examples must migrate when their domain APIs move. | Preserve deterministic Counter traces, interaction goldens, wire/schema approvals, old storage recovery, and real-process smoke. Update managed API approvals only for intentional changes. |
 
-## Migration order
+## Regression gates
 
-1. Define domain entry and snapshot/configuration ownership and adapters. Verify
-   round trips, forwarding evidence, and sizes before switching the log/store
-   and their public Ready fields.
-2. Replace peer commands and response shapes at the ingress/egress boundary
-   using those entries and snapshots. Keep a single transition owner, and move
-   shape validation into the adapter without moving term or quorum decisions.
-3. Replace local work/completions, read contexts, and their diagnostics with
-   typed domain inputs and outputs. Remove any remaining generated references
-   from the consensus and application contracts before claiming the split is
-   complete. Once those types are isolated, enforce the dependency direction
-   by compiling the domain without protobuf, not by inspecting namespace spelling.
+The completed migration is recorded in [ADR 0011](../adr/0011-complete-domain-codec-separation.md).
+Keep the core project independently buildable without runtime packages. The
+assembly reference test checks this boundary; the adapter owns all generated
+messages. Run the descriptor and schema approvals, codec round trips, typed
+worker tests, legacy recovery, and real-process smoke when the boundary changes.

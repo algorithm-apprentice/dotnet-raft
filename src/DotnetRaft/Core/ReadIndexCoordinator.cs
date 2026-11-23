@@ -4,8 +4,6 @@ using DotnetRaft.Protocol;
 using DotnetRaft.Quorum;
 using DotnetRaft.Read;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Core;
 
 internal readonly record struct ReadIndexAdvanceResult(
@@ -121,7 +119,7 @@ internal sealed class ReadIndexCoordinator
             Type = MessageType.MsgReadIndexResp,
             Index = index,
         };
-        response.Entries.Add(
+        response.Entries.AddRange(
             request.Entries.Select(
                 entry => entry.Clone()));
         return response;
@@ -142,12 +140,12 @@ internal sealed class ReadIndexCoordinator
         return true;
     }
 
-    internal ByteString GetHeartbeatContext()
+    internal RaftBytes GetHeartbeatContext()
     {
         return readOnly.GetHeartbeatContext();
     }
 
-    internal ReadAcknowledgement? ParseAcknowledgement(ByteString context, bool fromPeer)
+    internal ReadAcknowledgement? ParseAcknowledgement(RaftBytes context, bool fromPeer)
     {
         return readOnly.ParseAcknowledgement(context, fromPeer);
     }

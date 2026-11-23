@@ -32,6 +32,10 @@ public interface IRaftNode : IAsyncDisposable
         Message message,
         CancellationToken cancellationToken = default);
 
+    ValueTask CompleteStorageWorkAsync(
+        StorageCompletion completion,
+        CancellationToken cancellationToken = default);
+
     ValueTask ForgetLeaderAsync(
         CancellationToken cancellationToken = default);
 

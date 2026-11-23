@@ -59,15 +59,11 @@ dotnet run --project examples/DotnetRaft.Counter -- --async-storage
 ```
 
 Only the storage protocol changes; the nodes still use synchronous `RawNode`
-calls. Each replica has two FIFO work queues. `ProcessReady` routes
-`MsgStorageAppend` and `MsgStorageApply` by `Message.To` instead of processing
-the diagnostic persistence/application fields on `Ready`. The append worker
-writes the entries and hard state; the apply worker applies committed entries.
-Neither path calls `Advance`. Each worker releases the generated responses in
-order, and the pump calls `Step` on each response's own destination. A single
-append request can release both a local acknowledgement and a reply to a
-remote Raft peer. This process simulates both using one delivery queue; with
-real networking, only the remote replies go on the wire.
+calls. Each replica has two FIFO queues for `Ready.AppendWork` and
+`Ready.ApplyWork`. The append worker publishes the log batch, then releases
+`MessagesAfterPersist` in order. The apply worker applies committed entries.
+Neither calls `Advance`; the pump returns the worker's typed receipt using
+`CompleteStorageWork`. In a real network, only peer messages go on the wire.
 
 This run deliberately pauses the apply queues after proposing. Append and
 network work can still advance the leader's commit index, but the counter

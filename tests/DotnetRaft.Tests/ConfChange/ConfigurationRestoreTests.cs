@@ -233,10 +233,10 @@ public sealed class ConfigurationRestoreTests
             AutoLeave = outgoing.Length > 0
                 && random.Next(2) == 1,
         };
-        state.Voters.Add(voters);
-        state.Learners.Add(learners);
-        state.VotersOutgoing.Add(outgoing);
-        state.LearnersNext.Add(
+        state.Voters.AddRange(voters);
+        state.Learners.AddRange(learners);
+        state.VotersOutgoing.AddRange(outgoing);
+        state.LearnersNext.AddRange(
             removedVoters.Take(learnerNextCount));
         return state;
     }

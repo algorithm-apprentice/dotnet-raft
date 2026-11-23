@@ -1,9 +1,8 @@
 using System.Diagnostics;
 
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage.Sqlite;
-
-using Google.Protobuf;
 
 using Microsoft.Data.Sqlite;
 
@@ -74,7 +73,7 @@ internal static class Program
                     Term = 6,
                     ConfState = new ConfState { Voters = { 1, 2 } },
                 },
-                Data = ByteString.CopyFromUtf8("new application snapshot"),
+                Data = RaftBytes.CopyFromUtf8("new application snapshot"),
             },
         };
         request.Entries.Add(
@@ -83,7 +82,7 @@ internal static class Program
                 Index = 3,
                 Term = 7,
                 Data =
-                    ByteString.CopyFromUtf8(
+                    RaftBytes.CopyFromUtf8(
                         "durable"),
             });
         storage.PersistStorageAppend(request);
@@ -120,12 +119,7 @@ internal static class Program
             """;
         command.Parameters.AddWithValue(
             "$hardState",
-            new HardState
-            {
-                Term = 99,
-                Vote = 99,
-                Commit = 0,
-            }.ToByteArray());
+            ProtobufRaftCodec.EncodeHardState(new RaftHardState(99, 99, 0)));
         if (command.ExecuteNonQuery() != 1)
         {
             throw new InvalidOperationException("The crash fixture did not update its metadata row.");

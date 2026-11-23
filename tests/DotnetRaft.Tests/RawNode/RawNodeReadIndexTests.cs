@@ -23,7 +23,7 @@ public sealed class RawNodeReadIndexTests
         const ulong removalIndex = 2;
         const ulong writeIndex = 3;
         const ulong oldTerm = 1;
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(new Snapshot
         {
             Metadata = new SnapshotMetadata

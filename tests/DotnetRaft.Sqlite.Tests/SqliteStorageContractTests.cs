@@ -97,8 +97,8 @@ public sealed class SqliteStorageContractTests
     public void BothBackendsUseTheSameEncodedPageBudget(bool useSqlite)
     {
         Entry[] entries = Entries((1, 1), (2, 1), (3, 1));
-        entries[0].Data = ByteString.CopyFromUtf8("first");
-        entries[1].Data = ByteString.CopyFromUtf8("second");
+        entries[0].Data = RaftBytes.CopyFromUtf8("first");
+        entries[1].Data = RaftBytes.CopyFromUtf8("second");
         using TemporaryStorageDirectory directory = CreateDirectory();
         using SqliteStorage? sqlite = useSqlite ? CreateStorage(directory) : null;
         IStorage storage;
@@ -110,7 +110,7 @@ public sealed class SqliteStorageContractTests
         }
         else
         {
-            var memory = new MemoryStorage();
+            var memory = new MemoryStorage(ProtobufRaftCodec.Instance);
             memory.Append(entries);
             storage = memory;
         }
@@ -257,7 +257,7 @@ public sealed class SqliteStorageContractTests
                 directory,
                 Entries((3, 3), (4, 4), (5, 5)));
         var confState = new ConfState();
-        confState.Voters.Add([1, 2, 3]);
+        confState.Voters.AddRange([1, 2, 3]);
         storage.SetHardState(
             new RaftHardState
             {
@@ -268,7 +268,7 @@ public sealed class SqliteStorageContractTests
         Snapshot created = storage.CreateSnapshot(
             4,
             confState,
-            ByteString.CopyFromUtf8("local"));
+            RaftBytes.CopyFromUtf8("local"));
         confState.Voters.Clear();
         created.Metadata.ConfState.Voters.Clear();
 
@@ -280,7 +280,7 @@ public sealed class SqliteStorageContractTests
             storage.GetPendingApplicationSnapshot());
 
         var incomingConf = new ConfState();
-        incomingConf.Voters.Add([4, 5, 6]);
+        incomingConf.Voters.AddRange([4, 5, 6]);
         Snapshot incoming = SnapshotAt(
             6,
             6,
@@ -335,7 +335,7 @@ public sealed class SqliteStorageContractTests
         using SqliteStorage storage =
             CreateStorage(directory);
         var confState = new ConfState();
-        confState.Voters.Add([1, 2, 3]);
+        confState.Voters.AddRange([1, 2, 3]);
 
         storage.ApplySnapshot(
             SnapshotAt(
@@ -365,7 +365,7 @@ public sealed class SqliteStorageContractTests
         Snapshot created = storage.CreateSnapshot(
             2,
             null,
-            ByteString.CopyFromUtf8("first"));
+            RaftBytes.CopyFromUtf8("first"));
         Assert.Equal(
             [1UL, 2UL, 3UL],
             created.Metadata.ConfState.Voters);
@@ -374,12 +374,12 @@ public sealed class SqliteStorageContractTests
             () => storage.CreateSnapshot(
                 2,
                 null,
-                ByteString.Empty));
+                RaftBytes.Empty));
         Assert.Throws<InvalidOperationException>(
             () => storage.CreateSnapshot(
                 4,
                 null,
-                ByteString.Empty));
+                RaftBytes.Empty));
 
         storage.ApplySnapshot(
             SnapshotAt(

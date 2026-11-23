@@ -41,7 +41,7 @@ public sealed class RaftNodeCommandTests
             Ready leadership = await WaitReadyAsync(node);
             Assert.Equal(2, leadership.Entries.Count);
             Assert.Equal(
-                ByteString.CopyFromUtf8("original"),
+                RaftBytes.CopyFromUtf8("original"),
                 leadership.Entries[^1].Data);
             await PersistAndAdvanceAsync(
                 node,
@@ -92,12 +92,12 @@ public sealed class RaftNodeCommandTests
         {
             await Assert.ThrowsAsync<
                 ArgumentException>(
-                async () => await node.StepAsync(
+                async () => await node.StepFixtureAsync(
                         new Message())
                     .AsTask());
             await Assert.ThrowsAsync<
                 ArgumentException>(
-                async () => await node.StepAsync(
+                async () => await node.StepFixtureAsync(
                         new Message
                         {
                             From = 2,
@@ -285,7 +285,7 @@ public sealed class RaftNodeCommandTests
             Assert.True(
                 trace.Entered.Wait(
                     DeadlockGuardTimeout));
-            Task canceled = node.StepAsync(
+            Task canceled = node.StepFixtureAsync(
                     new Message
                     {
                         From = 2,
@@ -416,7 +416,7 @@ public sealed class RaftNodeCommandTests
                 Assert.Throws<ArgumentNullException>(
                     () =>
                     {
-                        _ = node.StepAsync(null!)
+                        _ = node.StepFixtureAsync(null!)
                             .AsTask();
                     });
             Assert.Equal(
@@ -469,9 +469,9 @@ public sealed class RaftNodeCommandTests
                 new Entry
                 {
                     Data =
-                        ByteString.CopyFromUtf8("blocked"),
+                        RaftBytes.CopyFromUtf8("blocked"),
                 });
-            Task blocked = node.StepAsync(
+            Task blocked = node.StepFixtureAsync(
                     proposal,
                     cancellation.Token)
                 .AsTask();
@@ -569,7 +569,7 @@ public sealed class RaftNodeCommandTests
                 traceSink: trace);
         try
         {
-            await node.StepAsync(
+            await node.StepFixtureAsync(
                 new Message
                 {
                     From = 2,
@@ -583,7 +583,7 @@ public sealed class RaftNodeCommandTests
                 await WaitReadyAsync(node));
 
             Volatile.Write(ref block, 1);
-            Task blocker = node.StepAsync(
+            Task blocker = node.StepFixtureAsync(
                     new Message
                     {
                         From = 2,
@@ -600,11 +600,11 @@ public sealed class RaftNodeCommandTests
             {
                 Type = ConfChangeType.ConfChangeAddNode,
                 NodeId = 3,
-                Context = ByteString.CopyFromUtf8("v1"),
+                Context = RaftBytes.CopyFromUtf8("v1"),
             };
             var v2 = new ConfChangeV2
             {
-                Context = ByteString.CopyFromUtf8("v2"),
+                Context = RaftBytes.CopyFromUtf8("v2"),
             };
             v2.Changes.Add(new ConfChangeSingle
             {
@@ -638,7 +638,7 @@ public sealed class RaftNodeCommandTests
             Ready ready = await WaitReadyAsync(node);
             Message[] proposals =
             [
-                .. ready.Messages.Where(
+                .. ready.FixtureMessages().Where(
                     message =>
                         message.Type
                         == MessageType.MsgProp),
@@ -653,26 +653,24 @@ public sealed class RaftNodeCommandTests
                 firstEntry.Type);
             Assert.Equal(
                 3UL,
-                ProtocolConfChange.Parser
-                    .ParseFrom(firstEntry.Data)
+                ProtobufFixtureEncoding.DecodeLegacy(firstEntry.Data)
                     .NodeId);
             Assert.Equal(
                 EntryType.EntryConfChangeV2,
                 secondEntry.Type);
             Assert.Equal(
                 4UL,
-                ConfChangeV2.Parser
-                    .ParseFrom(secondEntry.Data)
+                ProtobufFixtureEncoding.DecodeV2(secondEntry.Data)
                     .Changes[0]
                     .NodeId);
 
             Message readRequest = Assert.Single(
-                ready.Messages,
+                ready.FixtureMessages(),
                 message =>
                     message.Type
                     == MessageType.MsgReadIndex);
             Assert.Equal(
-                ByteString.CopyFromUtf8("read-context"),
+                RaftBytes.CopyFromUtf8("read-context"),
                 Assert.Single(readRequest.Entries).Data);
         }
         finally
@@ -783,14 +781,14 @@ public sealed class RaftNodeCommandTests
             voters: [1, 2]);
         try
         {
-            await node.StepAsync(
+            await node.StepFixtureAsync(
                 new Message
                 {
                     From = 2,
                     To = 1,
                     Type = MessageType.MsgHup,
                 });
-            await node.StepAsync(
+            await node.StepFixtureAsync(
                 new Message
                 {
                     From = 99,
@@ -818,7 +816,7 @@ public sealed class RaftNodeCommandTests
         {
             NotSupportedException storageResponse =
                 await Assert.ThrowsAsync<NotSupportedException>(
-                async () => await node.StepAsync(
+                async () => await node.StepFixtureAsync(
                     new Message
                     {
                         From = ulong.MaxValue,
@@ -831,7 +829,7 @@ public sealed class RaftNodeCommandTests
                 storageResponse.Message);
             NotSupportedException reservedSender =
                 await Assert.ThrowsAsync<NotSupportedException>(
-                async () => await node.StepAsync(
+                async () => await node.StepFixtureAsync(
                     new Message
                     {
                         From =
@@ -864,7 +862,7 @@ public sealed class RaftNodeCommandTests
                 Type = MessageType.MsgHeartbeat,
                 Term = 1,
             };
-            ValueTask step = node.StepAsync(message);
+            ValueTask step = node.StepFixtureAsync(message);
             message.From = 1;
             message.Type = MessageType.MsgHup;
             message.Term = 0;
@@ -889,7 +887,7 @@ public sealed class RaftNodeCommandTests
             RestartNode(voters: [1, 2]);
         try
         {
-            await node.StepAsync(
+            await node.StepFixtureAsync(
                 new Message
                 {
                     From = 2,
@@ -913,13 +911,13 @@ public sealed class RaftNodeCommandTests
                 new Entry
                 {
                     Data =
-                        ByteString.CopyFromUtf8("value"),
+                        RaftBytes.CopyFromUtf8("value"),
                 });
-            await node.StepAsync(proposal);
+            await node.StepFixtureAsync(proposal);
 
             Ready ready = await WaitReadyAsync(node);
             Message forwarded = Assert.Single(
-                ready.Messages,
+                ready.FixtureMessages(),
                 message =>
                     message.Type
                     == MessageType.MsgProp);
@@ -941,7 +939,7 @@ public sealed class RaftNodeCommandTests
                 learners: [1]);
         try
         {
-            await node.StepAsync(
+            await node.StepFixtureAsync(
                 new Message
                 {
                     From = 2,
@@ -958,7 +956,7 @@ public sealed class RaftNodeCommandTests
             await node.ProposeAsync("value"u8.ToArray());
             Ready ready = await WaitReadyAsync(node);
             Assert.Contains(
-                ready.Messages,
+                ready.FixtureMessages(),
                 message =>
                     message.Type
                     == MessageType.MsgProp
@@ -977,7 +975,7 @@ public sealed class RaftNodeCommandTests
             RestartNode(voters: [1, 2]);
         try
         {
-            await node.StepAsync(
+            await node.StepFixtureAsync(
                 new Message
                 {
                     From = 2,
@@ -1021,7 +1019,7 @@ public sealed class RaftNodeCommandTests
                 "accepted"u8.ToArray());
             Ready forwarded = await WaitReadyAsync(node);
             Assert.Contains(
-                forwarded.Messages,
+                forwarded.FixtureMessages(),
                 message =>
                     message.Type
                     == MessageType.MsgProp
@@ -1049,7 +1047,7 @@ public sealed class RaftNodeCommandTests
                         ConfChangeType.ConfChangeRemoveNode,
                     NodeId = 1,
                 });
-            await node.StepAsync(
+            await node.StepFixtureAsync(
                 new Message
                 {
                     From = 2,

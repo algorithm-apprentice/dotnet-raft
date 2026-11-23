@@ -111,8 +111,6 @@ internal sealed class InteractionEnvironment
         }
 
         ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(
-            options.SnapshotData);
         if (options.SnapshotIndex == 1)
         {
             throw new ArgumentOutOfRangeException(
@@ -127,15 +125,15 @@ internal sealed class InteractionEnvironment
         {
             ulong id = checked(
                 (ulong)_nodes.Count + 1);
-            var storage = new MemoryStorage();
+            var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
             Snapshot applicationSnapshot =
                 ProtocolDefaults.EnsureSnapshot(
                     new Snapshot());
             if (options.SnapshotIndex > 0)
             {
                 var state = new ConfState();
-                state.Voters.Add(voters);
-                state.Learners.Add(learners);
+                state.Voters.AddRange(voters);
+                state.Learners.AddRange(learners);
                 applicationSnapshot =
                     ProtocolDefaults.EnsureSnapshot(
                         new Snapshot
@@ -284,7 +282,7 @@ internal sealed class InteractionEnvironment
         InteractionNode node = GetNode(nodeIndex);
         Ready ready = node.RawNode.Ready();
         _output.Write(
-            RaftDescriptions.DescribeReady(ready));
+            ProtobufFixtureEncoding.DescribeReady(ready));
         foreach (ReadState readState in ready.ReadStates)
         {
             ReadStateDelivered?.Invoke(node.Config.Id, readState);
@@ -292,7 +290,7 @@ internal sealed class InteractionEnvironment
 
         if (node.Config.AsyncStorageWrites)
         {
-            foreach (Message message in ready.Messages)
+            foreach (Message message in ready.FixtureMessages())
             {
                 switch (message.To)
                 {
@@ -346,7 +344,7 @@ internal sealed class InteractionEnvironment
         }
 
         _messages.AddRange(
-            ready.Messages.Select(
+            ready.FixtureMessages().Select(
                 message => message.Clone()));
         node.RawNode.Advance(ready);
     }
@@ -376,7 +374,7 @@ internal sealed class InteractionEnvironment
         described.Responses.Clear();
         _output.WriteLine("Processing:");
         _output.WriteLine(
-            RaftDescriptions.DescribeMessage(
+            ProtobufFixtureEncoding.DescribeMessage(
                 described));
 
         if (request.Snapshot is not null
@@ -415,7 +413,7 @@ internal sealed class InteractionEnvironment
         foreach (Message response in responses)
         {
             _output.WriteLine(
-                RaftDescriptions.DescribeMessage(
+                ProtobufFixtureEncoding.DescribeMessage(
                     response));
             _messages.Add(response.Clone());
         }
@@ -446,7 +444,7 @@ internal sealed class InteractionEnvironment
         described.Responses.Clear();
         _output.WriteLine("Processing:");
         _output.WriteLine(
-            RaftDescriptions.DescribeMessage(
+            ProtobufFixtureEncoding.DescribeMessage(
                 described));
         foreach (Entry entry in request.Entries)
         {
@@ -457,7 +455,7 @@ internal sealed class InteractionEnvironment
         foreach (Message response in responses)
         {
             _output.WriteLine(
-                RaftDescriptions.DescribeMessage(
+                ProtobufFixtureEncoding.DescribeMessage(
                     response));
             _messages.Add(response.Clone());
         }
@@ -663,7 +661,7 @@ internal sealed class InteractionEnvironment
         };
         _messages.Add(message.Clone());
         _output.Write(
-            RaftDescriptions.DescribeMessage(message));
+            ProtobufFixtureEncoding.DescribeMessage(message));
     }
 
     internal void SetRandomizedElectionTimeout(
@@ -703,7 +701,7 @@ internal sealed class InteractionEnvironment
                 last + 1,
                 ulong.MaxValue);
         _output.Write(
-            RaftDescriptions.DescribeEntries(
+            ProtobufFixtureEncoding.DescribeEntries(
                 entries));
     }
 
@@ -893,7 +891,7 @@ internal sealed class InteractionEnvironment
         ulong[] voters = [];
         ulong[] learners = [];
         ulong snapshotIndex = 0;
-        ByteString snapshotData = ByteString.Empty;
+        RaftBytes snapshotData = RaftBytes.Empty;
         var inflight = int.MaxValue;
         ulong maxCommitted = 0;
         var preVote = false;
@@ -927,7 +925,7 @@ internal sealed class InteractionEnvironment
                     break;
                 case "content":
                     snapshotData =
-                        ByteString.CopyFromUtf8(
+                        RaftBytes.CopyFromUtf8(
                             OneValue(option));
                     break;
                 case "prevote":
@@ -1379,7 +1377,7 @@ internal sealed class InteractionEnvironment
         {
             Transition = transition,
         };
-        change.Changes.Add(changes);
+        change.Changes.AddRange(changes);
         ProposeConfiguration(nodeIndex, change);
     }
 
@@ -1462,7 +1460,7 @@ internal sealed class InteractionEnvironment
             _output.Write("dropped: ");
         }
 
-        _output.WriteLine(RaftDescriptions.DescribeMessage(message));
+        _output.WriteLine(ProtobufFixtureEncoding.DescribeMessage(message));
         if (!drop)
         {
             InteractionNode destination = GetNodeById(message.To);
@@ -1472,7 +1470,7 @@ internal sealed class InteractionEnvironment
             }
             else
             {
-                destination.RawNode.Step(message);
+                destination.RawNode.StepFixture(message);
             }
         }
 
@@ -1519,12 +1517,12 @@ internal sealed class InteractionEnvironment
         }
 
         ConfState configuration;
-        ByteString update;
+        RaftBytes update;
         switch (entry.Type)
         {
             case EntryType.EntryConfChange:
                 ProtocolConfChange v1 =
-                    ProtocolConfChange.Parser.ParseFrom(
+                    ProtobufFixtureEncoding.DecodeLegacy(
                         entry.Data);
                 configuration =
                     node.RawNode.ApplyConfChange(v1);
@@ -1532,7 +1530,7 @@ internal sealed class InteractionEnvironment
                 break;
             case EntryType.EntryConfChangeV2:
                 ConfChangeV2 v2 =
-                    ConfChangeV2.Parser.ParseFrom(
+                    ProtobufFixtureEncoding.DecodeV2(
                         entry.Data);
                 configuration =
                     node.RawNode.ApplyConfChange(v2);
@@ -1547,14 +1545,14 @@ internal sealed class InteractionEnvironment
 
         byte[] data =
         [
-            .. previous.Data,
-            .. update,
+            .. previous.Data.Span,
+            .. update.Span,
         ];
         Snapshot snapshot =
             node.Storage.CreateSnapshot(
                 entry.Index,
                 configuration,
-                ByteString.CopyFrom(data));
+                RaftBytes.CopyFrom(data));
         node.SetApplicationSnapshot(snapshot);
         EntryApplied?.Invoke(node.Config.Id, entry.Clone());
     }

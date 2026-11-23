@@ -14,8 +14,8 @@ internal sealed record InteractionNodeOptions
 
     internal ulong SnapshotIndex { get; init; }
 
-    internal ByteString SnapshotData { get; init; } =
-        ByteString.Empty;
+    internal RaftBytes SnapshotData { get; init; } =
+        RaftBytes.Empty;
 
     internal int ElectionTick { get; init; } = 3;
 

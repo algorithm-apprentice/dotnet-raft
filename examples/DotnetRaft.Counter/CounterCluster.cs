@@ -7,7 +7,7 @@ namespace DotnetRaft.Examples.Counter;
 internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace)
 {
     private const int MaxRounds = 100;
-    private readonly Queue<Message> _delivery = new();
+    private readonly Queue<Action> _delivery = new();
 
     internal IReadOnlyList<CounterReplica> Replicas { get; } = CreateReplicas(asyncStorage, trace);
 
@@ -53,7 +53,7 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
 
     private bool TryRunAppendWorker(CounterReplica replica)
     {
-        if (!replica.AppendWork.TryDequeue(out Message? request))
+        if (!replica.AppendWork.TryDequeue(out StorageAppendWork? request))
         {
             return false;
         }
@@ -64,30 +64,28 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
 
     private bool TryRunApplyWorker(CounterReplica replica)
     {
-        if (!replica.ApplyWork.TryDequeue(out Message? request))
+        if (!replica.ApplyWork.TryDequeue(out StorageApplyWork? request))
         {
             return false;
         }
 
         ApplyCommittedEntries(replica, request.Entries);
-        EnqueueDelivery(request.Responses);
+        _delivery.Enqueue(() =>
+        {
+            replica.Node.CompleteStorageWork(request.Completion);
+            trace?.AcknowledgedApplication(replica, request.Entries, nameof(MessageType.MsgStorageApplyResp));
+        });
         return true;
     }
 
     private bool TryDeliverMessage()
     {
-        if (!_delivery.TryDequeue(out Message? message))
+        if (!_delivery.TryDequeue(out Action? deliver))
         {
             return false;
         }
 
-        CounterReplica destination = Replicas.Single(replica => replica.Id == message.To);
-        destination.Node.Step(message);
-        if (message.Type == MessageType.MsgStorageApplyResp)
-        {
-            trace?.AcknowledgedApplication(destination, message.Entries, nameof(MessageType.MsgStorageApplyResp));
-        }
-
+        deliver();
         return true;
     }
 
@@ -96,7 +94,7 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
         Ready ready = replica.Node.Ready();
         if (asyncStorage)
         {
-            DispatchAsyncStorageWork(replica, ready.Messages);
+            DispatchAsyncStorageWork(replica, ready);
             return;
         }
 
@@ -130,25 +128,20 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
         trace?.AcknowledgedApplication(replica, ready.CommittedEntries, nameof(RawNode.Advance));
     }
 
-    private void DispatchAsyncStorageWork(CounterReplica replica, IEnumerable<Message> messages)
+    private void DispatchAsyncStorageWork(CounterReplica replica, Ready ready)
     {
         // In this protocol, the Ready fields are diagnostic. Workers complete
         // the messages below and release responses; they never call Advance.
-        foreach (Message message in messages)
+        EnqueueDelivery(ready.Messages);
+        if (ready.AppendWork is { } append)
         {
-            switch (message.To)
-            {
-                case RaftLocalMessageTargets.AppendThread:
-                    replica.AppendWork.Enqueue(message);
-                    break;
-                case RaftLocalMessageTargets.ApplyThread:
-                    replica.ApplyWork.Enqueue(message);
-                    trace?.ReceivedApplicationWork(replica.Id, message.Entries, nameof(MessageType.MsgStorageApply));
-                    break;
-                default:
-                    _delivery.Enqueue(message);
-                    break;
-            }
+            replica.AppendWork.Enqueue(append);
+        }
+
+        if (ready.ApplyWork is { } apply)
+        {
+            replica.ApplyWork.Enqueue(apply);
+            trace?.ReceivedApplicationWork(replica.Id, apply.Entries, nameof(MessageType.MsgStorageApply));
         }
     }
 
@@ -156,18 +149,19 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
     {
         foreach (Message message in messages)
         {
-            _delivery.Enqueue(message);
+            _delivery.Enqueue(() => Replicas.Single(replica => replica.Id == message.To).Node.Step(message));
         }
     }
 
-    private void ProcessAppend(CounterReplica replica, Message request)
+    private void ProcessAppend(CounterReplica replica, StorageAppendWork request)
     {
-        RaftHardState? hardState = StorageAppendHardState.Read(request);
-        replica.Persist(request.Snapshot, request.Entries, hardState);
-        trace?.Stored(replica.Id, request.Entries, hardState, nameof(MessageType.MsgStorageAppend));
-        // The same FIFO simulates local acknowledgements and remote replies.
-        // The pump steps the node in each response's own To, not request.From.
-        EnqueueDelivery(request.Responses);
+        replica.Persist(request.Snapshot, request.Entries, request.HardState);
+        trace?.Stored(replica.Id, request.Entries, request.HardState, nameof(MessageType.MsgStorageAppend));
+        EnqueueDelivery(request.MessagesAfterPersist);
+        if (request.Completion is { } completion)
+        {
+            _delivery.Enqueue(() => replica.Node.CompleteStorageWork(completion));
+        }
     }
 
     private static CounterReplica[] CreateReplicas(bool asyncStorage, CounterWriteTrace? trace)

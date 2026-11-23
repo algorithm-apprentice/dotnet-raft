@@ -43,6 +43,7 @@ cat > "$temp/NuGet.Config" <<EOF
   <packageSourceMapping>
     <packageSource key="candidate">
       <package pattern="DotnetRaft" />
+      <package pattern="DotnetRaft.Protobuf" />
       <package pattern="DotnetRaft.Sqlite" />
     </packageSource>
     <packageSource key="nuget.org">
@@ -64,7 +65,7 @@ cat > "$consumer/Consumer.csproj" <<'EOF'
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="DotnetRaft.Sqlite" Version="2.0.0" />
+    <PackageReference Include="DotnetRaft.Sqlite" Version="3.0.0" />
   </ItemGroup>
 </Project>
 EOF
@@ -128,8 +129,8 @@ dotnet restore "$consumer/Consumer.csproj" \
   --configfile "$temp/NuGet.Config" \
   --no-cache
 
-for package in dotnetraft dotnetraft.sqlite; do
-  metadata="$packages/$package/2.0.0/.nupkg.metadata"
+for package in dotnetraft dotnetraft.protobuf dotnetraft.sqlite; do
+  metadata="$packages/$package/3.0.0/.nupkg.metadata"
   test -f "$metadata"
   resolved_source="$(
     sed -n 's/.*"source"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$metadata"
@@ -144,4 +145,4 @@ dotnet run --project "$consumer/Consumer.csproj" \
   -c Release \
   --no-restore
 
-echo "consumer verified DotnetRaft.Sqlite 2.0.0"
+echo "consumer verified DotnetRaft.Sqlite 3.0.0"

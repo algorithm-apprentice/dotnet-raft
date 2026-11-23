@@ -5,8 +5,6 @@ using DotnetRaft.Core;
 using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 
-using Google.Protobuf;
-
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
 namespace DotnetRaft;
@@ -130,7 +128,7 @@ public sealed partial class RawNode
                 MessageType.MsgProp);
             proposal.Entries.Add(new Entry
             {
-                Data = ByteString.CopyFrom(owned),
+                Data = RaftBytes.CopyFrom(owned),
             });
             _core.Step(proposal);
         });
@@ -206,10 +204,7 @@ public sealed partial class RawNode
             if (MessageClassifier.IsStorageResponse(owned.Type)
                 || RaftMessageTargets.IsLocal(owned.From))
             {
-                ValidateStorageResponse(owned);
-                Activate();
-                StepStorageResponseCore(owned);
-                return;
+                throw new InvalidOperationException("Storage completions cannot be stepped as peer messages.");
             }
 
             if (MessageClassifier.IsLocal(owned.Type))
@@ -228,6 +223,42 @@ public sealed partial class RawNode
             _core.StepPeerMessage(owned, _activate);
         });
     }
+
+    /// <summary>Acknowledges local storage effects that have actually been published.</summary>
+    public void CompleteStorageWork(StorageCompletion completion)
+    {
+        Execute(() =>
+        {
+            ArgumentNullException.ThrowIfNull(completion);
+            if (!_core.AsyncStorageWrites)
+            {
+                throw new NotSupportedException("Storage completions require asynchronous storage writes.");
+            }
+
+            completion.Claim(this);
+            Activate();
+            try
+            {
+                _core.TraceStorageCompletion(completion);
+                completion.ApplyTo(_core);
+            }
+            catch (Exception exception)
+            {
+                Fault(exception);
+                throw;
+            }
+        });
+    }
+
+    // Deterministic fixtures can still inject malformed local frames to
+    // exercise the rejection and owner-loop fault boundaries.
+    internal void StepFixtureStorageResponse(Message message) => Execute(() =>
+    {
+        NetworkMessageValidation.ValidateType(message);
+        ValidateStorageResponse(message);
+        Activate();
+        StepStorageResponseCore(message.Clone());
+    });
 
     // The owner already serializes this query. Do not materialize diagnostics.
     internal bool HasPeerProgress(ulong id) => _core.Tracker.Contains(id);
@@ -325,7 +356,7 @@ public sealed partial class RawNode
                 MessageType.MsgReadIndex);
             request.Entries.Add(new Entry
             {
-                Data = ByteString.CopyFrom(owned),
+                Data = RaftBytes.CopyFrom(owned),
             });
             _core.Step(request);
         });
@@ -520,13 +551,11 @@ public sealed partial class RawNode
         ReadState[] readStates =
             _core.PeekReadStates();
 
-        var exposedMessages = new List<Message>(
-            immediateMessages.Length
-            + afterAppendMessages.Length
-            + 2);
+        var exposedMessages = new List<Message>(immediateMessages.Length + afterAppendMessages.Length);
         exposedMessages.AddRange(immediateMessages);
         Message[] selfMessages;
-        var syntheticMessages = new List<Message>(2);
+        StorageAppendWork? appendWork = null;
+        StorageApplyWork? applyWork = null;
         if (asyncStorageWrites)
         {
             selfMessages = [];
@@ -536,23 +565,26 @@ public sealed partial class RawNode
                     snapshot,
                     afterAppendMessages))
             {
-                Message append =
-                    CreateStorageAppendMessage(
+                appendWork =
+                    CreateStorageAppendWork(
                         emittedHardState,
                         unstableEntries,
                         snapshot,
                         afterAppendMessages);
-                exposedMessages.Add(append);
-                syntheticMessages.Add(append);
+                if (_core.TracingEnabled)
+                {
+                    _core.TraceSyntheticMessageSent(appendWork.DescribeWork());
+                }
             }
 
             if (committedEntries.Length > 0)
             {
-                Message apply =
-                    CreateStorageApplyMessage(
-                        committedEntries);
-                exposedMessages.Add(apply);
-                syntheticMessages.Add(apply);
+                applyWork = new StorageApplyWork(_core.Id, committedEntries,
+                    new ApplyStorageCompletion(this, _core.Id, committedEntries));
+                if (_core.TracingEnabled)
+                {
+                    _core.TraceSyntheticMessageSent(applyWork.DescribeWork());
+                }
             }
         }
         else
@@ -571,16 +603,11 @@ public sealed partial class RawNode
             ];
         }
 
-        foreach (Message message in syntheticMessages)
-        {
-            _core.TraceSyntheticMessageSent(message);
-        }
-
         bool mustSync = MustSync(
             currentHardState,
             _previousHardState,
             unstableEntries.Length);
-        ulong appliedEncodedSize = EntrySizing.EncodedSize(committedEntries);
+        ulong appliedEncodedSize = EntrySizing.EncodedSize(_core.Log.Format, committedEntries);
         Ready ready = DotnetRaft.Ready.FromDetachedWork(
             emittedSoftState,
             emittedHardState,
@@ -589,7 +616,9 @@ public sealed partial class RawNode
             snapshot,
             committedEntries,
             [.. exposedMessages],
-            mustSync);
+            mustSync,
+            appendWork,
+            applyWork);
         ReadyAcknowledgement? acknowledgement =
             asyncStorageWrites
                 ? null
@@ -715,96 +744,17 @@ public sealed partial class RawNode
             || afterAppendMessages.Length > 0;
     }
 
-    private Message CreateStorageAppendMessage(
+    private StorageAppendWork CreateStorageAppendWork(
         RaftHardState? hardState,
         Entry[] entries,
         Snapshot? snapshot,
         Message[] afterAppendMessages)
     {
-        var request = new Message
-        {
-            From = _core.Id,
-            To =
-                RaftLocalMessageTargets.AppendThread,
-            Type = MessageType.MsgStorageAppend,
-        };
-        request.Entries.Add(
-            entries.Select(entry => entry.Clone()));
-        if (hardState is { } state)
-        {
-            StorageAppendHardState.Write(request, state);
-        }
-
-        if (snapshot is not null)
-        {
-            request.Snapshot = snapshot.Clone();
-        }
-
-        request.Responses.Add(
-            afterAppendMessages.Select(
-                message => message.Clone()));
-        if (_core.Log.HasUnstableEntries
-            || snapshot is not null)
-        {
-            request.Responses.Add(
-                CreateStorageAppendResponse(snapshot));
-        }
-
-        return request;
-    }
-
-    private Message CreateStorageAppendResponse(
-        Snapshot? snapshot)
-    {
-        var response = new Message
-        {
-            From =
-                RaftLocalMessageTargets.AppendThread,
-            To = _core.Id,
-            Type =
-                MessageType.MsgStorageAppendResp,
-            Term = _core.Term,
-        };
-        if (_core.Log.HasUnstableEntries)
-        {
-            EntryId last = _core.Log.LastEntryId;
-            response.Index = last.Index;
-            response.LogTerm = last.Term;
-        }
-
-        if (snapshot is not null)
-        {
-            response.Snapshot = snapshot.Clone();
-        }
-
-        return response;
-    }
-
-    private Message CreateStorageApplyMessage(
-        Entry[] entries)
-    {
-        var request = new Message
-        {
-            From = _core.Id,
-            To = RaftLocalMessageTargets.ApplyThread,
-            Type = MessageType.MsgStorageApply,
-            Term = 0,
-        };
-        request.Entries.Add(
-            entries.Select(entry => entry.Clone()));
-
-        var response = new Message
-        {
-            From = RaftLocalMessageTargets.ApplyThread,
-            To = _core.Id,
-            Type =
-                MessageType.MsgStorageApplyResp,
-            Term = 0,
-        };
-        response.Entries.Add(
-            entries.Select(entry => entry.Clone()));
-        request.Responses.Add(response);
-        return request;
+        EntryId? stableEntry = _core.Log.HasUnstableEntries ? _core.Log.LastEntryId : null;
+        StorageCompletion? completion = stableEntry is not null || snapshot is not null
+            ? new AppendStorageCompletion(this, _core.Id, _core.Term, stableEntry, snapshot)
+            : null;
+        return new StorageAppendWork(_core.Id, hardState, entries, snapshot, afterAppendMessages, completion);
     }
 
     private ConfState ApplyConfChangeCore(

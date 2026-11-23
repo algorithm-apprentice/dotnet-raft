@@ -1,12 +1,9 @@
 using System.Buffers.Binary;
 
 using DotnetRaft.Core;
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
-
-using Google.Protobuf;
-
-using ProtocolHardState = DotnetRaft.Protocol.HardState;
 
 namespace DotnetRaft.Storage.Sqlite;
 
@@ -49,9 +46,9 @@ internal static class SqliteStorageCodec
         try
         {
             return NormalizeSnapshot(
-                Snapshot.Parser.ParseFrom(payload));
+                ProtobufRaftCodec.DecodeSnapshot(payload));
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw Unknown(
                 $"{description} is not a valid snapshot.",
@@ -65,25 +62,14 @@ internal static class SqliteStorageCodec
     {
         try
         {
-            ProtocolHardState state = ProtocolHardState.Parser.ParseFrom(payload);
-            return new RaftHardState(state.Term, state.Vote, state.Commit);
+            return ProtobufRaftCodec.DecodeHardState(payload);
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw Unknown(
                 $"{description} is not a valid hard state.",
                 exception);
         }
-    }
-
-    internal static byte[] EncodeHardState(RaftHardState state)
-    {
-        return new ProtocolHardState
-        {
-            Term = state.Term,
-            Vote = state.Vote,
-            Commit = state.Commit,
-        }.ToByteArray();
     }
 
     internal static Entry ParseEntry(
@@ -95,9 +81,9 @@ internal static class SqliteStorageCodec
         Entry entry;
         try
         {
-            entry = Entry.Parser.ParseFrom(payload);
+            entry = ProtobufRaftCodec.DecodeEntry(payload);
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw Unknown(
                 $"{description} is not a valid entry.",
@@ -110,41 +96,13 @@ internal static class SqliteStorageCodec
 
     internal static ulong ReadEntryTerm(byte[] payload, ulong expectedIndex, ulong expectedTerm, string description)
     {
-        // Use the protobuf reader for framing, including unknown fields. Do not
-        // construct the command ByteString merely to check the entry identity.
-        using var input = new CodedInputStream(payload);
-        const uint termTag = Entry.TermFieldNumber << 3;
-        const uint indexTag = Entry.IndexFieldNumber << 3;
-        const uint typeTag = Entry.TypeFieldNumber << 3;
-        const uint dataTag = (Entry.DataFieldNumber << 3) | (uint)WireFormat.WireType.LengthDelimited;
-        ulong index = 0;
-        ulong term = 0;
+        ulong index;
+        ulong term;
         try
         {
-            for (uint tag = input.ReadTag(); tag != 0; tag = input.ReadTag())
-            {
-                switch (tag)
-                {
-                    case termTag:
-                        term = input.ReadUInt64();
-                        break;
-                    case indexTag:
-                        index = input.ReadUInt64();
-                        break;
-                    case typeTag:
-                        _ = input.ReadEnum();
-                        break;
-                    case dataTag:
-                        input.SkipLastField();
-                        break;
-                    default:
-                        // Keep the generated parser's behavior for unusual wire
-                        // forms (including groups and invalid wire types).
-                        return ParseEntry(payload, expectedIndex, expectedTerm, description).Term;
-                }
-            }
+            (index, term) = ProtobufRaftCodec.ReadEntryPosition(payload);
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw Unknown($"{description} is not a valid entry.", exception);
         }

@@ -1,8 +1,6 @@
 using DotnetRaft.Core;
 using DotnetRaft.Protocol;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Storage;
 
 public sealed class MemoryStorage : IStorage
@@ -11,6 +9,14 @@ public sealed class MemoryStorage : IStorage
     private readonly List<Entry> _entries = [new Entry()];
     private RaftHardState? _hardState;
     private Snapshot _snapshot = ProtocolDefaults.EnsureSnapshot(new Snapshot());
+
+    public MemoryStorage(IRaftLogFormat logFormat)
+    {
+        ArgumentNullException.ThrowIfNull(logFormat);
+        LogFormat = logFormat;
+    }
+
+    public IRaftLogFormat LogFormat { get; }
 
     public StorageState GetInitialState()
     {
@@ -67,7 +73,7 @@ public sealed class MemoryStorage : IStorage
                 entries[index] = _entries[start + index].Clone();
             }
 
-            return EntrySizing.LimitSize(entries, maxSize);
+            return EntrySizing.LimitSize(LogFormat, entries, maxSize);
         }
     }
 
@@ -158,9 +164,8 @@ public sealed class MemoryStorage : IStorage
     public Snapshot CreateSnapshot(
         ulong index,
         ConfState? confState,
-        ByteString data)
+        RaftBytes data)
     {
-        ArgumentNullException.ThrowIfNull(data);
 
         lock (_gate)
         {

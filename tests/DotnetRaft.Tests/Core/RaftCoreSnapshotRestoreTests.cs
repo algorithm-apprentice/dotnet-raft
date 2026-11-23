@@ -60,9 +60,9 @@ public sealed class RaftCoreSnapshotRestoreTests
         Assert.Equal(1UL, response.To);
         Assert.Equal(5UL, response.Index);
 
-        message.Snapshot.Metadata.Index = 99;
+        message.Snapshot!.Metadata.Index = 99;
         message.Snapshot.Metadata.ConfState.Voters.Clear();
-        message.Snapshot.Data = ByteString.CopyFromUtf8("changed");
+        message.Snapshot.Data = RaftBytes.CopyFromUtf8("changed");
         Snapshot pending = core.Log.GetNextUnstableSnapshot()!;
         Assert.Equal(5UL, pending.Metadata.Index);
         Assert.Equal([1UL, 2UL, 3UL], pending.Metadata.ConfState.Voters);
@@ -521,20 +521,20 @@ public sealed class RaftCoreSnapshotRestoreTests
         string? data = null)
     {
         var state = new ConfState();
-        state.Voters.Add(voters ?? [1UL, 2UL]);
+        state.Voters.AddRange(voters ?? [1UL, 2UL]);
         if (outgoingVoters is not null)
         {
-            state.VotersOutgoing.Add(outgoingVoters);
+            state.VotersOutgoing.AddRange(outgoingVoters);
         }
 
         if (learners is not null)
         {
-            state.Learners.Add(learners);
+            state.Learners.AddRange(learners);
         }
 
         if (learnersNext is not null)
         {
-            state.LearnersNext.Add(learnersNext);
+            state.LearnersNext.AddRange(learnersNext);
         }
 
         return SnapshotAt(
@@ -553,8 +553,8 @@ public sealed class RaftCoreSnapshotRestoreTests
         return new Snapshot
         {
             Data = data is null
-                ? ByteString.Empty
-                : ByteString.CopyFromUtf8(data),
+                ? RaftBytes.Empty
+                : RaftBytes.CopyFromUtf8(data),
             Metadata = new SnapshotMetadata
             {
                 Index = index,

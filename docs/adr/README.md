@@ -16,7 +16,8 @@ alternatives it rejected. Find the current mechanism in the
 | [0004: Teach with a bounded gRPC example](0004-educational-grpc-kv-cluster.md) | Why the envelope carries Raft bytes, and why transport and application endpoints are separate. Its original volatile storage choice was superseded by 0007. |
 | [0007: Recover the KV host across two stores](0007-durable-fixed-membership-kv-host.md) | Why application effects, progress, and retry identity survive together. |
 | [0002: Define the compatibility surface](0002-release-and-compatibility-contract.md) | Why binary, wire, host behavior, and persisted data must be checked together. |
-| [0010: Separate domain state from its encoding](0010-separate-state-from-serialization.md) | Why business and consensus values should not be generated messages, and what must remain compatible. |
+| [0010: Separate domain state from its encoding](0010-separate-state-from-serialization.md) | First migration of hard state, ReadIndex results, and KV commands. |
+| [0011: Complete domain and codec separation](0011-complete-domain-codec-separation.md) | How the core remains codec-independent and how typed local work preserves completion ordering. |
 
 An ADR is not a backlog. When changing a decision, explain what problem
 changed and keep the earlier context traceable in Git. See

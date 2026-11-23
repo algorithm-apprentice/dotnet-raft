@@ -33,8 +33,7 @@ public sealed class RaftCoreMembershipAutoLeaveTests
         Assert.Equal(5UL, core.PendingConfigurationIndex);
         Entry exit = Assert.Single(core.Log.GetEntries(5));
         Assert.Equal(EntryType.EntryConfChangeV2, exit.Type);
-        Assert.Equal(new ConfChangeV2(), ConfChangeV2.Parser
-            .ParseFrom(exit.Data));
+        Assert.Equal(new ConfChangeV2(), ProtobufFixtureEncoding.DecodeV2(exit.Data));
 
         core.AppliedTo(3, 0);
         core.AppliedTo(4, 0);
@@ -79,8 +78,7 @@ public sealed class RaftCoreMembershipAutoLeaveTests
 
         Entry exit = Assert.Single(core.Log.GetEntries(4));
         Assert.Equal(EntryType.EntryConfChangeV2, exit.Type);
-        Assert.Equal(new ConfChangeV2(), ConfChangeV2.Parser
-            .ParseFrom(exit.Data));
+        Assert.Equal(new ConfChangeV2(), ProtobufFixtureEncoding.DecodeV2(exit.Data));
         Assert.Equal(4UL, core.PendingConfigurationIndex);
     }
 
@@ -130,8 +128,7 @@ public sealed class RaftCoreMembershipAutoLeaveTests
         if (autoLeave)
         {
             Entry exit = Assert.Single(exits);
-            Assert.Equal(new ConfChangeV2(), ConfChangeV2.Parser
-                .ParseFrom(exit.Data));
+            Assert.Equal(new ConfChangeV2(), ProtobufFixtureEncoding.DecodeV2(exit.Data));
             Assert.Equal(7UL, core.PendingConfigurationIndex);
         }
         else
@@ -186,7 +183,7 @@ public sealed class RaftCoreMembershipAutoLeaveTests
             To = 1,
             Type = MessageType.MsgProp,
         };
-        message.Entries.Add(entries);
+        message.Entries.AddRange(entries);
         return message;
     }
 
@@ -204,7 +201,7 @@ public sealed class RaftCoreMembershipAutoLeaveTests
     {
         return new Entry
         {
-            Data = ByteString.CopyFromUtf8(data),
+            Data = RaftBytes.CopyFromUtf8(data),
         };
     }
 

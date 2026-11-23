@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetRaft.Sqlite.CrashHarn
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetRaft.Counter", "examples\DotnetRaft.Counter\DotnetRaft.Counter.csproj", "{E57C1AB3-FFD3-4D96-AB06-C723F682641F}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DotnetRaft.Protobuf", "src\DotnetRaft.Protobuf\DotnetRaft.Protobuf.csproj", "{D15C4F58-1C4F-4DE2-9E10-3C375F883899}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -163,6 +165,18 @@ Global
 		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|x64.Build.0 = Release|Any CPU
 		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|x86.ActiveCfg = Release|Any CPU
 		{E57C1AB3-FFD3-4D96-AB06-C723F682641F}.Release|x86.Build.0 = Release|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Debug|x64.Build.0 = Debug|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Debug|x86.Build.0 = Debug|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Release|x64.ActiveCfg = Release|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Release|x64.Build.0 = Release|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Release|x86.ActiveCfg = Release|Any CPU
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -178,5 +192,6 @@ Global
 		{A3AAC16A-3ED2-4E08-918A-D0424C632856} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{0E173837-5D44-40A2-BD01-C95235F36237} = {07C2787E-EAC7-C090-1BA3-A61EC2A24D84}
 		{E57C1AB3-FFD3-4D96-AB06-C723F682641F} = {B36A84DF-456D-A817-6EDD-3EC3E7F6E11F}
+		{D15C4F58-1C4F-4DE2-9E10-3C375F883899} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

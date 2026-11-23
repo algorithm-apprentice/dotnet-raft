@@ -20,8 +20,8 @@ internal static class AsyncStorageTestSupport
         IRaftTraceSink? traceSink = null)
     {
         var state = new ConfState();
-        state.Voters.Add(voters ?? [1UL]);
-        var storage = new MemoryStorage();
+        state.Voters.AddRange(voters ?? [1UL]);
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(
             new Snapshot
             {
@@ -53,7 +53,7 @@ internal static class AsyncStorageTestSupport
         MessageType type)
     {
         return Assert.Single(
-            ready.Messages,
+            ready.FixtureMessages(),
             message => message.Type == type);
     }
 
@@ -94,59 +94,55 @@ internal static class AsyncStorageTestSupport
         ];
     }
 
-    internal static async Task ProcessReadyAsync(
+    internal static Task ProcessReadyAsync(
         DotnetRawNode node,
         MemoryStorage storage,
         Ready ready)
     {
         // This helper has no network; only use it for singleton batches.
-        foreach (Message message in ready.Messages)
+        if (ready.AppendWork is { } append)
         {
-            switch (message.Type)
+            if (append.Snapshot is { } snapshot && snapshot.Metadata.Index != 0)
             {
-                case MessageType.MsgStorageAppend:
-                    foreach (Message response in
-                             PersistAppend(
-                                 storage,
-                                 message))
-                    {
-                        Assert.Equal(message.From, response.To);
-                        node.Step(response);
-                    }
+                storage.ApplySnapshot(snapshot);
+            }
 
-                    break;
-                case MessageType.MsgStorageApply:
-                    foreach (Entry entry in message.Entries)
-                    {
-                        switch (entry.Type)
-                        {
-                            case EntryType.EntryConfChange:
-                                node.ApplyConfChange(
-                                    ProtocolConfChange.Parser
-                                        .ParseFrom(
-                                            entry.Data));
-                                break;
-                            case EntryType.EntryConfChangeV2:
-                                node.ApplyConfChange(
-                                    ConfChangeV2.Parser
-                                        .ParseFrom(
-                                            entry.Data));
-                                break;
-                        }
-                    }
+            storage.Append(append.Entries);
+            if (append.HardState is { } state)
+            {
+                storage.SetHardState(state);
+            }
 
-                    foreach (Message response in
-                             message.Responses)
-                    {
-                        Assert.Equal(message.From, response.To);
-                        node.Step(response);
-                    }
+            foreach (Message response in append.MessagesAfterPersist)
+            {
+                Assert.Equal(node.GetBasicStatus().Id, response.To);
+                node.Step(response);
+            }
 
-                    break;
+            if (append.Completion is { } complete)
+            {
+                node.CompleteStorageWork(complete);
             }
         }
 
-        await Task.CompletedTask;
+        if (ready.ApplyWork is { } apply)
+        {
+            foreach (Entry entry in apply.Entries)
+            {
+                if (entry.Type == EntryType.EntryConfChange)
+                {
+                    node.ApplyConfChange(ProtobufFixtureEncoding.DecodeLegacy(entry.Data));
+                }
+                else if (entry.Type == EntryType.EntryConfChangeV2)
+                {
+                    node.ApplyConfChange(ProtobufFixtureEncoding.DecodeV2(entry.Data));
+                }
+            }
+
+            node.CompleteStorageWork(apply.Completion);
+        }
+
+        return Task.CompletedTask;
     }
 
     internal static async Task BecomeLeaderAsync(

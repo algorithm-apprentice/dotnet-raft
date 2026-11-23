@@ -4,14 +4,12 @@ using DotnetRaft.Quorum;
 using DotnetRaft.Read;
 using DotnetRaft.Tracker;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Core;
 
 internal sealed partial class RaftCore
 {
-    private static readonly ByteString CampaignTransferContext =
-        ByteString.CopyFromUtf8("CampaignTransfer");
+    private static readonly RaftBytes CampaignTransferContext =
+        RaftBytes.CopyFromUtf8("CampaignTransfer");
 
     internal void TickElection()
     {
@@ -153,7 +151,7 @@ internal sealed partial class RaftCore
     {
         MessageType voteType;
         ulong campaignTerm;
-        ByteString context;
+        RaftBytes context;
         switch (campaignType)
         {
             case CampaignType.PreElection:
@@ -166,13 +164,13 @@ internal sealed partial class RaftCore
                 BecomePreCandidate();
                 voteType = MessageType.MsgPreVote;
                 campaignTerm = Term + 1;
-                context = ByteString.Empty;
+                context = RaftBytes.Empty;
                 break;
             case CampaignType.Election:
                 BecomeCandidate();
                 voteType = MessageType.MsgVote;
                 campaignTerm = Term;
-                context = ByteString.Empty;
+                context = RaftBytes.Empty;
                 break;
             case CampaignType.Transfer:
                 BecomeCandidate();

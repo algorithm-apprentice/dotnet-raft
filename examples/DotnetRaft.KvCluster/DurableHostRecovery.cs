@@ -1,8 +1,6 @@
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage.Sqlite;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Examples.KvCluster;
 
 public sealed record DurableRecoveryState(
@@ -208,7 +206,7 @@ public static class DurableHostRecovery
             throw new InvalidDataException($"HardState does not cover application index {applied}.");
         }
 
-        ByteString snapshotData = application.CreateSnapshotData();
+        RaftBytes snapshotData = application.CreateSnapshotData();
         if (snapshotData.Length <= maximumSnapshotBytes)
         {
             PublishSnapshotAndCompact(raftStorage, applied, application.ConfState, snapshotData);
@@ -219,7 +217,7 @@ public static class DurableHostRecovery
     }
 
     internal static bool PublishSnapshotAndCompact(
-        SqliteStorage raftStorage, ulong applied, ConfState configuration, ByteString snapshotData)
+        SqliteStorage raftStorage, ulong applied, ConfState configuration, RaftBytes snapshotData)
     {
         // Shared by live operation and recovery. The snapshot must be durable
         // first; a crash between these writes leaves a snapshot plus extra log,

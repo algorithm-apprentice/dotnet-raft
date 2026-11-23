@@ -21,7 +21,9 @@ public sealed partial class ReleaseMetadataTests
 
         Assert.Equal("true", Value(document, "IsPackable"));
         Assert.Equal("DotnetRaft", Value(document, "PackageId"));
-        Assert.Equal("2.0.0", Value(document, "Version"));
+        Assert.Equal("3.0.0", Value(document, "Version"));
+        Assert.Empty(document.Descendants("PackageReference"));
+        Assert.Empty(document.Descendants("ProjectReference"));
         Assert.Equal(
             "algorithm-apprentice",
             Value(document, "Authors"));
@@ -86,7 +88,7 @@ public sealed partial class ReleaseMetadataTests
         Assert.Equal(
             "DotnetRaft.Sqlite",
             Value(document, "PackageId"));
-        Assert.Equal("2.0.0", Value(document, "Version"));
+        Assert.Equal("3.0.0", Value(document, "Version"));
         Assert.Equal(
             "algorithm-apprentice",
             Value(document, "Authors"));
@@ -152,6 +154,8 @@ public sealed partial class ReleaseMetadataTests
             "tools/DotnetRaft.ReleaseVerifier/DotnetRaft.ReleaseVerifier.csproj",
             "src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj",
             "src/DotnetRaft.Sqlite/README.md",
+            "src/DotnetRaft.Protobuf/DotnetRaft.Protobuf.csproj",
+            "src/DotnetRaft.Protobuf/README.md",
         ];
         foreach (string relative in paths)
         {

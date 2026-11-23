@@ -121,7 +121,7 @@ public sealed class RaftCoreMembershipInteractionTests
                     leader.Core.PendingConfigurationIndex);
         Assert.Equal(
             new ConfChangeV2(),
-            ConfChangeV2.Parser.ParseFrom(exit.Data));
+            ProtobufFixtureEncoding.DecodeV2(exit.Data));
         Assert.Equal(
             exit.Index,
             leader.Core.PendingConfigurationIndex);
@@ -169,7 +169,7 @@ public sealed class RaftCoreMembershipInteractionTests
             1,
             new Entry
             {
-                Data = ByteString.CopyFromUtf8("trailing"),
+                Data = RaftBytes.CopyFromUtf8("trailing"),
             }));
 
         network.DrainWhere(message =>
@@ -376,7 +376,7 @@ public sealed class RaftCoreMembershipInteractionTests
                 return false;
             }
 
-            ulong encodedSize = EntrySizing.EncodedSize(entries);
+            ulong encodedSize = EntrySizing.EncodedSize(ProtobufRaftCodec.Instance, entries);
             core.Log.AcceptApplying(
                 entries[^1].Index,
                 encodedSize,
@@ -387,12 +387,12 @@ public sealed class RaftCoreMembershipInteractionTests
                 {
                     case EntryType.EntryConfChange:
                         core.ApplyConfigurationChange(
-                            ProtocolConfChange.Parser.ParseFrom(
+                            ProtobufFixtureEncoding.DecodeLegacy(
                                 entry.Data));
                         break;
                     case EntryType.EntryConfChangeV2:
                         core.ApplyConfigurationChange(
-                            ConfChangeV2.Parser.ParseFrom(
+                            ProtobufFixtureEncoding.DecodeV2(
                                 entry.Data));
                         break;
                 }

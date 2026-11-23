@@ -123,7 +123,7 @@ public sealed class ReadIndexCoordinatorTests
                 index: 9,
                 localId: 1));
         local.Entries[0].Data =
-            ByteString.CopyFromUtf8("changed");
+            RaftBytes.CopyFromUtf8("changed");
         ReadState state = Assert.Single(
             coordinator.PeekReadStates());
         Assert.Equal(9UL, state.Index);
@@ -140,7 +140,7 @@ public sealed class ReadIndexCoordinatorTests
                 index: 10,
                 localId: 1));
         remote.Entries[0].Data =
-            ByteString.CopyFromUtf8("changed");
+            RaftBytes.CopyFromUtf8("changed");
 
         Assert.Equal(0UL, response.From);
         Assert.Equal(2UL, response.To);
@@ -171,12 +171,12 @@ public sealed class ReadIndexCoordinatorTests
         var valid = invalid.Clone();
         valid.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8("response"),
+            Data = RaftBytes.CopyFromUtf8("response"),
         });
         Assert.True(
             coordinator.TryCompleteResponse(valid));
         valid.Entries[0].Data =
-            ByteString.CopyFromUtf8("changed");
+            RaftBytes.CopyFromUtf8("changed");
 
         Assert.Equal(
             "response",
@@ -247,7 +247,7 @@ public sealed class ReadIndexCoordinatorTests
         };
         message.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(context),
+            Data = RaftBytes.CopyFromUtf8(context),
         });
         return message;
     }

@@ -3,8 +3,6 @@ using System.Runtime.ExceptionServices;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage.Sqlite;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Examples.KvCluster;
 
 public sealed partial class RaftClusterHost
@@ -252,7 +250,7 @@ public sealed partial class RaftClusterHost
             return;
         }
 
-        ByteString snapshotData =
+        RaftBytes snapshotData =
             stateMachine.CreateSnapshotData();
         lastSnapshotAttemptIndex = applied;
         if (snapshotData.Length > MaximumPayloadBytes)
@@ -276,7 +274,7 @@ public sealed partial class RaftClusterHost
             && applied - lastSnapshotAttemptIndex < (ulong)options.SnapshotThresholdEntries);
     }
 
-    private void PublishSnapshot(ulong applied, ConfState configuration, ByteString snapshotData)
+    private void PublishSnapshot(ulong applied, ConfState configuration, RaftBytes snapshotData)
     {
         if (DurableHostRecovery.PublishSnapshotAndCompact(storage, applied, configuration, snapshotData))
         {

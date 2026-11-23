@@ -1,6 +1,5 @@
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
-
-using Google.Protobuf;
 
 using Microsoft.Data.Sqlite;
 
@@ -93,7 +92,7 @@ public sealed partial class SqliteKeyValueStateMachine
         insert.Parameters.AddWithValue("$schemaVersion", SchemaVersion);
         AddBlob(insert, "$nodeId", EncodeUInt64(NodeId));
         AddBlob(insert, "$physicalApplied", EncodeUInt64(0));
-        AddBlob(insert, "$confState", configuration.ToByteArray());
+        AddBlob(insert, "$confState", ProtobufRaftCodec.EncodeMembership(configuration));
         insert.ExecuteNonQuery();
     }
 
@@ -183,9 +182,9 @@ public sealed partial class SqliteKeyValueStateMachine
     {
         try
         {
-            return NormalizeConfState(ConfState.Parser.ParseFrom(reader.GetFieldValue<byte[]>(4)));
+            return NormalizeConfState(ProtobufRaftCodec.DecodeMembership(reader.GetFieldValue<byte[]>(4)));
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw new InvalidDataException("Application configuration is malformed.", exception);
         }

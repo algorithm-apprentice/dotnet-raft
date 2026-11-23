@@ -19,7 +19,7 @@ public sealed class RaftCoreReadIndexQuorumTests
     {
         RaftCore core = NewLeader(voters: [1, 2, 3]);
         core.Step(ReadRequest("periodic"));
-        ByteString initial = LatestHeartbeatContext(
+        RaftBytes initial = LatestHeartbeatContext(
             core.TakeMessages());
 
         core.TickLeader();
@@ -47,7 +47,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         core.Step(HeartbeatResponse(
             core,
             from: 99,
-            ByteString.CopyFrom([1])));
+            RaftBytes.CopyFrom([1])));
 
         Assert.Empty(core.TakeReadStates());
         Assert.Equal(1, core.GetReadOnlyPendingCountForTesting());
@@ -66,10 +66,10 @@ public sealed class RaftCoreReadIndexQuorumTests
         var progress = core.Tracker.Progress[2];
         progress.RecentActive = false;
         progress.AppendFlowPaused = true;
-        ByteString context = kind switch
+        RaftBytes context = kind switch
         {
-            "short" => ByteString.CopyFrom([1]),
-            "zero" => ByteString.CopyFrom(new byte[sizeof(ulong)]),
+            "short" => RaftBytes.CopyFrom([1]),
+            "zero" => RaftBytes.CopyFrom(new byte[sizeof(ulong)]),
             "future" => EncodePosition(2),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(kind),
@@ -97,7 +97,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             voters: [1, 2, 3],
             learners: [4]);
         core.Step(ReadRequest("learner"));
-        ByteString context = LatestHeartbeatContext(
+        RaftBytes context = LatestHeartbeatContext(
             core.TakeMessages());
 
         core.Step(HeartbeatResponse(
@@ -124,7 +124,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             voters: [1, 2, 3],
             outgoingVoters: [1, 4, 5]);
         core.Step(ReadRequest("joint"));
-        ByteString context = LatestHeartbeatContext(
+        RaftBytes context = LatestHeartbeatContext(
             core.TakeMessages());
 
         core.Step(HeartbeatResponse(
@@ -271,7 +271,7 @@ public sealed class RaftCoreReadIndexQuorumTests
             core,
             from: 2,
             index: core.Log.LastIndex));
-        ByteString context = LatestHeartbeatContext(
+        RaftBytes context = LatestHeartbeatContext(
             core.TakeMessages());
         core.Step(HeartbeatResponse(
             core,
@@ -292,7 +292,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         RaftCore core = NewLeader(voters: [1, 2, 3]);
         ulong oldTerm = core.Term;
         core.Step(ReadRequest("old"));
-        ByteString oldContext = LatestHeartbeatContext(
+        RaftBytes oldContext = LatestHeartbeatContext(
             core.TakeMessages());
 
         core.BecomeFollower(core.Term + 1, leaderId: 2);
@@ -309,7 +309,7 @@ public sealed class RaftCoreReadIndexQuorumTests
         core.TakeMessages();
 
         core.Step(ReadRequest("new"));
-        ByteString newContext = LatestHeartbeatContext(
+        RaftBytes newContext = LatestHeartbeatContext(
             core.TakeMessages());
         Assert.Equal(oldContext, newContext);
 
@@ -420,12 +420,12 @@ public sealed class RaftCoreReadIndexQuorumTests
         };
     }
 
-    private static ByteString EncodePosition(ulong position)
+    private static RaftBytes EncodePosition(ulong position)
     {
         var bytes = new byte[sizeof(ulong)];
         BinaryPrimitives.WriteUInt64LittleEndian(
             bytes,
             position);
-        return ByteString.CopyFrom(bytes);
+        return RaftBytes.CopyFrom(bytes);
     }
 }

@@ -47,7 +47,7 @@ This is why the fields `Message.Term` and `Message.LogTerm` are not redundant.
 For `MsgVote`, `Index`/`LogTerm` describe the candidate's last entry; for
 `MsgApp`, they describe the preceding entry. `EntryId` pairs an index and an
 entry term independently of the current role. Read the
-[`raft.proto`](../../src/DotnetRaft/Protocol/raft.proto) schema and
+[`raft.proto`](../../src/DotnetRaft.Protobuf/Protocol/raft.proto) schema and
 [`EntryId`](../../src/DotnetRaft/Core/EntryId.cs) together.
 
 ## Majority arithmetic, including the edge of a partition

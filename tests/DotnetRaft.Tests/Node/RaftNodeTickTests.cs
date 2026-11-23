@@ -244,7 +244,7 @@ public sealed class RaftNodeTickTests
                 Id = 1,
                 ElectionTick = 10,
                 HeartbeatTick = 1,
-                Storage = new MemoryStorage(),
+                Storage = new MemoryStorage(ProtobufRaftCodec.Instance),
                 TraceSink = trace,
                 Logger = logger,
             },

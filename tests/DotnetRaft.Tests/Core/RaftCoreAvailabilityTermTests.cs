@@ -102,7 +102,7 @@ public sealed class RaftCoreAvailabilityTermTests
             from: 3,
             term: 6);
         request.Context =
-            ByteString.CopyFromUtf8("CampaignTransfer");
+            RaftBytes.CopyFromUtf8("CampaignTransfer");
 
         core.Step(request);
 
@@ -228,7 +228,7 @@ public sealed class RaftCoreAvailabilityTermTests
             {
                 Assert.Equal(MessageType.MsgVote, request.Type);
                 Assert.Equal(
-                    ByteString.CopyFromUtf8("CampaignTransfer"),
+                    RaftBytes.CopyFromUtf8("CampaignTransfer"),
                     request.Context);
             });
         Message selfVote = Assert.Single(

@@ -1,9 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
-
-using Google.Protobuf;
 
 using Microsoft.Data.Sqlite;
 
@@ -18,15 +17,15 @@ public sealed partial class SqliteKeyValueStateMachine
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow,
     };
 
-    public ByteString CreateSnapshotData()
+    public RaftBytes CreateSnapshotData()
     {
         lock (gate)
         {
             ThrowIfDisposed();
             List<SnapshotValue> values = ReadSnapshotValues();
             List<SnapshotRequest> requests = ReadSnapshotRequests();
-            var snapshot = new ApplicationSnapshot(1, physicalApplied, confState.ToByteArray(), values, requests);
-            return ByteString.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(snapshot, SnapshotOptions));
+            var snapshot = new ApplicationSnapshot(1, physicalApplied, ProtobufRaftCodec.EncodeMembership(confState), values, requests);
+            return RaftBytes.CopyFrom(JsonSerializer.SerializeToUtf8Bytes(snapshot, SnapshotOptions));
         }
     }
 
@@ -60,9 +59,8 @@ public sealed partial class SqliteKeyValueStateMachine
         return requests;
     }
 
-    public void Restore(ulong index, ByteString data, ConfState configuration)
+    public void Restore(ulong index, RaftBytes data, ConfState configuration)
     {
-        ArgumentNullException.ThrowIfNull(data);
         ArgumentNullException.ThrowIfNull(configuration);
         ConfState expectedConfiguration = NormalizeConfState(configuration);
         ApplicationSnapshot snapshot = ReadValidatedSnapshot(index, data, expectedConfiguration);
@@ -74,7 +72,7 @@ public sealed partial class SqliteKeyValueStateMachine
         }
     }
 
-    private static ApplicationSnapshot ReadValidatedSnapshot(ulong index, ByteString data, ConfState configuration)
+    private static ApplicationSnapshot ReadValidatedSnapshot(ulong index, RaftBytes data, ConfState configuration)
     {
         ApplicationSnapshot snapshot = DecodeSnapshot(data);
         if (snapshot.PhysicalApplied != index)
@@ -98,9 +96,9 @@ public sealed partial class SqliteKeyValueStateMachine
     {
         try
         {
-            return NormalizeConfState(ConfState.Parser.ParseFrom(snapshot.ConfState));
+            return NormalizeConfState(ProtobufRaftCodec.DecodeMembership(snapshot.ConfState));
         }
-        catch (InvalidProtocolBufferException exception)
+        catch (InvalidDataException exception)
         {
             throw new InvalidDataException("Application snapshot configuration is malformed.", exception);
         }
@@ -156,7 +154,7 @@ public sealed partial class SqliteKeyValueStateMachine
         }
     }
 
-    private static ApplicationSnapshot DecodeSnapshot(ByteString data)
+    private static ApplicationSnapshot DecodeSnapshot(RaftBytes data)
     {
         ApplicationSnapshot snapshot;
         try

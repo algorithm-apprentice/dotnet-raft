@@ -37,13 +37,12 @@ public sealed class SqliteStorageRawNodeTests
                     ready.CommittedEntries);
             ConfState confState =
                 raw.ApplyConfChange(
-                    ProtocolConfChange.Parser
-                        .ParseFrom(
+                    ProtobufFixtureEncoding.DecodeLegacy(
                             configuration.Data));
             storage.CreateSnapshot(
                 configuration.Index,
                 confState,
-                ByteString.CopyFromUtf8(
+                RaftBytes.CopyFromUtf8(
                     "application"));
             storage.Compact(
                 configuration.Index);
@@ -113,11 +112,7 @@ public sealed class SqliteStorageRawNodeTests
                 });
             raw.Campaign();
             Ready ready = raw.Ready();
-            Message append = Assert.Single(
-                ready.Messages,
-                message =>
-                    message.Type
-                    == MessageType.MsgStorageAppend);
+            StorageAppendWork append = Assert.IsType<StorageAppendWork>(ready.AppendWork);
 
             storage.PersistStorageAppend(append);
         }
@@ -162,35 +157,23 @@ public sealed class SqliteStorageRawNodeTests
         incoming.Entries.Add(new Entry { Index = 1, Term = 1 });
         await node.StepAsync(incoming, guard.Token);
         Ready ready = await node.WaitForReadyAsync(guard.Token);
-        Message append = Assert.Single(ready.Messages);
-        Assert.Equal(MessageType.MsgStorageAppend, append.Type);
-        Assert.Collection(append.Responses,
-            response => Assert.Equal(leaderId, response.To),
-            response => Assert.Equal(localNodeId, response.To));
+        Assert.Empty(ready.Messages);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(ready.AppendWork);
+        Assert.Equal(leaderId, Assert.Single(append.MessagesAfterPersist).To);
 
         storage.PersistStorageAppend(append);
         Assert.Equal(1UL, storage.GetTerm(1));
         Assert.Equal(1UL, storage.GetHardState()?.Commit);
 
-        var sent = new List<Message>();
-        foreach (Message response in append.Responses)
-        {
-            if (response.To == localNodeId)
-            {
-                await node.StepAsync(response, guard.Token);
-            }
-            else
-            {
-                sent.Add(response);
-            }
-        }
-
-        Message outgoing = Assert.Single(sent);
+        Message outgoing = Assert.Single(append.MessagesAfterPersist);
         Assert.Equal(MessageType.MsgAppResp, outgoing.Type);
         Assert.Equal(1UL, outgoing.Index);
+        await node.CompleteStorageWorkAsync(Assert.IsAssignableFrom<StorageCompletion>(append.Completion), guard.Token);
         Ready afterAppend = await node.WaitForReadyAsync(guard.Token);
-        Message apply = Assert.Single(afterAppend.Messages);
-        Assert.Equal(MessageType.MsgStorageApply, apply.Type);
+        Assert.Empty(afterAppend.Messages);
+        StorageApplyWork apply = Assert.IsType<StorageApplyWork>(afterAppend.ApplyWork);
         Assert.Equal(1UL, Assert.Single(apply.Entries).Index);
+        await node.CompleteStorageWorkAsync(apply.Completion, guard.Token);
+        Assert.Equal(1UL, (await node.GetStatusAsync(guard.Token)).Basic.Applied);
     }
 }

@@ -483,7 +483,7 @@ public sealed class RaftCoreStateTests
         };
         request.Entries.Add(new Entry
         {
-            Data = Google.Protobuf.ByteString.CopyFromUtf8(context),
+            Data = DotnetRaft.Protocol.RaftBytes.CopyFromUtf8(context),
         });
         return request;
     }

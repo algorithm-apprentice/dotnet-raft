@@ -243,15 +243,15 @@ public sealed class RaftCoreReplicationInteractionTests
     {
         var storage = new CoreTestStorage();
         var state = new ConfState();
-        state.Voters.Add(voters);
+        state.Voters.AddRange(voters);
         if (learners is not null)
         {
-            state.Learners.Add(learners);
+            state.Learners.AddRange(learners);
         }
 
         storage.LogStorage.ApplySnapshot(new Snapshot
         {
-            Data = ByteString.CopyFromUtf8("state"),
+            Data = RaftBytes.CopyFromUtf8("state"),
             Metadata = new SnapshotMetadata
             {
                 Index = 5,
@@ -301,7 +301,7 @@ public sealed class RaftCoreReplicationInteractionTests
         {
             message.Entries.Add(new Entry
             {
-                Data = ByteString.CopyFromUtf8(data),
+                Data = RaftBytes.CopyFromUtf8(data),
             });
         }
 

@@ -16,13 +16,13 @@ internal static class RawNodeTestSupport
         IEnumerable<ulong>? learners = null)
     {
         var confState = new ConfState();
-        confState.Voters.Add(voters ?? [1UL]);
+        confState.Voters.AddRange(voters ?? [1UL]);
         if (learners is not null)
         {
-            confState.Learners.Add(learners);
+            confState.Learners.AddRange(learners);
         }
 
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(new Snapshot
         {
             Metadata = new SnapshotMetadata
@@ -35,7 +35,7 @@ internal static class RawNodeTestSupport
 
     internal static MemoryStorage CreateEmptyStorage()
     {
-        return new MemoryStorage();
+        return new MemoryStorage(ProtobufRaftCodec.Instance);
     }
 
     internal static RaftConfig CreateConfig(
@@ -231,8 +231,8 @@ internal static class RawNodeTestSupport
             Term = term,
             Type = type,
             Data = data is null
-                ? ByteString.Empty
-                : ByteString.CopyFromUtf8(data),
+                ? RaftBytes.Empty
+                : RaftBytes.CopyFromUtf8(data),
         };
     }
 }
@@ -240,6 +240,8 @@ internal static class RawNodeTestSupport
 internal sealed class FaultingStorage(
     MemoryStorage inner) : IStorage
 {
+    public IRaftLogFormat LogFormat => inner.LogFormat;
+
     internal bool ThrowOnGetTerm { get; set; }
 
     public StorageState GetInitialState()
@@ -302,11 +304,11 @@ internal sealed class OrderedApplicationHarness
         {
             EntryType.EntryConfChange =>
                 node.ApplyConfChange(
-                    ProtocolConfChange.Parser.ParseFrom(
+                    ProtobufFixtureEncoding.DecodeLegacy(
                         entry.Data)),
             EntryType.EntryConfChangeV2 =>
                 node.ApplyConfChange(
-                    ConfChangeV2.Parser.ParseFrom(entry.Data)),
+                    ProtobufFixtureEncoding.DecodeV2(entry.Data)),
             _ => throw new ArgumentException(
                 "Expected a configuration entry.",
                 nameof(entry)),
@@ -359,7 +361,7 @@ internal sealed class OrderedApplicationHarness
     internal Snapshot CreateSnapshot(
         MemoryStorage storage,
         ulong index,
-        ByteString data)
+        RaftBytes data)
     {
         if (index > PhysicalApplied)
         {

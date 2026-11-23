@@ -181,11 +181,11 @@ public sealed class RaftCoreReplicationTests
         };
         proposal.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8("first"),
+            Data = RaftBytes.CopyFromUtf8("first"),
         });
         proposal.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8("second"),
+            Data = RaftBytes.CopyFromUtf8("second"),
         });
         Message original = proposal.Clone();
 
@@ -221,7 +221,7 @@ public sealed class RaftCoreReplicationTests
                 message.Entries.Select(entry => entry.Index));
         });
 
-        proposal.Entries[0].Data = ByteString.CopyFromUtf8("changed");
+        proposal.Entries[0].Data = RaftBytes.CopyFromUtf8("changed");
         Assert.Equal(
             "first",
             core.Log.GetEntries(3, 1)[0].Data.ToStringUtf8());
@@ -263,7 +263,7 @@ public sealed class RaftCoreReplicationTests
         };
         proposal.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8("forward"),
+            Data = RaftBytes.CopyFromUtf8("forward"),
         });
         Message original = proposal.Clone();
 
@@ -685,7 +685,7 @@ public sealed class RaftCoreReplicationTests
         Message snapshot = Assert.Single(core.TakeMessages());
         Assert.Equal(MessageType.MsgSnap, snapshot.Type);
         Assert.Equal(2UL, snapshot.To);
-        Assert.Equal(5UL, snapshot.Snapshot.Metadata.Index);
+        Assert.Equal(5UL, snapshot.Snapshot!.Metadata.Index);
         Assert.Equal(ProgressState.Snapshot, remote.State);
         Assert.Equal(5UL, remote.PendingSnapshot);
     }
@@ -790,7 +790,7 @@ public sealed class RaftCoreReplicationTests
         };
         message.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(data),
+            Data = RaftBytes.CopyFromUtf8(data),
         });
         return message;
     }

@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Using Include="DotnetRaft.Protobuf" />
+    <Compile Include="../ProtobufFixtureEncoding.cs" Link="ProtobufFixtureEncoding.cs" />
   </ItemGroup>
 
   <ItemGroup>

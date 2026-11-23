@@ -9,7 +9,7 @@ It persists:
 - `HardState`;
 - retained snapshots and configuration;
 - prefix compaction; and
-- atomic synchronous `Ready` and asynchronous `MsgStorageAppend` batches.
+- atomic synchronous `Ready` and asynchronous `StorageAppendWork` batches.
 
 ## Install
 
@@ -68,7 +68,7 @@ retained snapshot; setting `RaftConfig.Applied` does not update it.
 
 Call `storage.PersistReady(ready)` at the persistence step of the
 [synchronous Ready loop](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/ready.md#synchronous-ready-loop).
-Call `storage.PersistStorageAppend(request)` in the
+Call `storage.PersistStorageAppend(appendWork)` in the
 [asynchronous append worker](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/ready.md#append-worker)
 instead when using asynchronous storage writes. Both methods publish snapshot,
 entries, and hard state in one `synchronous=FULL` transaction. Neither sends
@@ -79,8 +79,8 @@ index with `storage.AcknowledgeApplicationSnapshot(index)`. Do this before
 `Advance` in synchronous mode or before delivering the append responses in
 asynchronous mode, under the host's application barrier. Finish reconciliation
 before processing the next storage batch. In asynchronous mode, follow the
-linked worker protocol: step only responses addressed to the local node and
-send responses addressed to remote peers over the network.
+linked worker protocol: release `MessagesAfterPersist` in order, stepping
+self-addressed replies locally, and then return the typed receipt.
 
 `GetEntries` reads a bounded prefix. It includes a first entry even if it
 exceeds `maxSize` and stops at the budget boundary without decoding the rest

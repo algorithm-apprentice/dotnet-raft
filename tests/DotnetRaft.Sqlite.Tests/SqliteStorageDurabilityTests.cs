@@ -24,7 +24,7 @@ public sealed class SqliteStorageDurabilityTests
         using TemporaryStorageDirectory directory =
             CreateDirectory();
         var confState = new ConfState();
-        confState.Voters.Add([1, 2, 3]);
+        confState.Voters.AddRange([1, 2, 3]);
 
         using (SqliteStorage storage =
                CreateStorage(directory))
@@ -47,7 +47,7 @@ public sealed class SqliteStorageDurabilityTests
             storage.CreateSnapshot(
                 2,
                 confState,
-                ByteString.CopyFromUtf8("state"));
+                RaftBytes.CopyFromUtf8("state"));
             storage.Compact(2);
         }
 
@@ -101,7 +101,7 @@ public sealed class SqliteStorageDurabilityTests
         using TemporaryStorageDirectory directory =
             CreateDirectory();
         var confState = new ConfState();
-        confState.Voters.Add([1, 2, 3]);
+        confState.Voters.AddRange([1, 2, 3]);
         var request = new Message
         {
             Type = MessageType.MsgStorageAppend,
@@ -117,7 +117,7 @@ public sealed class SqliteStorageDurabilityTests
                 confState,
                 "snapshot"),
         };
-        request.Entries.Add(
+        request.Entries.AddRange(
             Entries((5, 3), (6, 3)));
 
         using (SqliteStorage storage =
@@ -225,7 +225,7 @@ public sealed class SqliteStorageDurabilityTests
             Vote = 1,
             Commit = 5,
         };
-        commitPastLog.Entries.Add(
+        commitPastLog.Entries.AddRange(
             Entries((1, 2)));
         Assert.Throws<InvalidOperationException>(
             () => storage.PersistStorageAppend(
@@ -282,7 +282,7 @@ public sealed class SqliteStorageDurabilityTests
                 () => storage.CreateSnapshot(
                     4,
                     new ConfState(),
-                    ByteString.Empty));
+                    RaftBytes.Empty));
             Assert.Equal(
                 0UL,
                 storage.GetSnapshot()
@@ -297,7 +297,7 @@ public sealed class SqliteStorageDurabilityTests
             storage.CreateSnapshot(
                 4,
                 new ConfState(),
-                ByteString.Empty);
+                RaftBytes.Empty);
             Assert.Throws<InvalidOperationException>(
                 () => storage.SetHardState(
                     new RaftHardState
@@ -681,7 +681,7 @@ public sealed class SqliteStorageDurabilityTests
     public void TermLookupMatchesGeneratedEntryParser(string payload, ulong term)
     {
         byte[] bytes = Convert.FromHexString(payload);
-        Entry decoded = Entry.Parser.ParseFrom(bytes);
+        Entry decoded = ProtobufRaftCodec.DecodeEntry(bytes);
         Assert.Equal(2UL, decoded.Index);
         Assert.Equal(term, decoded.Term);
         using TemporaryStorageDirectory directory = CreateDirectory();
@@ -715,10 +715,10 @@ public sealed class SqliteStorageDurabilityTests
         using TemporaryStorageDirectory directory =
             CreateDirectory();
         var oldHardState = new RaftHardState { Term = 1, Vote = 1, Commit = 1 };
-        var oldEntry = new Entry { Index = 1, Term = 1, Data = ByteString.CopyFromUtf8("original") };
-        var newHardState = new HardState { Term = 3, Vote = 2, Commit = 3 };
+        var oldEntry = new Entry { Index = 1, Term = 1, Data = RaftBytes.CopyFromUtf8("original") };
+        var newHardState = new DotnetRaft.Protobuf.Wire.HardState { Term = 3, Vote = 2, Commit = 3 };
         Snapshot newSnapshot = SnapshotAt(2, 2, data: "new");
-        var newEntry = new Entry { Index = 3, Term = 3, Data = ByteString.CopyFromUtf8("suffix") };
+        var newEntry = new Entry { Index = 3, Term = 3, Data = RaftBytes.CopyFromUtf8("suffix") };
         Snapshot oldSnapshot;
         using (SqliteStorage storage =
                CreateStorage(directory))
@@ -726,7 +726,7 @@ public sealed class SqliteStorageDurabilityTests
             storage.SetHardState(new RaftHardState { Term = 1, Vote = 1 });
             storage.Append([oldEntry]);
             storage.SetHardState(oldHardState);
-            oldSnapshot = storage.CreateSnapshot(1, new ConfState { Voters = { 1 } }, ByteString.CopyFromUtf8("old app"));
+            oldSnapshot = storage.CreateSnapshot(1, new ConfState { Voters = { 1 } }, RaftBytes.CopyFromUtf8("old app"));
             string expectedFailure = failAfterMetadataUpdate ? "injected after metadata" : "injected before insert";
             SqliteConnection connection =
                 GetConnection(storage);
@@ -909,7 +909,7 @@ public sealed class SqliteStorageDurabilityTests
     {
         using TemporaryStorageDirectory directory =
             CreateDirectory();
-        var oldEntry = new Entry { Index = 1, Term = 3, Data = ByteString.CopyFromUtf8("original") };
+        var oldEntry = new Entry { Index = 1, Term = 3, Data = RaftBytes.CopyFromUtf8("original") };
         var oldState = new RaftHardState { Term = 3, Vote = 1, Commit = 1 };
         var oldVoters = new ConfState { Voters = { 1 } };
         using (SqliteStorage initialize = CreateStorage(directory))
@@ -917,7 +917,7 @@ public sealed class SqliteStorageDurabilityTests
             initialize.SetHardState(new RaftHardState { Term = 3, Vote = 1 });
             initialize.Append([oldEntry]);
             initialize.SetHardState(oldState);
-            initialize.CreateSnapshot(1, oldVoters, ByteString.CopyFromUtf8("old application snapshot"));
+            initialize.CreateSnapshot(1, oldVoters, RaftBytes.CopyFromUtf8("old application snapshot"));
         }
 
         await RunCrashHarness(
@@ -935,7 +935,7 @@ public sealed class SqliteStorageDurabilityTests
             Assert.Equal(3UL, reopened.GetFirstIndex());
             Assert.Equal(3UL, reopened.GetLastIndex());
             Assert.Equal(6UL, reopened.GetTerm(2));
-            Assert.Equal(new Entry { Index = 3, Term = 7, Data = ByteString.CopyFromUtf8("durable") },
+            Assert.Equal(new Entry { Index = 3, Term = 7, Data = RaftBytes.CopyFromUtf8("durable") },
                 Assert.Single(reopened.GetEntries(3, 4, ulong.MaxValue)));
             Assert.Equal(snapshot, reopened.GetSnapshot());
             Assert.Equal(snapshot, reopened.GetPendingApplicationSnapshot());
@@ -991,7 +991,7 @@ public sealed class SqliteStorageDurabilityTests
         storage.CreateSnapshot(
             1,
             new ConfState(),
-            ByteString.CopyFrom(
+            RaftBytes.CopyFrom(
                 new byte[8 * 1024 * 1024]));
 
         long before =
@@ -1024,7 +1024,7 @@ public sealed class SqliteStorageDurabilityTests
                     Id = 1,
                     ElectionTick = 10,
                     HeartbeatTick = 1,
-                    Storage = new MemoryStorage(),
+                    Storage = new MemoryStorage(ProtobufRaftCodec.Instance),
                 })
             .Ready();
         storage.Dispose();
@@ -1038,7 +1038,7 @@ public sealed class SqliteStorageDurabilityTests
 
     private static Ready BootstrapReady()
     {
-        var memory = new MemoryStorage();
+        var memory = new MemoryStorage(ProtobufRaftCodec.Instance);
         return RawNode.Start(
                 new RaftConfig
                 {

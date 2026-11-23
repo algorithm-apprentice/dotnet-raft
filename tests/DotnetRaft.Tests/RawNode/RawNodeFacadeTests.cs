@@ -127,7 +127,7 @@ public sealed class RawNodeFacadeTests
         Ready ready = node.Ready();
         Entry entry = Assert.Single(ready.Entries);
         Assert.Equal(
-            ByteString.CopyFromUtf8("original"),
+            RaftBytes.CopyFromUtf8("original"),
             entry.Data);
     }
 
@@ -156,7 +156,7 @@ public sealed class RawNodeFacadeTests
         var node = CreateNode(CreateStorage(voters: [1, 2]));
 
         Assert.ThrowsAny<InvalidOperationException>(
-            () => node.Step(new Message
+            () => node.StepFixture(new Message
             {
                 From = 2,
                 To = 1,
@@ -173,7 +173,7 @@ public sealed class RawNodeFacadeTests
         var node = CreateNode(CreateStorage(voters: [1, 2]));
 
         Assert.ThrowsAny<InvalidOperationException>(
-            () => node.Step(new Message
+            () => node.StepFixture(new Message
             {
                 From = sender,
                 To = 1,
@@ -204,7 +204,7 @@ public sealed class RawNodeFacadeTests
         var node = CreateNode(storage);
 
         Assert.Throws<InvalidOperationException>(
-            () => node.Step(new Message
+            () => node.StepFixture(new Message
             {
                 From = sender,
                 To = 1,
@@ -227,11 +227,11 @@ public sealed class RawNodeFacadeTests
             Term = 1,
             Type = MessageType.MsgHeartbeat,
             Commit = 0,
-            Context = ByteString.CopyFromUtf8("context"),
+            Context = RaftBytes.CopyFromUtf8("context"),
         };
         Message original = message.Clone();
 
-        node.Step(message);
+        node.StepFixture(message);
 
         Assert.Equal(original, message);
     }
@@ -241,7 +241,7 @@ public sealed class RawNodeFacadeTests
     {
         MemoryStorage storage = CreateStorage(voters: [1, 2]);
         var node = CreateNode(storage);
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
@@ -252,7 +252,7 @@ public sealed class RawNodeFacadeTests
         PersistAndAdvance(node, storage, heartbeat);
         Assert.Equal(2UL, node.Core.LeaderId);
 
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
@@ -302,7 +302,7 @@ public sealed class RawNodeFacadeTests
         node.TransferLeader(2);
         Ready transfer = node.Ready();
         Assert.Contains(
-            transfer.Messages,
+            transfer.FixtureMessages(),
             message =>
                 message.Type == MessageType.MsgTimeoutNow
                 && message.To == 2);

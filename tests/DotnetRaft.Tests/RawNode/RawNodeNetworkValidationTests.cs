@@ -13,6 +13,25 @@ namespace DotnetRaft.Tests.RawNode;
 
 public sealed class RawNodeNetworkValidationTests
 {
+    [Fact]
+    public void NullDomainEntryIsRejectedWithoutObservingItsHigherTerm()
+    {
+        var node = CreateNode(CreateStorage());
+        BasicStatus before = node.GetBasicStatus();
+        var malformed = new Message
+        {
+            Type = MessageType.MsgApp,
+            From = 2,
+            To = before.Id,
+            Term = before.Term + 1,
+            Entries = { null! },
+        };
+
+        Assert.Throws<ArgumentNullException>(() => node.Step(malformed));
+        Assert.Equal(before, node.GetBasicStatus());
+        Assert.False(node.HasReady());
+    }
+
     public static TheoryData<Message> InvalidMessages =>
         new()
         {
@@ -44,7 +63,7 @@ public sealed class RawNodeNetworkValidationTests
             Proposal(
                 new Entry
                 {
-                    Data = ByteString.CopyFrom(
+                    Data = RaftBytes.CopyFrom(
                         [1]),
                 },
                 term: 1),
@@ -59,7 +78,7 @@ public sealed class RawNodeNetworkValidationTests
             Proposal(new Entry
             {
                 Type = EntryType.EntryConfChangeV2,
-                Data = ByteString.CopyFrom(
+                Data = RaftBytes.CopyFrom(
                     [0xff]),
             }),
             Proposal(new Entry
@@ -100,7 +119,7 @@ public sealed class RawNodeNetworkValidationTests
             node.Core.Tracker.ToConfState();
 
         Assert.Throws<ArgumentException>(
-            () => node.Step(message));
+            () => node.StepFixture(message));
 
         Assert.Equal(
             before,
@@ -134,7 +153,7 @@ public sealed class RawNodeNetworkValidationTests
         };
         append.Entries.Add(new Entry { Index = 3, Term = entryTerm });
 
-        Assert.Throws<ArgumentException>("message", () => node.Step(append));
+        Assert.Throws<ArgumentException>("message", () => node.StepFixture(append));
         Assert.Equal(before, node.GetBasicStatus());
         Assert.False(node.HasReady());
     }
@@ -155,14 +174,14 @@ public sealed class RawNodeNetworkValidationTests
             To = 1,
             Term = 1,
         };
-        Entry entry = Entry.Parser.ParseFrom(new byte[] { 0x10, 0x01, 0x18, 0x01, 0x78, 0x01 });
+        Entry entry = ProtobufRaftCodec.DecodeEntry(new byte[] { 0x10, 0x01, 0x18, 0x01, 0x78, 0x01 });
         byte[] encoded = entry.ToByteArray();
         if (!empty)
         {
             append.Entries.Add(entry);
         }
 
-        node.Step(append);
+        node.StepFixture(append);
         entry.Index = 99;
         append.Entries.Clear();
         Assert.Equal(0UL, storage.GetLastIndex());
@@ -184,8 +203,8 @@ public sealed class RawNodeNetworkValidationTests
         Message response;
         if (asyncStorageWrites)
         {
-            Message work = Assert.Single(ready.Messages, message => message.Type == MessageType.MsgStorageAppend);
-            Assert.DoesNotContain(ready.Messages, message => message.Type == MessageType.MsgAppResp);
+            Message work = Assert.Single(ready.FixtureMessages(), message => message.Type == MessageType.MsgStorageAppend);
+            Assert.DoesNotContain(ready.FixtureMessages(), message => message.Type == MessageType.MsgAppResp);
             response = Assert.Single(work.Responses, message => message.Type == MessageType.MsgAppResp);
             if (!empty)
             {
@@ -195,12 +214,12 @@ public sealed class RawNodeNetworkValidationTests
             Message[] responses = AsyncStorage.AsyncStorageTestSupport.PersistAppend(storage, work);
             foreach (Message completion in responses.Where(message => message.To == 1))
             {
-                node.Step(completion);
+                node.StepFixture(completion);
             }
         }
         else
         {
-            response = Assert.Single(ready.Messages, message => message.Type == MessageType.MsgAppResp);
+            response = Assert.Single(ready.FixtureMessages(), message => message.Type == MessageType.MsgAppResp);
             PersistAndAdvance(node, storage, ready);
         }
 
@@ -219,7 +238,7 @@ public sealed class RawNodeNetworkValidationTests
     public void EmptyAppendAtMaximumIndexUsesNormalRejection()
     {
         var node = CreateNode(CreateStorage(voters: [1, 2]));
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             Type = MessageType.MsgApp,
             From = 2,
@@ -230,7 +249,7 @@ public sealed class RawNodeNetworkValidationTests
 
         Ready ready = node.Ready();
         Assert.Empty(ready.Entries);
-        Message response = Assert.Single(ready.Messages, message => message.Type == MessageType.MsgAppResp);
+        Message response = Assert.Single(ready.FixtureMessages(), message => message.Type == MessageType.MsgAppResp);
         Assert.True(response.Reject);
         Assert.Equal(ulong.MaxValue, response.Index);
     }
@@ -249,7 +268,7 @@ public sealed class RawNodeNetworkValidationTests
         Message append = AppendWithGap();
         append.Term = term;
 
-        Assert.Throws<ArgumentException>("message", () => node.Step(append));
+        Assert.Throws<ArgumentException>("message", () => node.StepFixture(append));
         Assert.Equal(before, node.GetBasicStatus());
         Assert.False(node.HasReady());
     }
@@ -258,7 +277,7 @@ public sealed class RawNodeNetworkValidationTests
     public void RejectedPeerMessageDoesNotConsumeBootstrapEligibility()
     {
         var node = CreateNode(CreateEmptyStorage());
-        Assert.Throws<ArgumentException>(() => node.Step(AppendWithGap()));
+        Assert.Throws<ArgumentException>(() => node.StepFixture(AppendWithGap()));
 
         node.Bootstrap([new Peer(1)]);
 
@@ -283,7 +302,7 @@ public sealed class RawNodeNetworkValidationTests
         progress.AppendFlowPaused = true;
 
         Assert.Throws<ArgumentException>(
-            () => node.Step(new Message
+            () => node.StepFixture(new Message
             {
                 From = 2,
                 To = 1,
@@ -292,14 +311,14 @@ public sealed class RawNodeNetworkValidationTests
                 Index = lastIndex + 1,
             }));
         Assert.Throws<ArgumentException>(
-            () => node.Step(new Message
+            () => node.StepFixture(new Message
             {
                 From = 2,
                 To = 1,
                 Term = node.Core.Term,
                 Type =
                     MessageType.MsgHeartbeatResp,
-                Context = ByteString.CopyFrom(
+                Context = RaftBytes.CopyFrom(
                     [1]),
             }));
 
@@ -325,7 +344,7 @@ public sealed class RawNodeNetworkValidationTests
         BecomeTwoVoterLeader(node, storage);
         node.ReadIndex("read"u8);
         Ready request = node.Ready();
-        Message heartbeat = Assert.Single(request.Messages, message => message.Type == MessageType.MsgHeartbeat);
+        Message heartbeat = Assert.Single(request.FixtureMessages(), message => message.Type == MessageType.MsgHeartbeat);
         Assert.Empty(request.ReadStates);
         PersistAndAdvance(node, storage, request);
         var invalid = new byte[sizeof(ulong)];
@@ -336,21 +355,21 @@ public sealed class RawNodeNetworkValidationTests
             From = 2,
             To = 1,
             Term = heartbeat.Term,
-            Context = ByteString.CopyFrom(invalid),
+            Context = RaftBytes.CopyFrom(invalid),
         };
 
         BasicStatus before = node.GetBasicStatus();
         var progress = node.Core.Tracker.Progress[2];
         progress.RecentActive = false;
         progress.AppendFlowPaused = true;
-        Assert.Throws<ArgumentException>("context", () => node.Step(response));
+        Assert.Throws<ArgumentException>("context", () => node.StepFixture(response));
         Assert.Equal(before, node.GetBasicStatus());
         Assert.False(node.HasReady());
         Assert.False(progress.RecentActive);
         Assert.True(progress.AppendFlowPaused);
 
         response.Context = heartbeat.Context;
-        node.Step(response);
+        node.StepFixture(response);
         ReadState read = Assert.Single(node.Ready().ReadStates);
         Assert.True(read.RequestContext.Span.SequenceEqual("read"u8));
         Assert.Equal(before.Commit, read.Index);
@@ -372,7 +391,7 @@ public sealed class RawNodeNetworkValidationTests
             storage);
         Assert.Equal(2UL, node.Core.Term);
 
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
@@ -380,14 +399,14 @@ public sealed class RawNodeNetworkValidationTests
             Type = MessageType.MsgAppResp,
             Index = ulong.MaxValue,
         });
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             From = 2,
             To = 1,
             Term = 1,
             Type =
                 MessageType.MsgHeartbeatResp,
-            Context = ByteString.CopyFrom(
+            Context = RaftBytes.CopyFrom(
                 [1]),
         });
 
@@ -405,13 +424,13 @@ public sealed class RawNodeNetworkValidationTests
         BecomeTwoVoterLeader(node, storage);
         ulong nextTerm = node.GetBasicStatus().Term + 1;
 
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             Type = MessageType.MsgHeartbeatResp,
             From = 2,
             To = 1,
             Term = nextTerm,
-            Context = ByteString.CopyFrom([1]),
+            Context = RaftBytes.CopyFrom([1]),
         });
 
         BasicStatus status = node.GetBasicStatus();
@@ -441,14 +460,14 @@ public sealed class RawNodeNetworkValidationTests
 
         node.ReadIndex("read"u8);
         Ready request = node.Ready();
-        Message heartbeat = Assert.Single(request.Messages, message => message.Type == MessageType.MsgHeartbeat);
+        Message heartbeat = Assert.Single(request.FixtureMessages(), message => message.Type == MessageType.MsgHeartbeat);
         Assert.Empty(request.ReadStates);
         if (!asyncStorageWrites)
         {
             PersistAndAdvance(node, cluster.Nodes[0].Storage, request);
         }
 
-        node.Step(new Message
+        node.StepFixture(new Message
         {
             Type = MessageType.MsgHeartbeatResp,
             From = heartbeat.To,
@@ -469,9 +488,9 @@ public sealed class RawNodeNetworkValidationTests
         BecomeTwoVoterLeader(node, storage);
 
         Message read = ReadIndex(term: 0);
-        node.Step(read);
+        node.StepFixture(read);
         Ready request = node.Ready();
-        Message heartbeat = Assert.Single(request.Messages, message => message.Type == MessageType.MsgHeartbeat);
+        Message heartbeat = Assert.Single(request.FixtureMessages(), message => message.Type == MessageType.MsgHeartbeat);
         PersistAndAdvance(node, storage, request);
         node.Core.Tracker.Progress[2].BecomeProbe();
 
@@ -484,10 +503,10 @@ public sealed class RawNodeNetworkValidationTests
             Context = heartbeat.Context,
         };
 
-        node.Step(response);
+        node.StepFixture(response);
 
         Ready ready = node.Ready();
-        Assert.Collection(ready.Messages,
+        Assert.Collection(ready.FixtureMessages(),
             append => Assert.Equal(MessageType.MsgApp, append.Type),
             reply =>
             {
@@ -511,10 +530,10 @@ public sealed class RawNodeNetworkValidationTests
         BasicStatus before =
             node.GetBasicStatus();
 
-        node.Step(Heartbeat(
+        node.StepFixture(Heartbeat(
             commit: ulong.MaxValue,
             term: 1));
-        node.Step(SnapshotAt(
+        node.StepFixture(SnapshotAt(
             ulong.MaxValue));
 
         Assert.Equal(
@@ -539,7 +558,7 @@ public sealed class RawNodeNetworkValidationTests
             SnapshotAt(ulong.MaxValue);
         snapshot.Term = node.Core.Term;
 
-        node.Step(snapshot);
+        node.StepFixture(snapshot);
 
         Assert.Equal(
             before,
@@ -570,7 +589,7 @@ public sealed class RawNodeNetworkValidationTests
         ConfState configuration =
             node.Core.Tracker.ToConfState();
 
-        node.Step(
+        node.StepFixture(
             SnapshotWithReservedMember());
 
         Assert.Equal(
@@ -604,14 +623,14 @@ public sealed class RawNodeNetworkValidationTests
         };
         Message incoming = SnapshotAt(1);
         incoming.Term = 3;
-        incoming.Snapshot.Metadata.ConfState.Voters.Add(3);
+        incoming.Snapshot!.Metadata.ConfState.Voters.Add(3);
         if (matches)
         {
             // No configuration is consumed when the local prefix already matches.
             incoming.Snapshot.Metadata.ConfState.Voters.Add(RaftLocalMessageTargets.AppendThread);
         }
 
-        node.Step(incoming);
+        node.StepFixture(incoming);
         incoming.Snapshot.Metadata.ConfState.Voters.Clear();
 
         Assert.Equal(1, reads);
@@ -694,7 +713,7 @@ public sealed class RawNodeNetworkValidationTests
         };
         message.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFrom(
+            Data = RaftBytes.CopyFrom(
                 [1]),
         });
         return message;
@@ -719,7 +738,7 @@ public sealed class RawNodeNetworkValidationTests
         ulong index)
     {
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
         return new Message
         {
             From = 2,
@@ -742,7 +761,7 @@ public sealed class RawNodeNetworkValidationTests
         SnapshotWithReservedMember()
     {
         var message = SnapshotAt(1);
-        message.Snapshot.Metadata.ConfState
+        message.Snapshot!.Metadata.ConfState
             .Voters.Add(
                 RaftLocalMessageTargets
                     .AppendThread);

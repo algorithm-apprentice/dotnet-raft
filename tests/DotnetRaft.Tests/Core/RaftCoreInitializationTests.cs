@@ -310,12 +310,12 @@ public sealed class RaftCoreInitializationTests
         var state = new ConfState();
         if (voters is not null)
         {
-            state.Voters.Add(voters);
+            state.Voters.AddRange(voters);
         }
 
         if (learners is not null)
         {
-            state.Learners.Add(learners);
+            state.Learners.AddRange(learners);
         }
 
         return state;

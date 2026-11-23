@@ -31,7 +31,7 @@ public sealed class RaftCoreLeadershipTransferCampaignTests
             Assert.Equal(MessageType.MsgVote, request.Type);
             Assert.Equal(6UL, request.Term);
             Assert.Equal(
-                ByteString.CopyFromUtf8("CampaignTransfer"),
+                RaftBytes.CopyFromUtf8("CampaignTransfer"),
                 request.Context);
         });
         Message selfVote = Assert.Single(
@@ -98,7 +98,7 @@ public sealed class RaftCoreLeadershipTransferCampaignTests
                     MessageType.MsgVote,
                     request.Type);
                 Assert.Equal(
-                    ByteString.CopyFromUtf8(
+                    RaftBytes.CopyFromUtf8(
                         "CampaignTransfer"),
                     request.Context);
             });

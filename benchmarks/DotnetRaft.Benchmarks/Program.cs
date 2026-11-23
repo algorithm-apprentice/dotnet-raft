@@ -4,10 +4,9 @@ using System.Text.Json;
 
 using DotnetRaft;
 using DotnetRaft.Diagnostics;
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
-
-using Google.Protobuf;
 
 const ulong FnvOffset = 14695981039346656037UL;
 const ulong FnvPrime = 1099511628211UL;
@@ -200,7 +199,7 @@ static (
         {
             Term = 7,
             Index = 42,
-            Data = ByteString.CopyFrom(
+            Data = RaftBytes.CopyFrom(
                 Enumerable.Range(0, 32)
                     .Select(index => (byte)index)
                     .ToArray()),
@@ -211,7 +210,7 @@ static (
             Term = 7,
             Index = 43,
             Data =
-                ByteString.CopyFromUtf8(
+                RaftBytes.CopyFromUtf8(
                     "payload-two"),
         });
 
@@ -239,7 +238,7 @@ static (RawNode Node, MemoryStorage Storage)
 {
     var state = new ConfState();
     state.Voters.Add(1);
-    var storage = new MemoryStorage();
+    var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
     storage.ApplySnapshot(
         new Snapshot
         {

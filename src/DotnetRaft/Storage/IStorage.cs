@@ -6,6 +6,9 @@ namespace DotnetRaft.Storage;
 /// <remarks>The host publishes Ready writes separately. Reads must see a coherent view even with asynchronous storage writes.</remarks>
 public interface IStorage
 {
+    /// <summary>The adapter that defines durable entry sizes and membership payloads.</summary>
+    IRaftLogFormat LogFormat { get; }
+
     StorageState GetInitialState();
 
     /// <summary>Reads a contiguous prefix of the half-open range, limited by encoded entry bytes.</summary>

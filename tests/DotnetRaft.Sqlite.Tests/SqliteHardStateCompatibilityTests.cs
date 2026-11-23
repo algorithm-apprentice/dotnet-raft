@@ -6,7 +6,7 @@ using Microsoft.Data.Sqlite;
 
 using static DotnetRaft.Sqlite.Tests.SqliteStorageTestSupport;
 
-using ProtocolHardState = DotnetRaft.Protocol.HardState;
+using ProtocolHardState = DotnetRaft.Protobuf.Wire.HardState;
 
 namespace DotnetRaft.Sqlite.Tests;
 

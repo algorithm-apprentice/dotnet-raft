@@ -33,13 +33,29 @@ public sealed class PublicApiApprovalTests
     }
 
     [Fact]
+    public void ProtobufAdapterPublicApiMatchesApproval()
+    {
+        string actual = PublicApiFormatter.Generate(typeof(ProtobufRaftCodec).Assembly);
+        VerifyOrRewrite("ProtobufPublicApi.approved.txt", actual);
+    }
+
+    [Fact]
+    public void ConsensusDoesNotDependOnAStorageOrSerializationAssembly()
+    {
+        Assert.DoesNotContain(typeof(RaftConfig).Assembly.GetReferencedAssemblies(), reference =>
+            reference.Name is "Google.Protobuf" or "DotnetRaft.Protobuf" or "DotnetRaft.Sqlite");
+        Assert.DoesNotContain(typeof(ProtobufRaftCodec).Assembly.GetExportedTypes(), type =>
+            type.Namespace == "DotnetRaft.Protobuf.Wire");
+    }
+
+    [Fact]
     public void ProtobufWireApiMatchesApproval()
     {
         const string fileName =
             "ProtocolDescriptor.approved.txt";
         string actual =
             ProtocolDescriptorFormatter.Generate(
-                RaftReflection.Descriptor);
+                DotnetRaft.Protobuf.Wire.RaftReflection.Descriptor);
         VerifyOrRewrite(fileName, actual);
     }
 
@@ -130,7 +146,7 @@ internal static class PublicApiFormatter
             AppendType(builder, type);
         }
 
-        return builder.ToString();
+        return builder.ToString().TrimEnd('\n') + "\n";
     }
 
     internal static string FormatMethodForTesting(

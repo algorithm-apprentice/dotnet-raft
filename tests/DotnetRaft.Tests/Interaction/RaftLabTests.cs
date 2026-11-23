@@ -34,7 +34,7 @@ public sealed class RaftLabTests
         cluster.Stabilize();
         Assert.Equal(prefix, cluster.Nodes[0].RawNode.GetBasicStatus().Commit);
         Assert.Equal(prefix, oracle.AppliedThrough(1));
-        Assert.Equal(ByteString.CopyFromUtf8("minority/"),
+        Assert.Equal(RaftBytes.CopyFromUtf8("minority/"),
             Assert.Single(cluster.Nodes[0].Storage.GetEntries(prefix + 1, prefix + 2, ulong.MaxValue)).Data);
 
         int newLeader = minorityCount;

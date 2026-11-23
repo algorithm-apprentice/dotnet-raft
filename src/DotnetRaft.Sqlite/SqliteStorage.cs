@@ -1,8 +1,7 @@
 using DotnetRaft.Core;
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
-
-using Google.Protobuf;
 
 using Microsoft.Data.Sqlite;
 
@@ -10,6 +9,8 @@ namespace DotnetRaft.Storage.Sqlite;
 
 public sealed class SqliteStorage : IStorage, IDisposable
 {
+    public IRaftLogFormat LogFormat => ProtobufRaftCodec.Instance;
+
     private static readonly object
         OwnershipGate = new();
     private static readonly HashSet<string>
@@ -311,21 +312,33 @@ public sealed class SqliteStorage : IStorage, IDisposable
                     validateCommitBounds: true));
     }
 
+    public void PersistStorageAppend(StorageAppendWork work)
+    {
+        ArgumentNullException.ThrowIfNull(work);
+        PersistStorageAppendBatch(work.Snapshot, work.Entries, work.HardState);
+    }
+
+    /// <summary>Reads a legacy local envelope at the storage adapter boundary.</summary>
     public void PersistStorageAppend(Message request)
     {
         ArgumentNullException.ThrowIfNull(request);
         Message owned = request.Clone();
         RaftHardState? hardState = ValidateStorageAppend(owned);
+        PersistStorageAppendBatch(owned.Snapshot, owned.Entries, hardState);
+    }
+
+    private void PersistStorageAppendBatch(Snapshot? incoming, IEnumerable<Entry> work, RaftHardState? hardState)
+    {
         Snapshot? snapshot =
-            owned.Snapshot is null
+            incoming is null
                 ? null
                 : SqliteStorageCodec
                     .NormalizeSnapshot(
-                        owned.Snapshot);
+                        incoming);
         List<Entry> entries =
             SqliteStorageCodec
                 .CloneAndValidateEntries(
-                    owned.Entries);
+                    work);
         ExecuteWrite(
             "persist storage append",
             metadata =>
@@ -449,9 +462,8 @@ public sealed class SqliteStorage : IStorage, IDisposable
     public Snapshot CreateSnapshot(
         ulong index,
         ConfState? confState,
-        ByteString data)
+        RaftBytes data)
     {
-        ArgumentNullException.ThrowIfNull(data);
         ConfState? ownedConf =
             confState?.Clone();
         Snapshot? result = null;
@@ -777,7 +789,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
             AddBlob(
                 insert,
                 "$snapshot",
-                snapshot.ToByteArray());
+                ProtobufRaftCodec.EncodeSnapshot(snapshot));
             AddBlob(
                 insert,
                 "$zero",
@@ -810,7 +822,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
             AddBlob(
                 entry,
                 "$payload",
-                new Entry().ToByteArray());
+                ProtobufRaftCodec.EncodeEntry(new Entry()));
             entry.ExecuteNonQuery();
         }
 
@@ -1334,7 +1346,7 @@ public sealed class SqliteStorage : IStorage, IDisposable
         AddBlob(
             command,
             "$payload",
-            entry.ToByteArray());
+            ProtobufRaftCodec.EncodeEntry(entry));
         command.ExecuteNonQuery();
     }
 
@@ -1479,14 +1491,14 @@ public sealed class SqliteStorage : IStorage, IDisposable
             command,
             "$hardState",
             hardStateChanged && metadata.HardState is { } state
-                ? SqliteStorageCodec.EncodeHardState(state)
+                ? ProtobufRaftCodec.EncodeHardState(state)
                 : null);
         if (snapshotChanged)
         {
             AddBlob(
                 command,
                 "$snapshot",
-                metadata.Snapshot.ToByteArray());
+                ProtobufRaftCodec.EncodeSnapshot(metadata.Snapshot));
         }
         AddBlob(
             command,

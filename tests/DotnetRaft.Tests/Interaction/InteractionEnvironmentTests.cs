@@ -44,7 +44,7 @@ public sealed class InteractionEnvironmentTests
     public void ReadyProcessingPersistsAndAppliesInOrder()
     {
         var environment = CreateSingleton(
-            ByteString.CopyFromUtf8("seed"));
+            RaftBytes.CopyFromUtf8("seed"));
         environment.Campaign(0);
         environment.Stabilize();
 
@@ -59,7 +59,7 @@ public sealed class InteractionEnvironmentTests
         Assert.Equal(4UL, application.Metadata.Index);
         Assert.Equal(1UL, application.Metadata.Term);
         Assert.Equal(
-            ByteString.CopyFromUtf8("seedvalue"),
+            RaftBytes.CopyFromUtf8("seedvalue"),
             application.Data);
         Assert.Equal(
             [1UL],
@@ -102,7 +102,7 @@ public sealed class InteractionEnvironmentTests
                 .GetApplicationSnapshot();
         Assert.Equal(6UL, application.Metadata.Index);
         Assert.Equal(
-            ByteString.CopyFromUtf8("abc"),
+            RaftBytes.CopyFromUtf8("abc"),
             application.Data);
     }
 
@@ -529,7 +529,7 @@ public sealed class InteractionEnvironmentTests
     }
 
     private static InteractionEnvironment CreateSingleton(
-        ByteString? data = null)
+        RaftBytes? data = null)
     {
         var environment = new InteractionEnvironment();
         environment.AddNodes(
@@ -538,7 +538,7 @@ public sealed class InteractionEnvironmentTests
             {
                 Voters = [1],
                 SnapshotIndex = 2,
-                SnapshotData = data ?? ByteString.Empty,
+                SnapshotData = data ?? RaftBytes.Empty,
             });
         return environment;
     }

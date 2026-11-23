@@ -1,6 +1,6 @@
 # Install from a checkout
 
-Both packages target `net10.0`. Version `2.0.0` is packed and verified by CI,
+The packages target `net10.0`. Version `3.0.0` is packed and verified by CI,
 but is not published to NuGet.org. These commands install a local build; to
 just run the project, use the [examples](../../examples/README.md) instead.
 
@@ -12,6 +12,7 @@ repository root:
 ```bash
 dotnet restore DotnetRaft.sln
 dotnet pack src/DotnetRaft/DotnetRaft.csproj -c Release --no-restore
+dotnet pack src/DotnetRaft.Protobuf/DotnetRaft.Protobuf.csproj -c Release --no-restore
 dotnet pack src/DotnetRaft.Sqlite/DotnetRaft.Sqlite.csproj -c Release --no-restore
 ```
 
@@ -28,16 +29,20 @@ absolute path to the checkout:
 ```bash
 dotnet nuget add source /absolute/path/to/dotnet-raft/artifacts/package \
   --name dotnet-raft-local --configfile nuget.config
-dotnet add package DotnetRaft --version 2.0.0
+dotnet add package DotnetRaft.Protobuf --version 3.0.0
 ```
+
+The codec package brings in the consensus package. Construct `MemoryStorage`
+with `ProtobufRaftCodec.Instance` to use the existing log encoding, or reference
+only `DotnetRaft` if you supply your own `IRaftLogFormat`.
 
 For durable SQLite Raft storage, also install:
 
 ```bash
-dotnet add package DotnetRaft.Sqlite --version 2.0.0
+dotnet add package DotnetRaft.Sqlite --version 3.0.0
 ```
 
-NuGet may reuse `2.0.0` after a rebuild. When testing fresh package contents,
+NuGet may reuse `3.0.0` after a rebuild. When testing fresh package contents,
 set `NUGET_PACKAGES` to a new directory before restoring the consumer.
 
 Continue with [choosing a node API and storage protocol](README.md). For SQLite

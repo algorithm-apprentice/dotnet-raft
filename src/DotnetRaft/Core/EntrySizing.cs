@@ -4,7 +4,7 @@ namespace DotnetRaft.Core;
 
 internal static class EntrySizing
 {
-    public static ulong EncodedSize(IEnumerable<Entry> entries)
+    public static ulong EncodedSize(IRaftLogFormat format, IEnumerable<Entry> entries)
     {
         ArgumentNullException.ThrowIfNull(entries);
 
@@ -12,7 +12,7 @@ internal static class EntrySizing
         foreach (var entry in entries)
         {
             ArgumentNullException.ThrowIfNull(entry);
-            size = checked(size + (ulong)entry.CalculateSize());
+            size = checked(size + format.MeasureEntry(entry));
         }
 
         return size;
@@ -37,7 +37,7 @@ internal static class EntrySizing
         return size;
     }
 
-    public static IReadOnlyList<Entry> LimitSize(IReadOnlyList<Entry> entries, ulong maxSize)
+    public static IReadOnlyList<Entry> LimitSize(IRaftLogFormat format, IReadOnlyList<Entry> entries, ulong maxSize)
     {
         ArgumentNullException.ThrowIfNull(entries);
         if (entries.Count == 0)
@@ -45,12 +45,12 @@ internal static class EntrySizing
             return [];
         }
 
-        var size = (ulong)entries[0].CalculateSize();
+        ulong size = format.MeasureEntry(entries[0]);
         var limit = 1;
 
         while (limit < entries.Count)
         {
-            var nextSize = (ulong)entries[limit].CalculateSize();
+            ulong nextSize = format.MeasureEntry(entries[limit]);
             if (!FitsWithinBudget(size, nextSize, maxSize))
             {
                 break;

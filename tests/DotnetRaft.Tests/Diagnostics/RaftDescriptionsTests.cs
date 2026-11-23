@@ -18,7 +18,7 @@ public sealed class RaftDescriptionsTests
         {
             AutoLeave = true,
         };
-        state.Voters.Add([2UL, 1UL]);
+        state.Voters.AddRange([2UL, 1UL]);
         state.VotersOutgoing.Add(3);
         state.Learners.Add(4);
         state.LearnersNext.Add(5);
@@ -68,7 +68,7 @@ public sealed class RaftDescriptionsTests
         {
             Term = 1,
             Index = 2,
-            Data = ByteString.CopyFrom(
+            Data = RaftBytes.CopyFrom(
             [
                 (byte)'a',
                 (byte)'"',
@@ -81,10 +81,10 @@ public sealed class RaftDescriptionsTests
 
         Assert.Equal(
             "1/2 EntryNormal \"a\\\"\\\\\\n\\x00\\xff\"",
-            RaftDescriptions.DescribeEntry(entry));
+            ProtobufFixtureEncoding.DescribeEntry(entry));
         Assert.Equal(
             "1/2 EntryNormal bytes:6",
-            RaftDescriptions.DescribeEntry(
+            ProtobufFixtureEncoding.DescribeEntry(
                 entry,
                 data => $"bytes:{data.Length}"));
     }
@@ -115,7 +115,7 @@ public sealed class RaftDescriptionsTests
 
         Assert.Equal(
             "1/2 EntryConfChange v3",
-            RaftDescriptions.DescribeEntry(
+            ProtobufFixtureEncoding.DescribeEntry(
                 new Entry
                 {
                     Term = 1,
@@ -125,7 +125,7 @@ public sealed class RaftDescriptionsTests
                 }));
         Assert.Equal(
             "1/2 EntryConfChangeV2 v3 l4",
-            RaftDescriptions.DescribeEntry(
+            ProtobufFixtureEncoding.DescribeEntry(
                 new Entry
                 {
                     Term = 1,
@@ -148,7 +148,7 @@ public sealed class RaftDescriptionsTests
 
         Assert.Equal(
             "1/2 EntryConfChangeV2 unknown9",
-            RaftDescriptions.DescribeEntry(
+            ProtobufFixtureEncoding.DescribeEntry(
                 new Entry
                 {
                     Term = 1,
@@ -158,23 +158,23 @@ public sealed class RaftDescriptionsTests
                 }));
         Assert.Equal(
             "1/2 EntryConfChange invalid ConfChange payload:ff",
-            RaftDescriptions.DescribeEntry(
+            ProtobufFixtureEncoding.DescribeEntry(
                 new Entry
                 {
                     Term = 1,
                     Index = 2,
                     Type = EntryType.EntryConfChange,
-                    Data = ByteString.CopyFrom([0xff]),
+                    Data = RaftBytes.CopyFrom([0xff]),
                 }));
         Assert.Equal(
             "1/2 EntryConfChangeV2 invalid ConfChangeV2 payload:ff",
-            RaftDescriptions.DescribeEntry(
+            ProtobufFixtureEncoding.DescribeEntry(
                 new Entry
                 {
                     Term = 1,
                     Index = 2,
                     Type = EntryType.EntryConfChangeV2,
-                    Data = ByteString.CopyFrom([0xff]),
+                    Data = RaftBytes.CopyFrom([0xff]),
                 }));
     }
 
@@ -185,7 +185,7 @@ public sealed class RaftDescriptionsTests
         {
             Type = ConfChangeType.ConfChangeAddNode,
             NodeId = 2,
-            Context = ByteString.CopyFromUtf8("ctx"),
+            Context = RaftBytes.CopyFromUtf8("ctx"),
         };
         var v2 = new ConfChangeV2
         {
@@ -228,12 +228,12 @@ public sealed class RaftDescriptionsTests
             {
                 Term = 3,
                 Index = 4,
-                Data = ByteString.CopyFromUtf8("x"),
+                Data = RaftBytes.CopyFromUtf8("x"),
             });
 
         Assert.Equal(
             "10->ApplyThread MsgAppResp Term:5 Log:3/4 Rejected (Hint: 2) Commit:3 Vote:7 Entries:[3/4 EntryNormal \"x\"]",
-            RaftDescriptions.DescribeMessage(message));
+            ProtobufFixtureEncoding.DescribeMessage(message));
     }
 
     [Fact]
@@ -263,14 +263,14 @@ public sealed class RaftDescriptionsTests
             {
                 Term = 1,
                 Index = 4,
-                Data = ByteString.CopyFromUtf8("a"),
+                Data = RaftBytes.CopyFromUtf8("a"),
             });
         message.Entries.Add(
             new Entry
             {
                 Term = 1,
                 Index = 5,
-                Data = ByteString.CopyFromUtf8("b"),
+                Data = RaftBytes.CopyFromUtf8("b"),
             });
         message.Responses.Add(
             new Message
@@ -289,7 +289,7 @@ public sealed class RaftDescriptionsTests
             "  Snapshot: Index:7 Term:3 ConfState:Voters:[1] VotersOutgoing:[] Learners:[] LearnersNext:[] AutoLeave:false Responses:[\n" +
             "  2->1 MsgHeartbeat Term:4 Log:0/0\n" +
             "]",
-            RaftDescriptions.DescribeMessage(message));
+            ProtobufFixtureEncoding.DescribeMessage(message));
     }
 
     [Fact]
@@ -301,7 +301,7 @@ public sealed class RaftDescriptionsTests
         {
             Term = 1,
             Index = 4,
-            Data = ByteString.CopyFromUtf8("x"),
+            Data = RaftBytes.CopyFromUtf8("x"),
         };
         Ready ready = Ready.FromDetachedWork(
             new SoftState(1, RaftRole.Leader),
@@ -345,7 +345,7 @@ public sealed class RaftDescriptionsTests
             "1/4 EntryNormal \"x\"\n" +
             "Messages:\n" +
             "1->2 MsgHeartbeat Term:2 Log:0/0 Commit:3\n",
-            RaftDescriptions.DescribeReady(ready));
+            ProtobufFixtureEncoding.DescribeReady(ready));
     }
 
     [Fact]
@@ -363,10 +363,10 @@ public sealed class RaftDescriptionsTests
 
         Assert.Equal(
             "<empty Ready>",
-            RaftDescriptions.DescribeReady(ready));
+            ProtobufFixtureEncoding.DescribeReady(ready));
         Assert.Equal(
             string.Empty,
-            RaftDescriptions.DescribeEntries([]));
+            ProtobufFixtureEncoding.DescribeEntries([]));
     }
 
     [Fact]

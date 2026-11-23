@@ -78,6 +78,16 @@ internal sealed partial class RaftCore
         Trace(RaftTraceEventType.ReadyAccepted);
     }
 
+    internal bool TracingEnabled => traceSink is not null;
+
+    internal void TraceStorageCompletion(StorageCompletion completion)
+    {
+        if (TracingEnabled)
+        {
+            TraceMessage(RaftTraceEventType.MessageReceived, completion.DescribeReceipt());
+        }
+    }
+
     internal void TraceSyntheticMessageSent(
         Message message)
     {

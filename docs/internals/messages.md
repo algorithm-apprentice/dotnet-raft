@@ -7,8 +7,9 @@ distinction between producing a message and making its effect visible.
 
 ## Keep term, log position, and membership separate
 
-[`raft.proto`](../../src/DotnetRaft/Protocol/raft.proto) defines the generated
-message, log, and snapshot types. `Message.Term` normally identifies the
+[`raft.proto`](../../src/DotnetRaft.Protobuf/Protocol/raft.proto) defines the
+wire format behind the adapter. The node only sees the .NET values in
+`DotnetRaft.Protocol`. `Message.Term` normally identifies the
 sender's consensus term, but an election message can refer to a prospective
 term and some local messages use zero. `Entry.Term` identifies the term that
 created that entry. `LogTerm` and `Index` name a particular log point in an
@@ -29,7 +30,7 @@ must agree with what the application restored.
 | Peer consensus traffic | vote, append, heartbeat, snapshot and their replies | Carries term, quorum, or log evidence between nodes. Shape validation is separate from the rule that interprets the evidence. |
 | Client work that can be forwarded | `MsgProp`, `MsgReadIndex` | The request does not claim leadership in a Raft term. It can be sent on to the current leader; its origin may still be needed for a reply. |
 | Local control | campaign, heartbeat tick, reachability/snapshot reports | An input to this node's owner, not something a peer is allowed to inject as a local event. |
-| Local storage work | `MsgStorageAppend`, `MsgStorageApply` and their responses | Carries effects and evidence across workers, not across the trust boundary of peer transport. An append request may contain remote replies to release only after its write. |
+| Local storage work | `StorageAppendWork`, `StorageApplyWork`, and `StorageCompletion` | Carries effects and evidence across workers, not across the trust boundary of peer transport. An append may contain peer replies to release only after its write. |
 
 [`MessageClassifier`](../../src/DotnetRaft/Core/MessageClassifier.cs) and
 [`RaftOutput`](../../src/DotnetRaft/Core/RaftOutput.cs) keep these roles
@@ -42,14 +43,13 @@ and a remote response finally leave that queue.
 
 ## Preserve presence and ownership
 
-An absent field and an explicitly present zero are different. For example,
-a term/vote/commit update can contain a zero vote; absence of all three
-fields on a local append means no hard-state update. Do not infer presence
-from the numeric value. Generated protobuf types handle serialization and
-encoded sizes; [protocol tests](../../tests/DotnetRaft.Tests/Protocol/ProtocolModelTests.cs)
-check these details without requiring a second wire model.
+An absent field and an explicitly present zero are different. The codec
+preserves presence and unknown fields and owns encoded entry measures.
+Local append work uses `RaftHardState?`: null is no update, not a zero vote.
+[Protocol tests](../../tests/DotnetRaft.Tests/Protocol/ProtocolModelTests.cs)
+verify that the ordinary .NET values round-trip through the unchanged wire format.
 
-Protobuf objects are mutable. Clone when an operation needs to retain input
+The domain messages are mutable. Clone when an operation needs to retain input
 or hand output to another owner. [`ProtocolDefaults`](../../src/DotnetRaft/Protocol/ProtocolDefaults.cs)
 normalizes nested snapshot/configuration metadata on an owned value. When
 comparing membership, list order and an omitted default flag do not by

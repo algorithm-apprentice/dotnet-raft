@@ -196,7 +196,7 @@ public sealed class RaftCoreRejectionHintTests
         };
         message.Entries.Add(new Entry
         {
-            Data = ByteString.CopyFromUtf8(data),
+            Data = RaftBytes.CopyFromUtf8(data),
         });
         return message;
     }

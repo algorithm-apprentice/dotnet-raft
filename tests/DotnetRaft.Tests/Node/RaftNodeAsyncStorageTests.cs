@@ -91,7 +91,7 @@ public sealed class RaftNodeAsyncStorageTests
             foreach (Message response in responses)
             {
                 Assert.Equal(append.From, response.To);
-                await node.StepAsync(response);
+                await node.StepFixtureAsync(response);
             }
 
             Status status =
@@ -114,7 +114,7 @@ public sealed class RaftNodeAsyncStorageTests
         try
         {
             await Assert.ThrowsAnyAsync<InvalidOperationException>(
-                async () => await node.StepAsync(
+                async () => await node.StepFixtureAsync(
                     new Message
                     {
                         From = 2,
@@ -141,7 +141,7 @@ public sealed class RaftNodeAsyncStorageTests
         try
         {
             await Assert.ThrowsAsync<StorageResponseValidationException>(
-                async () => await node.StepAsync(
+                async () => await node.StepFixtureAsync(
                     new Message
                     {
                         From =
@@ -185,7 +185,7 @@ public sealed class RaftNodeAsyncStorageTests
         Ready ready)
     {
         // This helper has no network; only use it for singleton batches.
-        foreach (Message message in ready.Messages)
+        foreach (Message message in ready.FixtureMessages())
         {
             switch (message.Type)
             {
@@ -196,7 +196,7 @@ public sealed class RaftNodeAsyncStorageTests
                                  message))
                     {
                         Assert.Equal(message.From, response.To);
-                        await node.StepAsync(response);
+                        await node.StepFixtureAsync(response);
                     }
 
                     break;
@@ -205,7 +205,7 @@ public sealed class RaftNodeAsyncStorageTests
                              message.Responses)
                     {
                         Assert.Equal(message.From, response.To);
-                        await node.StepAsync(response);
+                        await node.StepFixtureAsync(response);
                     }
 
                     break;

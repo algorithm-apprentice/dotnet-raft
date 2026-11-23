@@ -12,7 +12,7 @@ public sealed class ConfigurationChangeProtocolTests
     [Fact]
     public void LegacyChangeConvertsToEquivalentV2Change()
     {
-        var context = ByteString.CopyFromUtf8("context");
+        var context = RaftBytes.CopyFromUtf8("context");
         var change = new LegacyConfChange
         {
             Type = ConfChangeType.ConfChangeAddLearnerNode,
@@ -51,7 +51,7 @@ public sealed class ConfigurationChangeProtocolTests
                 {
                     Transition =
                         ConfChangeTransition.Auto,
-                    Context = ByteString.CopyFromUtf8("context"),
+                    Context = RaftBytes.CopyFromUtf8("context"),
                 },
                 true),
             new LeaveCase(
@@ -146,7 +146,7 @@ public sealed class ConfigurationChangeProtocolTests
         {
             Transition = transition,
         };
-        result.Changes.Add(changes);
+        result.Changes.AddRange(changes);
         return result;
     }
 

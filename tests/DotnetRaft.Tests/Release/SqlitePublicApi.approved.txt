@@ -1,5 +1,6 @@
 type public sealed class DotnetRaft.Storage.Sqlite.SqliteStorage : DotnetRaft.Storage.IStorage, System.IDisposable
-  public DotnetRaft.Protocol.Snapshot CreateSnapshot(ulong index, DotnetRaft.Protocol.ConfState? confState, Google.Protobuf.ByteString data)
+  public DotnetRaft.Protocol.IRaftLogFormat LogFormat { get; }
+  public DotnetRaft.Protocol.Snapshot CreateSnapshot(ulong index, DotnetRaft.Protocol.ConfState? confState, DotnetRaft.Protocol.RaftBytes data)
   public DotnetRaft.Protocol.Snapshot? GetPendingApplicationSnapshot()
   public DotnetRaft.RaftHardState? GetHardState()
   public SqliteStorage(string databasePath)
@@ -17,5 +18,5 @@ type public sealed class DotnetRaft.Storage.Sqlite.SqliteStorage : DotnetRaft.St
   public void Compact(ulong compactIndex)
   public void PersistReady(DotnetRaft.Ready ready)
   public void PersistStorageAppend(DotnetRaft.Protocol.Message request)
+  public void PersistStorageAppend(DotnetRaft.StorageAppendWork work)
   public void SetHardState(DotnetRaft.RaftHardState state)
-

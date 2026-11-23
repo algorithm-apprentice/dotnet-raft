@@ -31,10 +31,12 @@ to see which acknowledgement advances the commit index.
 
 ## Install
 
-The packages target `net10.0`. Version `2.0.0` is built and verified by CI but
+The packages target `net10.0`. Version `3.0.0` is built and verified by CI but
 is not published on NuGet.org. Follow the
 [local package installation guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/install.md)
-to use it in another project. Add the optional
+to use it in another project. The consensus package has no protobuf dependency;
+add [the protobuf adapter](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/src/DotnetRaft.Protobuf/README.md)
+for the existing Raft wire format. Add the optional
 [SQLite package](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/src/DotnetRaft.Sqlite/README.md)
 for durable Raft storage; your application state is still yours to persist.
 

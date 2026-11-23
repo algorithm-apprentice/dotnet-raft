@@ -17,7 +17,7 @@
 syntax = "proto2";
 package raftpb;
 
-option csharp_namespace = "DotnetRaft.Protocol";
+option csharp_namespace = "DotnetRaft.Protobuf.Wire";
 option go_package = "go.etcd.io/raft/v3/raftpb";
 
 enum EntryType {

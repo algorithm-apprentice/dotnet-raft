@@ -104,7 +104,7 @@ public sealed class InteractionAsyncStorageTests
                 AsyncStorageWrites = true,
             });
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
         environment.Nodes[0].RawNode.Step(
             new Message
             {
@@ -146,7 +146,7 @@ public sealed class InteractionAsyncStorageTests
                 AsyncStorageWrites = true,
             });
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL]);
+        state.Voters.AddRange([1UL, 2UL]);
         InteractionNode node = environment.Nodes[0];
         node.RawNode.Step(
             new Message
@@ -181,7 +181,7 @@ public sealed class InteractionAsyncStorageTests
                 Index = 6,
                 Term = 1,
                 Data =
-                    Google.Protobuf.ByteString
+                    DotnetRaft.Protocol.RaftBytes
                         .CopyFromUtf8("after"),
             });
         node.RawNode.Step(append);
@@ -232,7 +232,7 @@ public sealed class InteractionAsyncStorageTests
             LogTerm = 1,
             Commit = oldEntry,
         };
-        append.Entries.Add(new Entry { Index = oldEntry, Term = 1, Data = ByteString.CopyFromUtf8("older") });
+        append.Entries.Add(new Entry { Index = oldEntry, Term = 1, Data = RaftBytes.CopyFromUtf8("older") });
         node.RawNode.Step(append);
         environment.ProcessReady(0);
         environment.ProcessAppendThread(0);
@@ -249,7 +249,7 @@ public sealed class InteractionAsyncStorageTests
             Snapshot = new Snapshot
             {
                 Metadata = new SnapshotMetadata { Index = snapshotIndex, Term = 2, ConfState = new ConfState { Voters = { 1, 2 } } },
-                Data = ByteString.CopyFromUtf8("replacement"),
+                Data = RaftBytes.CopyFromUtf8("replacement"),
             },
         });
         environment.ProcessReady(0);

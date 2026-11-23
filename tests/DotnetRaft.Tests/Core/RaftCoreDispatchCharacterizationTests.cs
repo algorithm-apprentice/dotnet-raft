@@ -122,13 +122,13 @@ public sealed class RaftCoreDispatchCharacterizationTests
                 core.GatedReadCountForTesting,
             immediate = core.PeekMessages()
                 .Select(message =>
-                    RaftDescriptions.DescribeMessage(
+                    ProtobufFixtureEncoding.DescribeMessage(
                         message))
                 .ToArray(),
             afterAppend =
                 core.PeekMessagesAfterAppend()
                     .Select(message =>
-                        RaftDescriptions.DescribeMessage(
+                        ProtobufFixtureEncoding.DescribeMessage(
                             message))
                     .ToArray(),
             readStates = core.PeekReadStates()
@@ -148,8 +148,8 @@ public sealed class RaftCoreDispatchCharacterizationTests
         TranscriptLogger logger)
     {
         var state = new ConfState();
-        state.Voters.Add([1UL, 2UL, 3UL]);
-        var storage = new MemoryStorage();
+        state.Voters.AddRange([1UL, 2UL, 3UL]);
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(
             new Snapshot
             {
@@ -246,7 +246,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
                     new Entry
                     {
                         Data =
-                            ByteString.CopyFromUtf8(
+                            RaftBytes.CopyFromUtf8(
                                 "proposal"),
                     });
                 break;
@@ -263,7 +263,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
                                 ? core.Term
                                 : term,
                         Data =
-                            ByteString.CopyFromUtf8(
+                            RaftBytes.CopyFromUtf8(
                                 "append"),
                     });
                 break;
@@ -277,7 +277,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
                 break;
             case MessageType.MsgSnap:
                 var snapshotState = new ConfState();
-                snapshotState.Voters.Add(
+                snapshotState.Voters.AddRange(
                     [1UL, 2UL, 3UL]);
                 message.Snapshot = new Snapshot
                 {
@@ -293,7 +293,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
             case MessageType.MsgHeartbeat:
                 message.Commit = core.Log.Committed;
                 message.Context =
-                    ByteString.CopyFromUtf8("hb");
+                    RaftBytes.CopyFromUtf8("hb");
                 break;
             case MessageType.MsgHeartbeatResp:
                 break;
@@ -309,7 +309,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
                     new Entry
                     {
                         Data =
-                            ByteString.CopyFromUtf8(
+                            RaftBytes.CopyFromUtf8(
                                 "read"),
                     });
                 break;
@@ -320,7 +320,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
                     new Entry
                     {
                         Data =
-                            ByteString.CopyFromUtf8(
+                            RaftBytes.CopyFromUtf8(
                                 "read"),
                     });
                 break;
@@ -336,7 +336,7 @@ public sealed class RaftCoreDispatchCharacterizationTests
                 if (variant.Snapshot)
                 {
                     var responseState = new ConfState();
-                    responseState.Voters.Add(
+                    responseState.Voters.AddRange(
                         [1UL, 2UL, 3UL]);
                     message.Snapshot = new Snapshot
                     {

@@ -160,7 +160,7 @@ public sealed class RaftCoreLeadershipTransferMembershipTests
             exit.Type);
         Assert.Equal(
             new ConfChangeV2(),
-            ConfChangeV2.Parser.ParseFrom(
+            ProtobufFixtureEncoding.DecodeV2(
                 exit.Data));
 
         core.AppliedTo(2, 0);

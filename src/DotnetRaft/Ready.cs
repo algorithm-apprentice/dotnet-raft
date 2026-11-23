@@ -7,8 +7,8 @@ namespace DotnetRaft;
 /// <summary>Work handed to the host, not effects that have already happened.</summary>
 /// <remarks>
 /// In Ready/Advance mode, the host meets the persistence and application requirements before acknowledging the batch.
-/// With asynchronous storage writes, drive writes and application from local requests in
-/// <see cref="Messages"/>, not the mirrored fields, and do not call Advance.
+/// With asynchronous storage writes, use <see cref="AppendWork"/> and <see cref="ApplyWork"/>,
+/// not the mirrored fields, and return their completions instead of calling Advance.
 /// Consume <see cref="ReadStates"/> in either mode.
 /// </remarks>
 public sealed class Ready
@@ -26,7 +26,10 @@ public sealed class Ready
         Snapshot? snapshot,
         Entry[] committedEntries,
         Message[] messages,
-        bool mustSync) => new(softState, hardState, readStates, entries, snapshot, committedEntries, messages, mustSync);
+        bool mustSync,
+        StorageAppendWork? appendWork = null,
+        StorageApplyWork? applyWork = null) =>
+        new(softState, hardState, readStates, entries, snapshot, committedEntries, messages, mustSync, appendWork, applyWork);
 
     private Ready(
         SoftState? softState,
@@ -36,7 +39,9 @@ public sealed class Ready
         Snapshot? snapshot,
         Entry[] committedEntries,
         Message[] messages,
-        bool mustSync)
+        bool mustSync,
+        StorageAppendWork? appendWork,
+        StorageApplyWork? applyWork)
     {
         // The producer transfers detached values, including independent
         // mutable protobufs for each work/completion stream.
@@ -44,6 +49,8 @@ public sealed class Ready
         HardState = hardState;
         Snapshot = snapshot;
         MustSync = mustSync;
+        AppendWork = appendWork;
+        ApplyWork = applyWork;
 
         _readStates = Array.AsReadOnly(readStates);
         _entries = Array.AsReadOnly(entries);
@@ -68,5 +75,16 @@ public sealed class Ready
 
     public IReadOnlyList<Message> Messages => _messages;
 
+    public StorageAppendWork? AppendWork { get; }
+
+    public StorageApplyWork? ApplyWork { get; }
+
     public bool MustSync { get; }
+
+    internal IEnumerable<Message> DescribeMessages()
+    {
+        foreach (Message message in _messages) yield return message;
+        if (AppendWork is not null) yield return AppendWork.DescribeWork();
+        if (ApplyWork is not null) yield return ApplyWork.DescribeWork();
+    }
 }

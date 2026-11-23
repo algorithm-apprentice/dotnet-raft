@@ -127,7 +127,7 @@ public sealed class RaftCoreLeadershipTransferTests
 
         Message snapshot = Assert.Single(core.TakeMessages());
         Assert.Equal(MessageType.MsgSnap, snapshot.Type);
-        Assert.Equal(5UL, snapshot.Snapshot.Metadata.Index);
+        Assert.Equal(5UL, snapshot.Snapshot!.Metadata.Index);
         Assert.Equal(
             ProgressState.Snapshot,
             core.Tracker.Progress[2].State);
@@ -488,7 +488,7 @@ public sealed class RaftCoreLeadershipTransferTests
                 new Entry
                 {
                     Type = type,
-                    Data = ByteString.CopyFrom(0xff),
+                    Data = RaftBytes.CopyFrom([0xff]),
                 })));
 
         Assert.Equal(lastIndex, core.Log.LastIndex);

@@ -54,20 +54,20 @@ internal static class RaftCoreElectionTestSupport
         }
 
         var confState = new ConfState();
-        confState.Voters.Add(voters ?? [1UL, 2UL, 3UL]);
+        confState.Voters.AddRange(voters ?? [1UL, 2UL, 3UL]);
         if (outgoingVoters is not null)
         {
-            confState.VotersOutgoing.Add(outgoingVoters);
+            confState.VotersOutgoing.AddRange(outgoingVoters);
         }
 
         if (learners is not null)
         {
-            confState.Learners.Add(learners);
+            confState.Learners.AddRange(learners);
         }
 
         if (learnersNext is not null)
         {
-            confState.LearnersNext.Add(learnersNext);
+            confState.LearnersNext.AddRange(learnersNext);
         }
 
         storage.InitialState = new StorageState(

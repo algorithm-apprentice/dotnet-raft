@@ -195,33 +195,11 @@ public sealed class RaftNode : IRaftNode
         NetworkMessageValidation.ValidateType(
             owned);
 
-        if (MessageClassifier.IsStorageResponse(owned.Type))
+        if (MessageClassifier.IsStorageResponse(owned.Type) || RaftMessageTargets.IsLocal(owned.From))
         {
-            if (!_asyncStorageWrites
-                && RaftMessageTargets.IsLocal(
-                    owned.From))
-            {
-                return QueueOperation(
-                    _ => throw new NotSupportedException(
-                        "Storage-thread responses require asynchronous storage writes."),
-                    cancellationToken);
-            }
-
             return QueueOperation(
-                rawNode => rawNode.Step(owned),
+                _ => throw new InvalidOperationException("Storage completions cannot be stepped as peer messages."),
                 cancellationToken);
-        }
-
-        if (RaftMessageTargets.IsLocal(owned.From))
-        {
-            return _asyncStorageWrites
-                ? QueueOperation(
-                    rawNode => rawNode.Step(owned),
-                    cancellationToken)
-                : QueueOperation(
-                    _ => throw new NotSupportedException(
-                        "Storage-thread responses require asynchronous storage writes."),
-                    cancellationToken);
         }
 
         if (MessageClassifier.IsLocal(owned.Type))
@@ -254,6 +232,21 @@ public sealed class RaftNode : IRaftNode
             : QueueOperation(
                 step,
                 cancellationToken);
+    }
+
+    public ValueTask CompleteStorageWorkAsync(StorageCompletion completion, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(completion);
+        return QueueOperation(rawNode => rawNode.CompleteStorageWork(completion), cancellationToken);
+    }
+
+    internal ValueTask StepFixtureStorageResponseAsync(Message message, CancellationToken cancellationToken = default)
+    {
+        Message owned = message.Clone();
+        NetworkMessageValidation.ValidateType(owned);
+        return !_asyncStorageWrites && RaftMessageTargets.IsLocal(owned.From)
+            ? QueueOperation(_ => throw new NotSupportedException("Storage-thread responses require asynchronous storage writes."), cancellationToken)
+            : QueueOperation(rawNode => rawNode.StepFixtureStorageResponse(owned), cancellationToken);
     }
 
     public ValueTask ForgetLeaderAsync(

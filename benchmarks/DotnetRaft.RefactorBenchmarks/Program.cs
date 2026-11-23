@@ -4,10 +4,9 @@ using System.Runtime;
 using System.Text.Json;
 
 using DotnetRaft;
+using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
-
-using Google.Protobuf;
 
 const ulong FnvOffset = 14695981039346656037UL;
 const ulong FnvPrime = 1099511628211UL;
@@ -196,7 +195,7 @@ static (
         Type = MessageType.MsgHeartbeat,
         Term = 1,
         Commit = 2,
-        Context = ByteString.CopyFromUtf8("ctx"),
+        Context = RaftBytes.CopyFromUtf8("ctx"),
     };
     ulong checksum = FnvOffset;
     long allocatedBefore =
@@ -388,8 +387,8 @@ static MemoryStorage CreateStorage(
     IEnumerable<ulong> voters)
 {
     var state = new ConfState();
-    state.Voters.Add(voters);
-    var storage = new MemoryStorage();
+    state.Voters.AddRange(voters);
+    var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
     storage.ApplySnapshot(
         new Snapshot
         {

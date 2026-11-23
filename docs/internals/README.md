@@ -19,7 +19,7 @@ step. It does not run the host's storage workers. Stable log **reads** via
 
 | Concern | Code owner | Reason for the boundary |
 |---|---|---|
-| Message and entry representation | [Messages and records](messages.md), backed by [`raft.proto`](../../src/DotnetRaft/Protocol/raft.proto) | The wire schema stays fixed. Domain values are being separated from it as tracked in the [serialization-boundary audit](../maintaining/serialization-boundary-audit.md). |
+| Message and entry representation | [Messages and records](messages.md), encoded by [`DotnetRaft.Protobuf`](../../src/DotnetRaft.Protobuf/README.md) | The core consumes owned .NET values. Only the codec needs the generated wire representation. |
 | Roles, log matching, commitment, membership | [`RaftCore`](../../src/DotnetRaft/Core/RaftCore.cs) and [consensus internals](consensus.md) | The core owns transitions that touch multiple components. It chooses effects without doing network or disk I/O itself, apart from stable reads. |
 | Ready and acknowledgement | [`RawNode`](../../src/DotnetRaft/RawNode.cs), with the concurrent [`RaftNode`](../../src/DotnetRaft/RaftNode.cs) facade; see [node internals](node.md) | One implementation binds persistence and application completions to the work delivered. Concurrency cannot create a separate consensus or persistence path. |
 | Stable view | [`IStorage`](../../src/DotnetRaft/Storage/IStorage.cs), [`MemoryStorage`](../../src/DotnetRaft/Storage/MemoryStorage.cs), optional [`SqliteStorage`](../../src/DotnetRaft.Sqlite/SqliteStorage.cs) | The backend owns publication, read consistency, and durability. Neither storage implementation decides what the quorum committed. |
@@ -42,7 +42,7 @@ elected node 1 in term 2 and applied entries through index 4.
 | The counter changes, then Raft's acknowledgement cursor moves. | [`RawNode.CreateReady`](../../src/DotnetRaft/RawNode.cs#L487) marks the delivered slice as `Applying`. [`CounterReplica.Apply`](../../examples/DotnetRaft.Counter/CounterReplica.cs) changes application state and updates its own index. [`RawNode.AdvanceCore`](../../src/DotnetRaft/RawNode.cs#L651) subsequently acknowledges the batch and advances Raft `Applied`. |
 
 The async trace has the same append and quorum decisions. `CreateReady`
-routes work through local `MsgStorageAppend` / `MsgStorageApply` requests
+routes work through typed local append and apply requests
 instead, and completed workers return the generated responses. See
 [Ready internals](node.md#delivery-and-acknowledgement) for how the two
 protocols record delivery and completion.

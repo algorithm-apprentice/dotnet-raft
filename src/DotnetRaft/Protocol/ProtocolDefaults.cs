@@ -1,5 +1,3 @@
-using Google.Protobuf.Collections;
-
 namespace DotnetRaft.Protocol;
 
 public static class ProtocolDefaults
@@ -61,10 +59,5 @@ public static class ProtocolDefaults
         return normalized;
     }
 
-    private static void Sort(RepeatedField<ulong> values)
-    {
-        var sorted = values.Order().ToArray();
-        values.Clear();
-        values.Add(sorted);
-    }
+    private static void Sort(List<ulong> values) => values.Sort();
 }

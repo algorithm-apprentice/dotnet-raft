@@ -8,29 +8,32 @@ using System.Text.Json;
 using System.Xml.Linq;
 
 const string PackageId = "DotnetRaft";
+const string ProtobufPackageId = "DotnetRaft.Protobuf";
 const string SqlitePackageId = "DotnetRaft.Sqlite";
-const string PackageVersion = "2.0.0";
+const string PackageVersion = "3.0.0";
 const string Description =
     "A deterministic Raft consensus library for building replicated state machines in .NET.";
+const string ProtobufDescription = "The protobuf wire and storage codec for DotnetRaft.";
 const string SqliteDescription =
     "Durable SQLite consensus storage for DotnetRaft.";
 
 if (args.Length == 0)
 {
     return Fail(
-        "Usage: verify|verify-sqlite <nupkg> <snupkg> <repository-root> <commit> | compare <left> <right>");
+        "Usage: verify|verify-protobuf|verify-sqlite <nupkg> <snupkg> <repository-root> <commit> | compare <left> <right>");
 }
 
 try
 {
     switch (args[0])
     {
-        case "verify" when args.Length == 5:
+        case "verify" or "verify-protobuf" when args.Length == 5:
             VerifyPackage(
                 Path.GetFullPath(args[1]),
                 Path.GetFullPath(args[2]),
                 Path.GetFullPath(args[3]),
-                args[4]);
+                args[4],
+                args[0] == "verify" ? PackageId : ProtobufPackageId);
             return 0;
         case "verify-sqlite" when args.Length == 5:
             VerifySqlitePackage(
@@ -57,8 +60,14 @@ static void VerifyPackage(
     string packagePath,
     string symbolPath,
     string repositoryRoot,
-    string expectedCommit)
+    string expectedCommit,
+    string packageId)
 {
+    bool protobufAdapter = packageId == ProtobufPackageId;
+    string readme = Path.Combine(repositoryRoot, protobufAdapter ? "src/DotnetRaft.Protobuf/README.md" : "README.md");
+    string assemblyEntry = $"lib/net10.0/{packageId}.dll";
+    string pdbEntryPath = $"lib/net10.0/{packageId}.pdb";
+    string nuspecPath = $"{packageId}.nuspec";
     Require(
         expectedCommit.Length == 40
         && expectedCommit.All(Uri.IsHexDigit),
@@ -67,8 +76,7 @@ static void VerifyPackage(
     RequireFile(symbolPath);
     RequireFile(
         Path.Combine(repositoryRoot, "LICENSE"));
-    RequireFile(
-        Path.Combine(repositoryRoot, "README.md"));
+    RequireFile(readme);
     RequireFile(
         Path.Combine(
             repositoryRoot,
@@ -76,7 +84,7 @@ static void VerifyPackage(
 
     using ZipArchive package =
         ZipFile.OpenRead(packagePath);
-    RequireEntry(package, "lib/net10.0/DotnetRaft.dll");
+    RequireEntry(package, assemblyEntry);
     RequireEntry(package, "LICENSE");
     RequireEntry(package, "README.md");
     RequireEntry(package, "THIRD-PARTY-NOTICES.md");
@@ -84,7 +92,7 @@ static void VerifyPackage(
         SingleNuspec(package);
     XDocument nuspec = ReadXml(nuspecEntry);
     XElement metadata = Metadata(nuspec);
-    RequireValue(metadata, "id", PackageId);
+    RequireValue(metadata, "id", packageId);
     RequireValue(metadata, "version", PackageVersion);
     RequireValue(
         metadata,
@@ -93,7 +101,7 @@ static void VerifyPackage(
     RequireValue(
         metadata,
         "description",
-        Description);
+        protobufAdapter ? ProtobufDescription : Description);
     RequireValue(metadata, "readme", "README.md");
 
     XNamespace ns = metadata.Name.Namespace;
@@ -143,29 +151,16 @@ static void VerifyPackage(
     XElement[] dependencies = metadata
         .Descendants(ns + "dependency")
         .ToArray();
-    XElement protobuf = dependencies.SingleOrDefault(
-        dependency =>
-            string.Equals(
-                (string?)dependency.Attribute("id"),
-                "Google.Protobuf",
-                StringComparison.Ordinal))
-        ?? throw new InvalidOperationException(
-            "Google.Protobuf dependency is missing.");
-    Require(
-        ((string?)protobuf.Attribute("version")
-         ?? string.Empty)
-        .Contains(
-            "3.36.2",
-            StringComparison.Ordinal),
-        "Google.Protobuf dependency version is not 3.36.2.");
-    Require(
-        dependencies.All(
-            dependency =>
-                !string.Equals(
-                    (string?)dependency.Attribute("id"),
-                    "Grpc.Tools",
-                    StringComparison.Ordinal)),
-        "Grpc.Tools leaked into runtime dependencies.");
+    if (protobufAdapter)
+    {
+        Require(dependencies.Length == 2, "The codec must depend only on DotnetRaft and Google.Protobuf.");
+        RequireDependency(dependencies, PackageId, PackageVersion);
+        RequireDependency(dependencies, "Google.Protobuf", "3.36.2");
+    }
+    else
+    {
+        Require(dependencies.Length == 0, "The consensus package must not require runtime packages.");
+    }
 
     CompareEntry(
         package,
@@ -174,7 +169,7 @@ static void VerifyPackage(
     CompareEntry(
         package,
         "README.md",
-        Path.Combine(repositoryRoot, "README.md"));
+        readme);
     CompareEntry(
         package,
         "THIRD-PARTY-NOTICES.md",
@@ -184,15 +179,15 @@ static void VerifyPackage(
 
     byte[] dll = ReadEntry(
         package,
-        "lib/net10.0/DotnetRaft.dll");
+        assemblyEntry);
     using ZipArchive symbols =
         ZipFile.OpenRead(symbolPath);
     RequireEntry(
         symbols,
-        "lib/net10.0/DotnetRaft.pdb");
+        pdbEntryPath);
     XElement symbolMetadata =
         Metadata(ReadXml(SingleNuspec(symbols)));
-    RequireValue(symbolMetadata, "id", PackageId);
+    RequireValue(symbolMetadata, "id", packageId);
     RequireValue(
         symbolMetadata,
         "version",
@@ -249,8 +244,8 @@ static void VerifyPackage(
     string[] expectedSymbolEntries =
     [
         "_rels/.rels",
-        "DotnetRaft.nuspec",
-        "lib/net10.0/DotnetRaft.pdb",
+        nuspecPath,
+        pdbEntryPath,
         "[Content_Types].xml",
         coreProperties.FullName,
     ];
@@ -267,7 +262,7 @@ static void VerifyPackage(
     foreach (ZipArchiveEntry entry in symbolEntries)
     {
         Require(
-            IsAllowedSymbolEntry(entry.FullName),
+            IsAllowedSymbolEntry(entry.FullName, nuspecPath, $"{packageId}.pdb"),
             $"Symbol package contains unsupported entry {entry.FullName}.");
     }
 
@@ -275,7 +270,7 @@ static void VerifyPackage(
         symbolEntries.Single(entry =>
             string.Equals(
                 entry.FullName,
-                "lib/net10.0/DotnetRaft.pdb",
+                pdbEntryPath,
                 StringComparison.Ordinal));
     byte[] pdb = ReadEntryBytes(pdbEntry);
     Require(
@@ -286,10 +281,17 @@ static void VerifyPackage(
         dll,
         pdb,
         expectedCommit,
-        "DotnetRaft.pdb");
+        $"{packageId}.pdb");
 
     Console.WriteLine(
-        $"verified {PackageId} {PackageVersion} commit {commit}");
+        $"verified {packageId} {PackageVersion} commit {commit}");
+}
+
+static void RequireDependency(IEnumerable<XElement> dependencies, string id, string version)
+{
+    XElement dependency = dependencies.SingleOrDefault(element => (string?)element.Attribute("id") == id)
+        ?? throw new InvalidOperationException($"{id} dependency is missing.");
+    Require((string?)dependency.Attribute("version") == version, $"{id} dependency version is not {version}.");
 }
 
 static void VerifySqlitePackage(
@@ -387,6 +389,7 @@ static void VerifySqlitePackage(
     XElement[] dependencies = metadata
         .Descendants(ns + "dependency")
         .ToArray();
+    RequireDependency(dependencies, ProtobufPackageId, PackageVersion);
     XElement core = dependencies.SingleOrDefault(
         dependency =>
             string.Equals(

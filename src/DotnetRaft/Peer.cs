@@ -1,22 +1,21 @@
-using Google.Protobuf;
+using DotnetRaft.Protocol;
 
 namespace DotnetRaft;
 
 public sealed record Peer
 {
     public Peer(ulong id)
-        : this(id, ByteString.Empty)
+        : this(id, RaftBytes.Empty)
     {
     }
 
-    public Peer(ulong id, ByteString context)
+    public Peer(ulong id, RaftBytes context)
     {
-        ArgumentNullException.ThrowIfNull(context);
         Id = id;
         Context = context;
     }
 
     public ulong Id { get; }
 
-    public ByteString Context { get; }
+    public RaftBytes Context { get; }
 }

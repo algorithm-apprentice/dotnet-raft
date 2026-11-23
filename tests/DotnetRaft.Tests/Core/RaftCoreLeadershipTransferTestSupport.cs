@@ -55,10 +55,10 @@ internal static class RaftCoreLeadershipTransferTestSupport
     {
         var storage = new CoreTestStorage();
         var state = new ConfState();
-        state.Voters.Add(voters ?? [1UL, 2UL]);
+        state.Voters.AddRange(voters ?? [1UL, 2UL]);
         storage.LogStorage.ApplySnapshot(new Snapshot
         {
-            Data = ByteString.CopyFromUtf8("snapshot"),
+            Data = RaftBytes.CopyFromUtf8("snapshot"),
             Metadata = new SnapshotMetadata
             {
                 Index = 5,
@@ -141,7 +141,7 @@ internal static class RaftCoreLeadershipTransferTestSupport
             To = id,
             Type = MessageType.MsgProp,
         };
-        proposal.Entries.Add(entries);
+        proposal.Entries.AddRange(entries);
         return proposal;
     }
 
@@ -149,7 +149,7 @@ internal static class RaftCoreLeadershipTransferTestSupport
     {
         return new Entry
         {
-            Data = ByteString.CopyFromUtf8(data),
+            Data = RaftBytes.CopyFromUtf8(data),
         };
     }
 }

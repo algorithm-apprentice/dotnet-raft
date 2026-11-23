@@ -23,7 +23,7 @@ public sealed class AsyncStorageResponseTests
                         .CreateStorage());
 
         Assert.ThrowsAny<InvalidOperationException>(
-            () => node.Step(
+            () => node.StepFixture(
                 new Message
                 {
                     From =
@@ -108,7 +108,7 @@ public sealed class AsyncStorageResponseTests
         foreach (Message response in invalid)
         {
             Assert.ThrowsAny<InvalidOperationException>(
-                () => node.Step(response));
+                () => node.StepFixture(response));
         }
 
         Assert.Equal(0UL, node.GetBasicStatus().Term);
@@ -154,11 +154,11 @@ public sealed class AsyncStorageResponseTests
                 currentReady,
                 MessageType.MsgStorageAppend).Entries);
 
-        node.Step(first);
-        node.Step(second);
+        node.StepFixture(first);
+        node.StepFixture(second);
         Assert.Equal(3UL, node.Core.Log.Unstable.Offset);
 
-        node.Step(current);
+        node.StepFixture(current);
         Assert.Equal(4UL, node.Core.Log.Unstable.Offset);
     }
 
@@ -172,7 +172,7 @@ public sealed class AsyncStorageResponseTests
         Snapshot snapshot = SnapshotAt(
             5,
             [1UL, 2UL]);
-        node.Step(
+        node.StepFixture(
             new Message
             {
                 From = 2,
@@ -198,7 +198,7 @@ public sealed class AsyncStorageResponseTests
             node.GetStatus().Configuration.Voters);
         trace.Events.Clear();
 
-        node.Step(response);
+        node.StepFixture(response);
 
         Assert.Equal(
             [1UL, 2UL],
@@ -228,7 +228,7 @@ public sealed class AsyncStorageResponseTests
                 ConfState = state,
             },
         };
-        node.Step(
+        node.StepFixture(
             new Message
             {
                 From = 2,
@@ -253,7 +253,7 @@ public sealed class AsyncStorageResponseTests
         Assert.False(node.Core.Tracker.IsLearner(node.Core.Id));
         Assert.NotEmpty(node.Core.Tracker.Votes);
 
-        node.Step(response);
+        node.StepFixture(response);
 
         Assert.True(node.Core.Tracker.IsLearner(node.Core.Id));
         Assert.Empty(node.Core.Tracker.Votes);
@@ -266,7 +266,7 @@ public sealed class AsyncStorageResponseTests
     public void OldSnapshotResponseDoesNotOverwriteNewConfiguration()
     {
         (DotnetRawNode node, _) = CreateNode(voters: [1, 2, 3]);
-        node.Step(
+        node.StepFixture(
             new Message
             {
                 From = 2,
@@ -281,7 +281,7 @@ public sealed class AsyncStorageResponseTests
             node.Ready(),
             MessageType.MsgStorageAppendResp);
 
-        node.Step(
+        node.StepFixture(
             new Message
             {
                 From = 2,
@@ -303,13 +303,13 @@ public sealed class AsyncStorageResponseTests
                 NodeId = 3,
             });
 
-        node.Step(oldResponse);
+        node.StepFixture(oldResponse);
         Assert.Equal(
             [1UL, 2UL],
             node.GetStatus().Configuration.Voters);
         Assert.True(node.Core.Log.HasUnstableSnapshot);
 
-        node.Step(currentResponse);
+        node.StepFixture(currentResponse);
         Assert.Equal(
             [1UL, 2UL, 3UL],
             node.GetStatus().Configuration.Voters);
@@ -321,7 +321,7 @@ public sealed class AsyncStorageResponseTests
     {
         var state = new ConfState();
         state.Voters.Add(1);
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(
             new Snapshot
             {
@@ -357,7 +357,7 @@ public sealed class AsyncStorageResponseTests
         Assert.True(
             node.Core.Log.ApplyingEntriesSize > 0);
 
-        node.Step(
+        node.StepFixture(
             new Message
             {
                 From = 1,
@@ -371,10 +371,10 @@ public sealed class AsyncStorageResponseTests
         Message snapshotResponse = StorageResponse(
             node.Ready(),
             MessageType.MsgStorageAppendResp);
-        node.Step(snapshotResponse);
+        node.StepFixture(snapshotResponse);
         Assert.Equal(5UL, node.GetBasicStatus().Applied);
 
-        node.Step(applyResponse);
+        node.StepFixture(applyResponse);
         Assert.Equal(5UL, node.GetBasicStatus().Applied);
         Assert.Equal(
             0UL,
@@ -397,7 +397,7 @@ public sealed class AsyncStorageResponseTests
         IEnumerable<ulong> voters)
     {
         var state = new ConfState();
-        state.Voters.Add(voters);
+        state.Voters.AddRange(voters);
         return new Snapshot
         {
             Metadata = new SnapshotMetadata

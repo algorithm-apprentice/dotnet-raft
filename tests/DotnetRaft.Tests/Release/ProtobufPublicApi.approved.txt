@@ -1,0 +1,18 @@
+type public sealed class DotnetRaft.Protobuf.ProtobufRaftCodec : DotnetRaft.Protocol.IRaftLogFormat
+  public sealed virtual DotnetRaft.Protocol.ConfChange DecodeConfigurationChange(System.ReadOnlySpan<byte> payload)
+  public sealed virtual DotnetRaft.Protocol.ConfChangeV2 DecodeConfigurationChangeV2(System.ReadOnlySpan<byte> payload)
+  public sealed virtual DotnetRaft.Protocol.RaftBytes EncodeConfigurationChange(DotnetRaft.Protocol.ConfChange change)
+  public sealed virtual DotnetRaft.Protocol.RaftBytes EncodeConfigurationChange(DotnetRaft.Protocol.ConfChangeV2 change)
+  public sealed virtual ulong MeasureEntry(DotnetRaft.Protocol.Entry entry)
+  public static DotnetRaft.Protobuf.ProtobufRaftCodec Instance { get; }
+  public static DotnetRaft.Protocol.ConfState DecodeMembership(System.ReadOnlySpan<byte> payload)
+  public static DotnetRaft.Protocol.Entry DecodeEntry(System.ReadOnlySpan<byte> payload)
+  public static DotnetRaft.Protocol.Message DecodeMessage(System.ReadOnlySpan<byte> payload)
+  public static DotnetRaft.Protocol.Snapshot DecodeSnapshot(System.ReadOnlySpan<byte> payload)
+  public static DotnetRaft.RaftHardState DecodeHardState(System.ReadOnlySpan<byte> payload)
+  public static System.ValueTuple<ulong, ulong> ReadEntryPosition(byte[] payload)
+  public static byte[] EncodeEntry(DotnetRaft.Protocol.Entry entry)
+  public static byte[] EncodeHardState(DotnetRaft.RaftHardState state)
+  public static byte[] EncodeMembership(DotnetRaft.Protocol.ConfState state)
+  public static byte[] EncodeMessage(DotnetRaft.Protocol.Message message)
+  public static byte[] EncodeSnapshot(DotnetRaft.Protocol.Snapshot snapshot)

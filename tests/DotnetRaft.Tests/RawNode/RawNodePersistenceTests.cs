@@ -38,7 +38,7 @@ public sealed class RawNodePersistenceTests
     [Fact]
     public void RestartFromSnapshotEmitsOnlyLaterCommittedEntries()
     {
-        var storage = new MemoryStorage();
+        var storage = new MemoryStorage(ProtobufRaftCodec.Instance);
         storage.ApplySnapshot(new Snapshot
         {
             Metadata = new SnapshotMetadata
@@ -175,13 +175,13 @@ public sealed class RawNodePersistenceTests
             () => application.CreateSnapshot(
                 storage,
                 1,
-                ByteString.Empty));
+                RaftBytes.Empty));
 
         application.Advance(node, ready);
         Snapshot snapshot = application.CreateSnapshot(
             storage,
             2,
-            ByteString.CopyFromUtf8("state"));
+            RaftBytes.CopyFromUtf8("state"));
 
         Assert.Equal(2UL, snapshot.Metadata.Index);
         Assert.Throws<InvalidOperationException>(
