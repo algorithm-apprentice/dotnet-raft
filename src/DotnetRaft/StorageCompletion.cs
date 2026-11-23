@@ -15,12 +15,12 @@ public abstract class StorageCompletion
     {
         if (!ReferenceEquals(node, owner))
         {
-            throw new InvalidOperationException("The storage completion belongs to another node instance.");
+            throw new StorageResponseValidationException("The storage completion belongs to another node instance.");
         }
 
         if (consumed)
         {
-            throw new InvalidOperationException("The storage completion has already been consumed.");
+            throw new StorageResponseValidationException("The storage completion has already been consumed.");
         }
 
         consumed = true;

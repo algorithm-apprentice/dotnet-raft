@@ -25,3 +25,6 @@ Keep the core project independently buildable without runtime packages. The
 assembly reference test checks this boundary; the adapter owns all generated
 messages. Run the descriptor and schema approvals, codec round trips, typed
 worker tests, legacy recovery, and real-process smoke when the boundary changes.
+
+The [3.0 review follow-up](serialization-boundary-review.md) records the
+receipt rejection, test coverage, transport allocation, and host guide fixes.

@@ -203,18 +203,18 @@ public sealed class RawNodeNetworkValidationTests
         Message response;
         if (asyncStorageWrites)
         {
-            Message work = Assert.Single(ready.FixtureMessages(), message => message.Type == MessageType.MsgStorageAppend);
-            Assert.DoesNotContain(ready.FixtureMessages(), message => message.Type == MessageType.MsgAppResp);
-            response = Assert.Single(work.Responses, message => message.Type == MessageType.MsgAppResp);
+            StorageAppendWork work = Assert.IsType<StorageAppendWork>(ready.AppendWork);
+            Assert.DoesNotContain(ready.Messages, message => message.Type == MessageType.MsgAppResp);
+            response = Assert.Single(work.MessagesAfterPersist, message => message.Type == MessageType.MsgAppResp);
             if (!empty)
             {
                 Assert.Equal(encoded, Assert.Single(work.Entries).ToByteArray());
             }
 
-            Message[] responses = AsyncStorage.AsyncStorageTestSupport.PersistAppend(storage, work);
-            foreach (Message completion in responses.Where(message => message.To == 1))
+            AsyncStorage.AsyncStorageTestSupport.PersistAppend(storage, work);
+            if (work.Completion is { } completion)
             {
-                node.StepFixture(completion);
+                node.CompleteStorageWork(completion);
             }
         }
         else

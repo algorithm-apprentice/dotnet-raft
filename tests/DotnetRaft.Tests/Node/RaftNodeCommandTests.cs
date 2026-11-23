@@ -809,7 +809,7 @@ public sealed class RaftNodeCommandTests
     }
 
     [Fact]
-    public async Task ReservedStorageSenderIsRejectedWithoutAsyncStorageWrites()
+    public async Task FixtureReservedStorageSenderIsRejectedWithoutAsyncStorageWrites()
     {
         (RaftNode node, _) = RestartNode();
         try

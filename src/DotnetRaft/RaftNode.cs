@@ -195,10 +195,12 @@ public sealed class RaftNode : IRaftNode
         NetworkMessageValidation.ValidateType(
             owned);
 
-        if (MessageClassifier.IsStorageResponse(owned.Type) || RaftMessageTargets.IsLocal(owned.From))
+        if (NetworkMessageValidation.IsStorageInput(owned))
         {
+            // A storage frame must be rejected even if its type or sender
+            // would otherwise be ignored or wait in the proposal lane.
             return QueueOperation(
-                _ => throw new InvalidOperationException("Storage completions cannot be stepped as peer messages."),
+                rawNode => rawNode.Step(owned),
                 cancellationToken);
         }
 

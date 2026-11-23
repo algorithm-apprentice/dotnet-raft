@@ -4,6 +4,9 @@ namespace DotnetRaft.Core;
 
 internal static class NetworkMessageValidation
 {
+    internal static bool IsStorageInput(Message message) =>
+        MessageClassifier.IsStorageResponse(message.Type) || RaftMessageTargets.IsLocal(message.From);
+
     // RawNode has already checked that the owned message has a known type.
     internal static void ValidatePeerFields(
         Message message,

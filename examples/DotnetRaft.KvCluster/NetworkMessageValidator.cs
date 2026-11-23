@@ -1,4 +1,4 @@
-using DotnetRaft.Core;
+using DotnetRaft.Examples.KvCluster.Transport;
 using DotnetRaft.Protocol;
 
 namespace DotnetRaft.Examples.KvCluster;

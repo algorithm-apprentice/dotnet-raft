@@ -22,10 +22,17 @@
     <Compile Include="..\..\src\DotnetRaft\Core\MessageClassifier.cs" Link="MessageClassifier.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="DotnetRaft.Tests" />
+    <InternalsVisibleTo Include="DotnetRaft.RefactorBenchmarks" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Keep the linked source's internal type distinct from the core copy. -->
+    <DefineConstants>$(DefineConstants);DOTNET_RAFT_KV_TRANSPORT</DefineConstants>
   </PropertyGroup>
 
 </Project>

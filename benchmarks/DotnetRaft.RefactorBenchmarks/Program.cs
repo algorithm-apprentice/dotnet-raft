@@ -4,9 +4,13 @@ using System.Runtime;
 using System.Text.Json;
 
 using DotnetRaft;
+using DotnetRaft.Examples.KvCluster;
+using DotnetRaft.Examples.KvCluster.Transport;
 using DotnetRaft.Protobuf;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
+
+using Microsoft.Extensions.Logging.Abstractions;
 
 const ulong FnvOffset = 14695981039346656037UL;
 const ulong FnvPrime = 1099511628211UL;
@@ -49,6 +53,12 @@ Run(
         ? 6022984572386408565UL
         : null,
     BenchmarkSafeReadCompletion);
+Run(
+    "large-snapshot-envelope",
+    smoke ? 1 : 4,
+    iterations,
+    smoke ? 6873571993255534759UL : null,
+    BenchmarkSnapshotEnvelope);
 
 static void Run(
     string name,
@@ -422,6 +432,34 @@ static void Persist(
     {
         storage.SetHardState(hardState);
     }
+}
+
+static (long Ticks, long AllocatedBytes, ulong Checksum) BenchmarkSnapshotEnvelope(int operations)
+{
+    var message = new Message
+    {
+        Type = MessageType.MsgSnap,
+        From = 1,
+        To = 2,
+        Term = 3,
+        Snapshot = new Snapshot
+        {
+            Metadata = new SnapshotMetadata { Index = 2, Term = 3 },
+            Data = RaftBytes.CopyFrom(new byte[31 * 1024 * 1024]),
+        },
+    };
+    var logger = NullLogger<GrpcRaftMessageTransport>.Instance;
+    ulong checksum = FnvOffset;
+    long allocatedBefore = GC.GetAllocatedBytesForCurrentThread();
+    long started = Stopwatch.GetTimestamp();
+    for (var operation = 0; operation < operations; operation++)
+    {
+        RaftEnvelope envelope = GrpcRaftMessageTransport.EncodeEnvelope(message, 64 * 1024 * 1024, logger)
+            ?? throw new InvalidOperationException("The snapshot workload must fit in the transport budget.");
+        checksum = Add(checksum, (ulong)envelope.Payload.Length);
+    }
+
+    return (Stopwatch.GetTimestamp() - started, GC.GetAllocatedBytesForCurrentThread() - allocatedBefore, checksum);
 }
 
 static ulong Add(ulong checksum, ulong value)

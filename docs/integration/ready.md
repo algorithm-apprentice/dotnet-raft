@@ -148,6 +148,8 @@ commit-only write is still outstanding. Recovery must therefore reconcile
 the physical cursor and durable commit, not assume they were one write.
 
 Return each receipt once, in worker order, to the instance that issued it.
-The node rejects another instance's or a previously consumed receipt. Use the
-[shutdown barrier](recovery.md#fault-handling)
-before reading a new recovery point.
+Both facades reject another instance's or a previously consumed receipt
+without applying it or faulting the node. This is an input rejection, not a
+recovery mechanism: a failure while processing a valid receipt still faults
+the instance. Use the [shutdown barrier](recovery.md#fault-handling) before
+reading a new recovery point.

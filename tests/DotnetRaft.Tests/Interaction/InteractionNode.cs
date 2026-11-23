@@ -2,8 +2,6 @@ using DotnetRaft.Protocol;
 using DotnetRaft.Read;
 using DotnetRaft.Storage;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Tests.Interaction;
 
 internal sealed record InteractionNodeOptions
@@ -43,8 +41,8 @@ internal sealed record InteractionNodeOptions
 internal sealed class InteractionNode
 {
     private Snapshot _applicationSnapshot;
-    private readonly Queue<Message> _appendWork = new();
-    private readonly Queue<Message> _applyWork = new();
+    internal Queue<StorageAppendWork> AppendWork { get; } = new();
+    internal Queue<StorageApplyWork> ApplyWork { get; } = new();
 
     internal InteractionNode(
         DotnetRaft.RawNode rawNode,
@@ -74,9 +72,9 @@ internal sealed class InteractionNode
 
     internal InteractionNodeOptions Options { get; }
 
-    internal int AppendWorkCount => _appendWork.Count;
+    internal int AppendWorkCount => AppendWork.Count;
 
-    internal int ApplyWorkCount => _applyWork.Count;
+    internal int ApplyWorkCount => ApplyWork.Count;
 
     internal Snapshot GetApplicationSnapshot()
     {
@@ -88,30 +86,6 @@ internal sealed class InteractionNode
     {
         ArgumentNullException.ThrowIfNull(snapshot);
         _applicationSnapshot = snapshot.Clone();
-    }
-
-    internal void EnqueueAppendWork(Message message)
-    {
-        ArgumentNullException.ThrowIfNull(message);
-        _appendWork.Enqueue(message.Clone());
-    }
-
-    internal void EnqueueApplyWork(Message message)
-    {
-        ArgumentNullException.ThrowIfNull(message);
-        _applyWork.Enqueue(message.Clone());
-    }
-
-    internal bool TryDequeueAppendWork(
-        out Message? message)
-    {
-        return _appendWork.TryDequeue(out message);
-    }
-
-    internal bool TryDequeueApplyWork(
-        out Message? message)
-    {
-        return _applyWork.TryDequeue(out message);
     }
 }
 

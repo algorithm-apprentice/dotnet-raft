@@ -1,8 +1,6 @@
 using DotnetRaft.Examples.KvCluster;
 using DotnetRaft.Protocol;
 
-using Google.Protobuf;
-
 using Microsoft.Extensions.Logging.Abstractions;
 
 using ProtocolConfChange =
@@ -156,6 +154,32 @@ public sealed class KvClusterComponentTests
             () => NetworkMessageValidator.Validate(
                 new Message(),
                 options));
+    }
+
+    [Fact]
+    public void SnapshotEnvelopePreservesEncodedBytesAndHasItsOwnPayload()
+    {
+        var message = new Message
+        {
+            Type = MessageType.MsgSnap,
+            From = 1,
+            To = 2,
+            Term = 3,
+            Snapshot = new Snapshot
+            {
+                Metadata = new SnapshotMetadata { Index = 5, Term = 2, ConfState = new ConfState { Voters = { 1, 2, 3 } } },
+                Data = RaftBytes.CopyFrom([0, 255, 42]),
+            },
+        };
+        byte[] expected = ProtobufRaftCodec.EncodeMessage(message);
+        var logger = NullLogger<GrpcRaftMessageTransport>.Instance;
+        var envelope = GrpcRaftMessageTransport.EncodeEnvelope(message, expected.Length, logger);
+        Assert.NotNull(envelope);
+        Assert.Null(GrpcRaftMessageTransport.EncodeEnvelope(message, expected.Length - 1, logger));
+
+        message.Snapshot.Data = RaftBytes.Empty;
+        message.Snapshot.Metadata.Index = 6;
+        Assert.True(envelope.Payload.Span.SequenceEqual(expected));
     }
 
     [Fact]

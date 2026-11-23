@@ -16,7 +16,8 @@ dotnet run \
 ```
 
 The refactor suite also reports allocations for the proposal cycle, follower
-heartbeat dispatch, and safe-read completion:
+heartbeat dispatch, safe-read completion, and the KV gRPC envelope for a
+31 MiB snapshot:
 
 ```bash
 dotnet run \
@@ -26,8 +27,9 @@ dotnet run \
 
 [CI](../../.github/workflows/ci.yml) runs both projects with `--smoke`. That
 checks that the workloads execute and produce valid results, not whether
-timings meet a threshold. These are in-memory microbenchmarks, not measures
-of SQLite, transport, or end-to-end KV throughput.
+timings meet a threshold. These are in-memory microbenchmarks. The snapshot
+workload includes Protobuf encoding and envelope construction, not socket
+I/O, SQLite, or end-to-end KV throughput.
 
 ## Methodology
 

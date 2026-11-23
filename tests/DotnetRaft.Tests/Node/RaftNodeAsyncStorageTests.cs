@@ -74,7 +74,7 @@ public sealed class RaftNodeAsyncStorageTests
     }
 
     [Fact]
-    public async Task ValidStorageResponsesAreSerialized()
+    public async Task ValidStorageWorkIsSerialized()
     {
         (RaftNode node, MemoryStorage storage) =
             RestartAsyncNode();
@@ -82,17 +82,7 @@ public sealed class RaftNodeAsyncStorageTests
         {
             await node.CampaignAsync();
             Ready ready = await WaitReadyAsync(node);
-            Message append = StorageMessage(
-                ready,
-                MessageType.MsgStorageAppend);
-            Message[] responses =
-                PersistAppend(storage, append);
-
-            foreach (Message response in responses)
-            {
-                Assert.Equal(append.From, response.To);
-                await node.StepFixtureAsync(response);
-            }
+            await ProcessReadyAsync(node, storage, ready);
 
             Status status =
                 await node.GetStatusAsync();
@@ -107,7 +97,7 @@ public sealed class RaftNodeAsyncStorageTests
     }
 
     [Fact]
-    public async Task WrongSenderStorageResponseIsNonterminal()
+    public async Task FixtureStorageResponseWithWrongSenderIsNonterminal()
     {
         (RaftNode node, _) =
             RestartAsyncNode();
@@ -134,7 +124,7 @@ public sealed class RaftNodeAsyncStorageTests
     }
 
     [Fact]
-    public async Task ReservedSenderWithNonStorageMessageIsNonterminal()
+    public async Task FixtureStorageResponseWithWrongTypeIsNonterminal()
     {
         (RaftNode node, _) =
             RestartAsyncNode();
@@ -185,31 +175,26 @@ public sealed class RaftNodeAsyncStorageTests
         Ready ready)
     {
         // This helper has no network; only use it for singleton batches.
-        foreach (Message message in ready.FixtureMessages())
+        Assert.Empty(ready.Messages);
+        if (ready.AppendWork is { } append)
         {
-            switch (message.Type)
+            PersistAppend(storage, append);
+            foreach (Message response in append.MessagesAfterPersist)
             {
-                case MessageType.MsgStorageAppend:
-                    foreach (Message response in
-                             PersistAppend(
-                                 storage,
-                                 message))
-                    {
-                        Assert.Equal(message.From, response.To);
-                        await node.StepFixtureAsync(response);
-                    }
-
-                    break;
-                case MessageType.MsgStorageApply:
-                    foreach (Message response in
-                             message.Responses)
-                    {
-                        Assert.Equal(message.From, response.To);
-                        await node.StepFixtureAsync(response);
-                    }
-
-                    break;
+                Assert.Equal(1UL, response.To);
+                await node.StepAsync(response);
             }
+
+            if (append.Completion is { } completion)
+            {
+                await node.CompleteStorageWorkAsync(completion);
+            }
+        }
+
+        if (ready.ApplyWork is { } apply)
+        {
+            Assert.All(apply.Entries, entry => Assert.Equal(EntryType.EntryNormal, entry.Type));
+            await node.CompleteStorageWorkAsync(apply.Completion);
         }
     }
 

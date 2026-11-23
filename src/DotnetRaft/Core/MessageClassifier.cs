@@ -1,6 +1,10 @@
 using DotnetRaft.Protocol;
 
+#if DOTNET_RAFT_KV_TRANSPORT
+namespace DotnetRaft.Examples.KvCluster.Transport;
+#else
 namespace DotnetRaft.Core;
+#endif
 
 internal static class MessageClassifier
 {

@@ -17,7 +17,7 @@ public sealed class TypedStorageWorkTests
         StorageCompletion written = Assert.IsAssignableFrom<StorageCompletion>(append.Completion);
         Assert.Empty(ready.Messages);
         Assert.Null(ready.ApplyWork);
-        Assert.Throws<InvalidOperationException>(() => replacement.CompleteStorageWork(written));
+        Assert.ThrowsAny<InvalidOperationException>(() => replacement.CompleteStorageWork(written));
 
         // The Ready mirror is detached from the actual work and its receipt.
         Assert.Single(ready.Entries).Index = 99;
@@ -29,21 +29,21 @@ public sealed class TypedStorageWorkTests
         }
 
         node.CompleteStorageWork(written);
-        Assert.Throws<InvalidOperationException>(() => node.CompleteStorageWork(written));
+        Assert.ThrowsAny<InvalidOperationException>(() => node.CompleteStorageWork(written));
 
         Ready committed = node.Ready();
         var apply = Assert.IsType<StorageApplyWork>(committed.ApplyWork);
         Assert.Equal(durable.Index, Assert.Single(apply.Entries).Index);
         node.CompleteStorageWork(apply.Completion);
         Assert.Equal(durable.Index, node.GetBasicStatus().Applied);
-        Assert.Throws<InvalidOperationException>(() => node.CompleteStorageWork(apply.Completion));
+        Assert.ThrowsAny<InvalidOperationException>(() => node.CompleteStorageWork(apply.Completion));
     }
 
     [Fact]
     public void PeerStepCannotAcknowledgeAStorageWorker()
     {
         var (node, _) = AsyncStorageTestSupport.CreateNode();
-        Assert.Throws<InvalidOperationException>(() => node.Step(new Message
+        Assert.ThrowsAny<InvalidOperationException>(() => node.Step(new Message
         {
             Type = MessageType.MsgStorageAppendResp,
             From = RaftLocalMessageTargets.AppendThread,

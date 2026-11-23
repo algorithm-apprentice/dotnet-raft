@@ -2,8 +2,6 @@ using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
-using Google.Protobuf;
-
 using static DotnetRaft.Tests.AsyncStorage.AsyncStorageTestSupport;
 
 using DotnetRawNode = DotnetRaft.RawNode;
@@ -116,63 +114,64 @@ public sealed class AsyncStorageResponseTests
     }
 
     [Fact]
-    public void AppendResponseTermPreventsAbaTruncation()
+    public void AppendReceiptTermPreventsAbaTruncation()
     {
-        (DotnetRawNode node, _) = CreateNode();
+        (DotnetRawNode node, MemoryStorage storage) = CreateNode();
         node.Core.BecomeFollower(1, 0);
         node.Core.Log.Append(
         [
             EntryAt(3, 1),
         ]);
-        Message first = StorageResponse(
-            node.Ready(),
-            MessageType.MsgStorageAppendResp);
+        StorageAppendWork first = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
 
         node.Core.BecomeFollower(2, 0);
         node.Core.Log.Append(
         [
             EntryAt(3, 2),
         ]);
-        Message second = StorageResponse(
-            node.Ready(),
-            MessageType.MsgStorageAppendResp);
+        StorageAppendWork second = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
 
         node.Core.BecomeFollower(3, 0);
         node.Core.Log.Append(
         [
             EntryAt(3, 1),
         ]);
-        _ = node.Ready();
+        StorageAppendWork restored = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
 
         node.Core.BecomeFollower(4, 0);
-        Ready currentReady = node.Ready();
-        Message current = StorageResponse(
-            currentReady,
-            MessageType.MsgStorageAppendResp);
-        Assert.Empty(
-            StorageMessage(
-                currentReady,
-                MessageType.MsgStorageAppend).Entries);
+        StorageAppendWork current = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
+        Assert.Empty(current.Entries);
 
-        node.StepFixture(first);
-        node.StepFixture(second);
+        CompleteAppend(first);
+        Assert.Equal(3UL, node.Core.Log.Unstable.Offset);
+        CompleteAppend(second);
+        Assert.Equal(3UL, node.Core.Log.Unstable.Offset);
+        CompleteAppend(restored);
         Assert.Equal(3UL, node.Core.Log.Unstable.Offset);
 
-        node.StepFixture(current);
+        CompleteAppend(current);
         Assert.Equal(4UL, node.Core.Log.Unstable.Offset);
+        Assert.Equal(1UL, storage.GetTerm(3));
+
+        void CompleteAppend(StorageAppendWork append)
+        {
+            Assert.Empty(append.MessagesAfterPersist);
+            PersistAppend(storage, append);
+            node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(append.Completion));
+        }
     }
 
     [Fact]
     public void SnapshotCompletionReassertsMatchingConfiguration()
     {
         var trace = new RecordingTraceSink();
-        (DotnetRawNode node, _) = CreateNode(
+        (DotnetRawNode node, MemoryStorage storage) = CreateNode(
             voters: [1, 2],
             traceSink: trace);
         Snapshot snapshot = SnapshotAt(
             5,
             [1UL, 2UL]);
-        node.StepFixture(
+        node.Step(
             new Message
             {
                 From = 2,
@@ -181,9 +180,7 @@ public sealed class AsyncStorageResponseTests
                 Term = 1,
                 Snapshot = snapshot,
             });
-        Message response = StorageResponse(
-            node.Ready(),
-            MessageType.MsgStorageAppendResp);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
 
         node.Core.BecomeFollower(2, 0);
         node.ApplyConfChange(
@@ -198,7 +195,8 @@ public sealed class AsyncStorageResponseTests
             node.GetStatus().Configuration.Voters);
         trace.Events.Clear();
 
-        node.StepFixture(response);
+        PersistAppend(storage, append);
+        node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(append.Completion));
 
         Assert.Equal(
             [1UL, 2UL],
@@ -215,7 +213,7 @@ public sealed class AsyncStorageResponseTests
     [Fact]
     public void SnapshotCompletionReassertsLearnerStateAndClearsVotes()
     {
-        (DotnetRawNode node, _) = CreateNode(voters: [1, 2]);
+        (DotnetRawNode node, MemoryStorage storage) = CreateNode(voters: [1, 2]);
         var state = new ConfState();
         state.Voters.Add(2);
         state.Learners.Add(1);
@@ -228,7 +226,7 @@ public sealed class AsyncStorageResponseTests
                 ConfState = state,
             },
         };
-        node.StepFixture(
+        node.Step(
             new Message
             {
                 From = 2,
@@ -237,9 +235,7 @@ public sealed class AsyncStorageResponseTests
                 Term = 1,
                 Snapshot = snapshot,
             });
-        Message response = StorageResponse(
-            node.Ready(),
-            MessageType.MsgStorageAppendResp);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
         Assert.True(node.Core.Tracker.IsLearner(node.Core.Id));
 
         node.ApplyConfChange(
@@ -253,7 +249,8 @@ public sealed class AsyncStorageResponseTests
         Assert.False(node.Core.Tracker.IsLearner(node.Core.Id));
         Assert.NotEmpty(node.Core.Tracker.Votes);
 
-        node.StepFixture(response);
+        PersistAppend(storage, append);
+        node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(append.Completion));
 
         Assert.True(node.Core.Tracker.IsLearner(node.Core.Id));
         Assert.Empty(node.Core.Tracker.Votes);
@@ -263,10 +260,10 @@ public sealed class AsyncStorageResponseTests
     }
 
     [Fact]
-    public void OldSnapshotResponseDoesNotOverwriteNewConfiguration()
+    public void OldSnapshotReceiptDoesNotOverwriteNewConfiguration()
     {
-        (DotnetRawNode node, _) = CreateNode(voters: [1, 2, 3]);
-        node.StepFixture(
+        (DotnetRawNode node, MemoryStorage storage) = CreateNode(voters: [1, 2, 3]);
+        node.Step(
             new Message
             {
                 From = 2,
@@ -277,11 +274,9 @@ public sealed class AsyncStorageResponseTests
                     5,
                     [1UL, 2UL]),
             });
-        Message oldResponse = StorageResponse(
-            node.Ready(),
-            MessageType.MsgStorageAppendResp);
+        StorageAppendWork older = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
 
-        node.StepFixture(
+        node.Step(
             new Message
             {
                 From = 2,
@@ -292,9 +287,7 @@ public sealed class AsyncStorageResponseTests
                     6,
                     [1UL, 2UL, 3UL]),
             });
-        Message currentResponse = StorageResponse(
-            node.Ready(),
-            MessageType.MsgStorageAppendResp);
+        StorageAppendWork current = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
         node.ApplyConfChange(
             new ProtocolConfChange
             {
@@ -303,13 +296,15 @@ public sealed class AsyncStorageResponseTests
                 NodeId = 3,
             });
 
-        node.StepFixture(oldResponse);
+        PersistAppend(storage, older);
+        node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(older.Completion));
         Assert.Equal(
             [1UL, 2UL],
             node.GetStatus().Configuration.Voters);
         Assert.True(node.Core.Log.HasUnstableSnapshot);
 
-        node.StepFixture(currentResponse);
+        PersistAppend(storage, current);
+        node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(current.Completion));
         Assert.Equal(
             [1UL, 2UL, 3UL],
             node.GetStatus().Configuration.Voters);
@@ -317,7 +312,7 @@ public sealed class AsyncStorageResponseTests
     }
 
     [Fact]
-    public void OlderApplyResponseAfterSnapshotReleasesAccounting()
+    public void OlderApplyReceiptAfterSnapshotReleasesAccounting()
     {
         var state = new ConfState();
         state.Voters.Add(1);
@@ -347,17 +342,11 @@ public sealed class AsyncStorageResponseTests
                 Applied = 2,
                 AsyncStorageWrites = true,
             });
-        Ready applyReady = node.Ready();
-        Message applyResponse =
-            StorageMessage(
-                applyReady,
-                MessageType.MsgStorageApply)
-            .Responses[0]
-            .Clone();
+        StorageApplyWork apply = Assert.IsType<StorageApplyWork>(node.Ready().ApplyWork);
         Assert.True(
             node.Core.Log.ApplyingEntriesSize > 0);
 
-        node.StepFixture(
+        node.Step(
             new Message
             {
                 From = 1,
@@ -368,13 +357,12 @@ public sealed class AsyncStorageResponseTests
                     5,
                     [1UL]),
             });
-        Message snapshotResponse = StorageResponse(
-            node.Ready(),
-            MessageType.MsgStorageAppendResp);
-        node.StepFixture(snapshotResponse);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(node.Ready().AppendWork);
+        PersistAppend(storage, append);
+        node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(append.Completion));
         Assert.Equal(5UL, node.GetBasicStatus().Applied);
 
-        node.StepFixture(applyResponse);
+        node.CompleteStorageWork(apply.Completion);
         Assert.Equal(5UL, node.GetBasicStatus().Applied);
         Assert.Equal(
             0UL,
@@ -417,18 +405,5 @@ public sealed class AsyncStorageResponseTests
         {
             Events.Add(traceEvent);
         }
-    }
-
-    private static Message StorageResponse(
-        Ready ready,
-        MessageType type)
-    {
-        return Assert.Single(
-                StorageMessage(
-                    ready,
-                    MessageType.MsgStorageAppend)
-                .Responses,
-                message => message.Type == type)
-            .Clone();
     }
 }

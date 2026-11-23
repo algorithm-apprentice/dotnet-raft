@@ -265,9 +265,8 @@ public sealed class RawNodeReadyTests
         storage.SetHardState(new RaftHardState { Term = 1, Commit = 1 });
         var node = CreateNode(storage, asyncStorageWrites: asyncStorageWrites);
         Ready earlier = node.Ready();
-        Message? apply = asyncStorageWrites
-            ? Assert.Single(earlier.FixtureMessages(), message =>
-                message.Type == MessageType.MsgStorageApply)
+        StorageApplyWork? apply = asyncStorageWrites
+            ? Assert.IsType<StorageApplyWork>(earlier.ApplyWork)
             : null;
         Entry entry = Assert.Single(apply is null
             ? earlier.CommittedEntries
@@ -290,7 +289,7 @@ public sealed class RawNodeReadyTests
         }
         else
         {
-            node.StepFixture(Assert.Single(apply.Responses));
+            node.CompleteStorageWork(apply.Completion);
         }
 
         Ready snapshot = node.Ready();
@@ -378,9 +377,9 @@ public sealed class RawNodeReadyTests
             return;
         }
 
-        Message append = AsyncStorageTestSupport.StorageMessage(
-            ready, MessageType.MsgStorageAppend);
-        Message[] responses = AsyncStorageTestSupport.PersistAppend(storage, append);
-        node.StepFixture(Assert.Single(responses, response => response.To == 1));
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(ready.AppendWork);
+        AsyncStorageTestSupport.PersistAppend(storage, append);
+        Assert.Equal(2UL, Assert.Single(append.MessagesAfterPersist).To);
+        node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(append.Completion));
     }
 }

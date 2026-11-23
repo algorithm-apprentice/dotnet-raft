@@ -103,12 +103,14 @@ its origin. A strict one-hop transport can drop these and let clients retry.
 If you support repeated forwarding, explicitly authorize the authenticated
 forwarder to carry that origin; do not rewrite a ReadIndex reply address.
 
-`RawNode.Step` rejects unknown-peer responses and local-only message types
-on the ordinary network path; `RaftNode.StepAsync` ignores them. Neither
-replaces the transport allowlist. Known malformed shapes fail before core
-mutation; a structural `ArgumentException` rejects the request without
-faulting the node. See the [input boundary](../internals/node.md#validation-and-failure)
-for why it is separate from consensus transitions.
+Both `RawNode.Step` and `RaftNode.StepAsync` reject legacy storage responses
+and reserved worker senders without faulting the node. `RawNode.Step` also
+rejects unknown-peer responses and other local-only message types;
+`RaftNode.StepAsync` ignores those. Neither replaces the transport allowlist.
+Known malformed shapes fail before core mutation; a structural
+`ArgumentException` rejects the request without faulting the node. See the
+[input boundary](../internals/node.md#validation-and-failure) for why it is
+separate from consensus transitions.
 
 After an outbound snapshot transfer, call `ReportSnapshot` or
 `ReportSnapshotAsync` with the transport outcome. Both outcomes can move a

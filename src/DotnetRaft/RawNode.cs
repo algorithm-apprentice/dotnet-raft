@@ -201,10 +201,9 @@ public sealed partial class RawNode
             NetworkMessageValidation.ValidateType(
                 owned);
 
-            if (MessageClassifier.IsStorageResponse(owned.Type)
-                || RaftMessageTargets.IsLocal(owned.From))
+            if (NetworkMessageValidation.IsStorageInput(owned))
             {
-                throw new InvalidOperationException("Storage completions cannot be stepped as peer messages.");
+                throw new StorageResponseValidationException("Storage completions cannot be stepped as peer messages.");
             }
 
             if (MessageClassifier.IsLocal(owned.Type))

@@ -34,7 +34,7 @@ public sealed partial class GrpcRaftMessageTransport
     {
         ArgumentNullException.ThrowIfNull(message);
         PeerClient peer = GetPeerClient(message);
-        RaftEnvelope? envelope = EncodeEnvelope(message);
+        RaftEnvelope? envelope = EncodeEnvelope(message, options.MaxTransportMessageBytes, logger);
         if (envelope is null)
         {
             return RaftSendResult.Unavailable;
@@ -61,12 +61,11 @@ public sealed partial class GrpcRaftMessageTransport
                 options.MaxTransportMessageBytes));
     }
 
-    private RaftEnvelope? EncodeEnvelope(Message message)
+    internal static RaftEnvelope? EncodeEnvelope(
+        Message message, int maximumMessageBytes, ILogger<GrpcRaftMessageTransport> logger)
     {
-        ByteString payload =
-            ByteString.CopyFrom(ProtobufRaftCodec.EncodeMessage(message));
-        if (payload.Length
-            > options.MaxTransportMessageBytes)
+        byte[] payload = ProtobufRaftCodec.EncodeMessage(message);
+        if (payload.Length > maximumMessageBytes)
         {
             LogOversize(
                 logger,
@@ -74,13 +73,15 @@ public sealed partial class GrpcRaftMessageTransport
                 message.From,
                 message.To,
                 payload.Length,
-                options.MaxTransportMessageBytes);
+                maximumMessageBytes);
             return null;
         }
 
         return new RaftEnvelope
         {
-            Payload = payload,
+            // The encoder returns a fresh array. Transfer it to the envelope;
+            // no code retains a writable alias or returns it to a pool.
+            Payload = UnsafeByteOperations.UnsafeWrap(payload),
         };
     }
 

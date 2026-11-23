@@ -8,7 +8,7 @@ using DotnetRaft.Protocol;
 using DotnetRaft.Read;
 using DotnetRaft.Storage;
 
-using Google.Protobuf;
+using static DotnetRaft.Tests.AsyncStorage.AsyncStorageTestSupport;
 
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
@@ -19,7 +19,7 @@ internal sealed class InteractionEnvironment
     private const int DefaultStabilizationLimit = 100_000;
     private readonly int _stabilizationLimit;
     private readonly List<InteractionNode> _nodes = [];
-    private readonly List<Message> _messages = [];
+    private readonly List<InteractionDelivery> _deliveries = [];
     private readonly HashSet<ulong> _crashed = [];
     private readonly InteractionOutput _output = new();
 
@@ -44,8 +44,8 @@ internal sealed class InteractionEnvironment
 
     internal IReadOnlyList<Message> QueuedMessages =>
         Array.AsReadOnly(
-            _messages
-                .Select(message => message.Clone())
+            _deliveries
+                .Select(delivery => delivery.Frame.Clone())
                 .ToArray());
 
     internal string CurrentOutput =>
@@ -159,13 +159,16 @@ internal sealed class InteractionEnvironment
 
     internal void CrashNode(int nodeIndex)
     {
-        ulong id = GetNode(nodeIndex).Config.Id;
+        InteractionNode node = GetNode(nodeIndex);
+        ulong id = node.Config.Id;
         if (!_crashed.Add(id))
         {
             throw new InvalidOperationException($"Node {id} is already crashed.");
         }
 
-        _messages.RemoveAll(message => message.From == id || message.To == id);
+        node.AppendWork.Clear();
+        node.ApplyWork.Clear();
+        _deliveries.RemoveAll(delivery => delivery.From == id || delivery.To == id);
     }
 
     internal void RestartNode(int nodeIndex)
@@ -199,7 +202,7 @@ internal sealed class InteractionEnvironment
         }
 
         _nodes[nodeIndex] = CreateNode(id, node.Storage, node.Options, application);
-        _messages.RemoveAll(message => message.From == id || message.To == id);
+        _deliveries.RemoveAll(delivery => delivery.From == id || delivery.To == id);
         _crashed.Remove(id);
     }
 
@@ -288,54 +291,39 @@ internal sealed class InteractionEnvironment
             ReadStateDelivered?.Invoke(node.Config.Id, readState);
         }
 
-        if (node.Config.AsyncStorageWrites)
+        if (!node.Config.AsyncStorageWrites)
         {
-            foreach (Message message in ready.FixtureMessages())
-            {
-                switch (message.To)
-                {
-                    case RaftLocalMessageTargets.AppendThread
-                        when message.Type
-                            == MessageType.MsgStorageAppend:
-                        node.EnqueueAppendWork(message);
-                        break;
-                    case RaftLocalMessageTargets.ApplyThread
-                        when message.Type
-                            == MessageType.MsgStorageApply:
-                        node.EnqueueApplyWork(message);
-                        break;
-                    case RaftLocalMessageTargets.AppendThread:
-                    case RaftLocalMessageTargets.ApplyThread:
-                        throw new InvalidOperationException(
-                            $"Unexpected local storage message {message.Type} for target {message.To}.");
-                    default:
-                        _messages.Add(message.Clone());
-                        break;
-                }
-            }
-
+            ProcessSynchronousReady(node, ready);
             return;
         }
 
-        Snapshot? applicationSnapshot =
-            ready.Snapshot?.Clone();
-        if (ready.Snapshot is not null)
+        EnqueueMessages(ready.Messages);
+        if (ready.AppendWork is { } append)
         {
-            node.Storage.ApplySnapshot(
-                ready.Snapshot);
+            node.AppendWork.Enqueue(append);
         }
 
+        if (ready.ApplyWork is { } apply)
+        {
+            node.ApplyWork.Enqueue(apply);
+        }
+    }
+
+    private void ProcessSynchronousReady(InteractionNode node, Ready ready)
+    {
+        if (ready.Snapshot is { } snapshot)
+        {
+            node.Storage.ApplySnapshot(snapshot);
+        }
         node.Storage.Append(ready.Entries);
         if (ready.HardState is { } hardState)
         {
-            node.Storage.SetHardState(
-                hardState);
+            node.Storage.SetHardState(hardState);
         }
 
-        if (applicationSnapshot is not null)
+        if (ready.Snapshot is { } applicationSnapshot)
         {
-            node.SetApplicationSnapshot(
-                applicationSnapshot);
+            node.SetApplicationSnapshot(applicationSnapshot);
         }
 
         foreach (Entry entry in ready.CommittedEntries)
@@ -343,122 +331,83 @@ internal sealed class InteractionEnvironment
             ApplyEntry(node, entry);
         }
 
-        _messages.AddRange(
-            ready.FixtureMessages().Select(
-                message => message.Clone()));
+        EnqueueMessages(ready.Messages);
         node.RawNode.Advance(ready);
     }
 
     internal void ProcessAppendThread(int nodeIndex)
     {
         InteractionNode node = GetNode(nodeIndex);
-        if (!node.TryDequeueAppendWork(
-                out Message? request))
+        if (!node.AppendWork.TryDequeue(out StorageAppendWork? request))
         {
             _output.Write(
                 "no append work to perform");
             return;
         }
 
-        if (request is null)
+        DescribeWorkerRequest(request.DescribeWork());
+        PersistAppend(node.Storage, request);
+
+        if (request.Snapshot is { } snapshot)
         {
-            throw new InvalidOperationException(
-                "Append work queue returned a null message.");
-        }
-        Message[] responses =
-        [
-            .. request.Responses.Select(
-                response => response.Clone()),
-        ];
-        Message described = request.Clone();
-        described.Responses.Clear();
-        _output.WriteLine("Processing:");
-        _output.WriteLine(
-            ProtobufFixtureEncoding.DescribeMessage(
-                described));
-
-        if (request.Snapshot is not null
-            && request.Snapshot.Metadata.Index != 0)
-        {
-            node.Storage.ApplySnapshot(
-                request.Snapshot);
-            node.SetApplicationSnapshot(
-                request.Snapshot);
-        }
-
-        node.Storage.Append(request.Entries);
-
-        if (request.HasTerm
-            || request.HasVote
-            || request.HasCommit)
-        {
-            if (!request.HasTerm
-                || !request.HasVote
-                || !request.HasCommit)
-            {
-                throw new InvalidOperationException(
-                    "Storage append hard state must be all-or-none.");
-            }
-
-            node.Storage.SetHardState(
-                new RaftHardState
-                {
-                    Term = request.Term,
-                    Vote = request.Vote,
-                    Commit = request.Commit,
-                });
+            node.SetApplicationSnapshot(snapshot);
         }
 
         _output.WriteLine("Responses:");
-        foreach (Message response in responses)
+        foreach (Message response in request.MessagesAfterPersist)
         {
-            _output.WriteLine(
-                ProtobufFixtureEncoding.DescribeMessage(
-                    response));
-            _messages.Add(response.Clone());
+            _output.WriteLine(ProtobufFixtureEncoding.DescribeMessage(response));
+            EnqueueMessage(response);
+        }
+
+        if (request.Completion is { } completion)
+        {
+            EnqueueCompletion(node.Config.Id, completion);
         }
     }
 
     internal void ProcessApplyThread(int nodeIndex)
     {
         InteractionNode node = GetNode(nodeIndex);
-        if (!node.TryDequeueApplyWork(
-                out Message? request))
+        if (!node.ApplyWork.TryDequeue(out StorageApplyWork? request))
         {
             _output.Write(
                 "no apply work to perform");
             return;
         }
 
-        if (request is null)
-        {
-            throw new InvalidOperationException(
-                "Apply work queue returned a null message.");
-        }
-        Message[] responses =
-        [
-            .. request.Responses.Select(
-                response => response.Clone()),
-        ];
-        Message described = request.Clone();
-        described.Responses.Clear();
-        _output.WriteLine("Processing:");
-        _output.WriteLine(
-            ProtobufFixtureEncoding.DescribeMessage(
-                described));
+        DescribeWorkerRequest(request.DescribeWork());
         foreach (Entry entry in request.Entries)
         {
             ApplyEntry(node, entry);
         }
 
         _output.WriteLine("Responses:");
-        foreach (Message response in responses)
+        EnqueueCompletion(node.Config.Id, request.Completion);
+    }
+
+    private void DescribeWorkerRequest(Message description)
+    {
+        description.Responses.Clear();
+        _output.WriteLine("Processing:");
+        _output.WriteLine(ProtobufFixtureEncoding.DescribeMessage(description));
+    }
+
+    private void EnqueueMessage(Message message) => _deliveries.Add(new InteractionDelivery(message));
+
+    private void EnqueueMessages(IReadOnlyList<Message> messages)
+    {
+        foreach (Message message in messages)
         {
-            _output.WriteLine(
-                ProtobufFixtureEncoding.DescribeMessage(
-                    response));
-            _messages.Add(response.Clone());
+            EnqueueMessage(message);
         }
+    }
+
+    private void EnqueueCompletion(ulong nodeId, StorageCompletion completion)
+    {
+        var delivery = new InteractionDelivery(nodeId, completion);
+        _output.WriteLine(ProtobufFixtureEncoding.DescribeMessage(delivery.Frame));
+        _deliveries.Add(delivery);
     }
 
     internal int DeliverMessages(
@@ -473,16 +422,16 @@ internal sealed class InteractionEnvironment
 
     internal void DeliverNetworkMessage(int index, bool drop = false, bool duplicate = false)
     {
-        Message message = _messages[index];
-        if (IsLocalMessage(message))
+        InteractionDelivery delivery = _deliveries[index];
+        if (delivery.IsLocal)
         {
             throw new ArgumentException("Only network messages can be reordered, dropped, or duplicated.", nameof(index));
         }
 
-        drop |= !CanDeliver(message);
+        drop |= !CanDeliver(delivery);
         if (!drop && duplicate)
         {
-            _messages.Add(message.Clone());
+            EnqueueMessage(delivery.Frame);
         }
 
         FinishDelivery(index, drop);
@@ -531,9 +480,9 @@ internal sealed class InteractionEnvironment
             {
                 InteractionNode node =
                     GetNode(nodeIndex);
-                if (!_messages.Any(
-                        message =>
-                            message.To
+                if (!_deliveries.Any(
+                        delivery =>
+                            delivery.To
                             == node.Config.Id))
                 {
                     continue;
@@ -659,7 +608,7 @@ internal sealed class InteractionEnvironment
             Snapshot =
                 from.GetApplicationSnapshot(),
         };
-        _messages.Add(message.Clone());
+        EnqueueMessage(message);
         _output.Write(
             ProtobufFixtureEncoding.DescribeMessage(message));
     }
@@ -678,7 +627,7 @@ internal sealed class InteractionEnvironment
         Message message)
     {
         ArgumentNullException.ThrowIfNull(message);
-        _messages.Add(message.Clone());
+        EnqueueMessage(message);
     }
 
     internal void RaftLog(int nodeIndex)
@@ -1421,15 +1370,14 @@ internal sealed class InteractionEnvironment
                  recipients)
         {
             var index = 0;
-            while (index < _messages.Count)
+            while (index < _deliveries.Count)
             {
-                Message message = _messages[index];
+                InteractionDelivery delivery = _deliveries[index];
                 bool matches =
-                    message.To == recipient.Id
+                    delivery.To == recipient.Id
                     && (!type.HasValue
-                        || message.Type == type.Value)
-                    && !(recipient.Drop
-                         && IsLocalMessage(message));
+                        || delivery.Type == type.Value)
+                    && !(recipient.Drop && delivery.IsLocal);
                 if (!matches)
                 {
                     index++;
@@ -1437,7 +1385,7 @@ internal sealed class InteractionEnvironment
                 }
 
                 beforeHandle?.Invoke();
-                FinishDelivery(index, recipient.Drop || !CanDeliver(message));
+                FinishDelivery(index, recipient.Drop || !CanDeliver(delivery));
                 handled++;
             }
         }
@@ -1445,16 +1393,17 @@ internal sealed class InteractionEnvironment
         return handled;
     }
 
-    private bool CanDeliver(Message message)
+    private bool CanDeliver(InteractionDelivery delivery)
     {
-        return !_crashed.Contains(message.From)
-            && !_crashed.Contains(message.To)
-            && (IsLocalMessage(message) || NetworkLinkIsOpen?.Invoke(message) != false);
+        return !_crashed.Contains(delivery.From)
+            && !_crashed.Contains(delivery.To)
+            && (delivery.IsLocal || NetworkLinkIsOpen?.Invoke(delivery.Frame) != false);
     }
 
     private void FinishDelivery(int index, bool drop)
     {
-        Message message = _messages[index];
+        InteractionDelivery delivery = _deliveries[index];
+        Message message = delivery.Frame;
         if (drop)
         {
             _output.Write("dropped: ");
@@ -1463,18 +1412,22 @@ internal sealed class InteractionEnvironment
         _output.WriteLine(ProtobufFixtureEncoding.DescribeMessage(message));
         if (!drop)
         {
-            InteractionNode destination = GetNodeById(message.To);
-            if (IsSafelyRejectedUnknownResponse(destination, message))
+            InteractionNode destination = GetNodeById(delivery.To);
+            if (delivery.Completion is { } completion)
+            {
+                destination.RawNode.CompleteStorageWork(completion);
+            }
+            else if (IsSafelyRejectedUnknownResponse(destination, message))
             {
                 _output.WriteLine($"Response sender {message.From} is not a known peer.");
             }
             else
             {
-                destination.RawNode.StepFixture(message);
+                destination.RawNode.Step(message);
             }
         }
 
-        _messages.RemoveAt(index);
+        _deliveries.RemoveAt(index);
     }
 
     private static bool IsSafelyRejectedUnknownResponse(
@@ -1493,14 +1446,6 @@ internal sealed class InteractionEnvironment
         destination.RawNode.VisitProgress(
             (id, _) => known |= id == message.From);
         return !known;
-    }
-
-    private static bool IsLocalMessage(
-        Message message)
-    {
-        return message.From == message.To
-            || RaftMessageTargets.IsLocal(message.From)
-            || RaftMessageTargets.IsLocal(message.To);
     }
 
     private void ApplyEntry(
@@ -1652,8 +1597,7 @@ internal sealed class InteractionEnvironment
                     _nodes[index].Config.Id),
         ];
         var idSet = ids.ToHashSet();
-        int messages = _messages.Count(
-            message => idSet.Contains(message.To));
+        int messages = _deliveries.Count(delivery => idSet.Contains(delivery.To));
         throw new InvalidOperationException(
             $"Stabilization exceeded limit {_stabilizationLimit}; selected IDs: {string.Join(',', ids)}; ready IDs: {string.Join(',', ready)}; queued selected messages: {messages}.");
     }

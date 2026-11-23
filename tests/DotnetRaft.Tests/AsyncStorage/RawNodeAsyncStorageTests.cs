@@ -1,8 +1,6 @@
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
-using Google.Protobuf;
-
 using static DotnetRaft.Tests.AsyncStorage.AsyncStorageTestSupport;
 
 using DotnetRawNode = DotnetRaft.RawNode;
@@ -18,7 +16,7 @@ namespace DotnetRaft.Tests.AsyncStorage;
 public sealed class RawNodeAsyncStorageTests
 {
     [Fact]
-    public void ElectionPersistenceUsesAppendRequest()
+    public void ElectionPersistenceUsesAppendWork()
     {
         (DotnetRawNode node, _) = CreateNode();
 
@@ -30,29 +28,20 @@ public sealed class RawNodeAsyncStorageTests
             ready.SoftState?.Role);
         Assert.Empty(ready.Entries);
         Assert.Empty(ready.CommittedEntries);
-        Message append = StorageMessage(
-            ready,
-            MessageType.MsgStorageAppend);
-        Assert.Equal(
-            RaftLocalMessageTargets.AppendThread,
-            append.To);
-        Assert.Equal(1UL, append.From);
-        Assert.True(append.HasTerm);
-        Assert.True(append.HasVote);
-        Assert.True(append.HasCommit);
-        Assert.Equal(1UL, append.Term);
-        Assert.Equal(1UL, append.Vote);
-        Assert.Equal(2UL, append.Commit);
-        Message vote = Assert.Single(append.Responses);
+        Assert.Empty(ready.Messages);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(ready.AppendWork);
+        Assert.Equal(new RaftHardState(1, 1, 2), append.HardState);
+        Assert.Empty(append.Entries);
+        Assert.Null(append.Completion);
+        Message vote = Assert.Single(append.MessagesAfterPersist);
         Assert.Equal(MessageType.MsgVoteResp, vote.Type);
-        Assert.False(append.HasIndex);
-        Assert.False(append.HasLogTerm);
+        Assert.Equal(1UL, vote.To);
         Assert.Throws<NotSupportedException>(
             () => node.Advance(ready));
     }
 
     [Fact]
-    public async Task AppendResponsesPrecedeStorageAcknowledgement()
+    public async Task AppendReleasesPeerResponsesSeparatelyFromItsReceipt()
     {
         (DotnetRawNode node, MemoryStorage storage) = CreateNode();
         node.Campaign();
@@ -63,28 +52,14 @@ public sealed class RawNodeAsyncStorageTests
 
         Ready ready = node.Ready();
         Entry entry = Assert.Single(ready.Entries);
-        Message append = StorageMessage(
-            ready,
-            MessageType.MsgStorageAppend);
-
-        Assert.Equal(
-            [
-                MessageType.MsgAppResp,
-                MessageType.MsgStorageAppendResp,
-            ],
-            append.Responses.Select(
-                response => response.Type));
-        Message response = append.Responses[^1];
-        Assert.Equal(
-            RaftLocalMessageTargets.AppendThread,
-            response.From);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(ready.AppendWork);
+        Message response = Assert.Single(append.MessagesAfterPersist);
+        Assert.Equal(MessageType.MsgAppResp, response.Type);
+        Assert.Equal(1UL, response.From);
         Assert.Equal(1UL, response.To);
-        Assert.True(response.HasTerm);
         Assert.Equal(1UL, response.Term);
-        Assert.True(response.HasIndex);
-        Assert.True(response.HasLogTerm);
         Assert.Equal(entry.Index, response.Index);
-        Assert.Equal(entry.Term, response.LogTerm);
+        Assert.NotNull(append.Completion);
     }
 
     [Fact]
@@ -104,23 +79,13 @@ public sealed class RawNodeAsyncStorageTests
 
         Ready commit = node.Ready();
 
-        Message append = StorageMessage(
-            commit,
-            MessageType.MsgStorageAppend);
-        Assert.True(append.HasTerm);
-        Assert.Equal(3UL, append.Commit);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(commit.AppendWork);
+        Assert.Equal(new RaftHardState(1, 1, 3), append.HardState);
         Assert.Empty(append.Entries);
-        Assert.Empty(append.Responses);
-        Message apply = StorageMessage(
-            commit,
-            MessageType.MsgStorageApply);
-        Assert.True(apply.HasTerm);
-        Assert.Equal(0UL, apply.Term);
-        Message applyResponse =
-            Assert.Single(apply.Responses);
-        Assert.True(applyResponse.HasTerm);
-        Assert.Equal(0UL, applyResponse.Term);
-        Assert.Single(applyResponse.Entries);
+        Assert.Empty(append.MessagesAfterPersist);
+        Assert.Null(append.Completion);
+        StorageApplyWork apply = Assert.IsType<StorageApplyWork>(commit.ApplyWork);
+        Assert.Equal(3UL, Assert.Single(apply.Entries).Index);
     }
 
     [Fact]
@@ -130,21 +95,18 @@ public sealed class RawNodeAsyncStorageTests
         await BecomeLeaderAsync(node, storage);
         node.Propose("command"u8);
         Ready ready = node.Ready();
-        Message append = StorageMessage(ready, MessageType.MsgStorageAppend);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(ready.AppendWork);
         ulong index = Assert.Single(append.Entries).Index;
 
         ready.Entries[0].Index = index + 10;
         Assert.Equal(index, append.Entries[0].Index);
         await ProcessReadyAsync(node, storage, ready);
         Ready committed = node.Ready();
-        Message apply = StorageMessage(committed, MessageType.MsgStorageApply);
-        Message completion = Assert.Single(apply.Responses);
+        StorageApplyWork apply = Assert.IsType<StorageApplyWork>(committed.ApplyWork);
         committed.CommittedEntries[0].Index = index + 11;
         Assert.Equal(index, apply.Entries[0].Index);
         apply.Entries[0].Index = index + 12;
-        Assert.Equal(index, completion.Entries[0].Index);
-
-        node.StepFixture(completion);
+        node.CompleteStorageWork(apply.Completion);
         Assert.Equal(index, node.GetBasicStatus().Applied);
     }
 
@@ -182,33 +144,20 @@ public sealed class RawNodeAsyncStorageTests
         await BecomeLeaderAsync(node, storage);
         node.Propose("value"u8);
         Ready appendReady = node.Ready();
-        Message append = StorageMessage(
-            appendReady,
-            MessageType.MsgStorageAppend);
-        Message selfAppend = append.Responses[0];
-        Message stable = append.Responses[1];
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(appendReady.AppendWork);
+        Message selfAppend = Assert.Single(append.MessagesAfterPersist);
 
         PersistAppend(storage, append);
-        node.StepFixture(selfAppend);
+        node.Step(selfAppend);
         Ready committedButUnstable = node.Ready();
 
-        Assert.Single(
-            committedButUnstable.FixtureMessages(),
-            message =>
-                message.Type
-                == MessageType.MsgStorageAppend);
-        Assert.DoesNotContain(
-            committedButUnstable.FixtureMessages(),
-            message =>
-                message.Type
-                == MessageType.MsgStorageApply);
+        Assert.NotNull(committedButUnstable.AppendWork);
+        Assert.Null(committedButUnstable.ApplyWork);
 
-        node.StepFixture(stable);
+        node.CompleteStorageWork(Assert.IsAssignableFrom<StorageCompletion>(append.Completion));
         Ready applicable = node.Ready();
 
-        Message apply = StorageMessage(
-            applicable,
-            MessageType.MsgStorageApply);
+        StorageApplyWork apply = Assert.IsType<StorageApplyWork>(applicable.ApplyWork);
         Assert.Equal(
             RaftBytes.CopyFromUtf8("value"),
             Assert.Single(apply.Entries).Data);
@@ -222,9 +171,7 @@ public sealed class RawNodeAsyncStorageTests
         node.Propose("value"u8);
 
         Ready ready = node.Ready();
-        Message append = StorageMessage(
-            ready,
-            MessageType.MsgStorageAppend);
+        StorageAppendWork append = Assert.IsType<StorageAppendWork>(ready.AppendWork);
         ready.Entries[0].Data =
             RaftBytes.CopyFromUtf8("mutated");
         append.Entries[0].Data =
@@ -239,7 +186,7 @@ public sealed class RawNodeAsyncStorageTests
     }
 
     [Fact]
-    public async Task ApplyPaginationWaitsForEachResponse()
+    public async Task ApplyPaginationWaitsForEachReceipt()
     {
         (DotnetRawNode node, MemoryStorage storage) =
             CreateNode(
@@ -249,23 +196,13 @@ public sealed class RawNodeAsyncStorageTests
         node.Propose("b"u8);
         node.Propose("c"u8);
         Ready appendReady = node.Ready();
-        Message append = StorageMessage(
-            appendReady,
-            MessageType.MsgStorageAppend);
-        Message[] responses =
-            PersistAppend(storage, append);
-        foreach (Message response in responses)
-        {
-            node.StepFixture(response);
-        }
+        await ProcessReadyAsync(node, storage, appendReady);
 
         var indexes = new List<ulong>();
         for (var page = 0; page < 3; page++)
         {
             Ready ready = node.Ready();
-            Message apply = StorageMessage(
-                ready,
-                MessageType.MsgStorageApply);
+            StorageApplyWork apply = Assert.IsType<StorageApplyWork>(ready.ApplyWork);
             Entry entry = Assert.Single(apply.Entries);
             indexes.Add(entry.Index);
             if (page < 2)
@@ -273,9 +210,7 @@ public sealed class RawNodeAsyncStorageTests
                 Assert.False(node.HasReady());
             }
 
-            node.StepFixture(
-                Assert.Single(
-                    apply.Responses));
+            node.CompleteStorageWork(apply.Completion);
         }
 
         Assert.Equal(

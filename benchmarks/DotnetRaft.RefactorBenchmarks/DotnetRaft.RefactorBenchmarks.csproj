@@ -12,6 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="../../src/DotnetRaft/DotnetRaft.csproj" />
     <ProjectReference Include="../../src/DotnetRaft.Protobuf/DotnetRaft.Protobuf.csproj" />
+    <ProjectReference Include="../../examples/DotnetRaft.KvCluster/DotnetRaft.KvCluster.csproj" />
   </ItemGroup>
 
 </Project>

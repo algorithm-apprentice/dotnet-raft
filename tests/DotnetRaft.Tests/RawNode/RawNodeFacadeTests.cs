@@ -156,7 +156,7 @@ public sealed class RawNodeFacadeTests
         var node = CreateNode(CreateStorage(voters: [1, 2]));
 
         Assert.ThrowsAny<InvalidOperationException>(
-            () => node.StepFixture(new Message
+            () => node.Step(new Message
             {
                 From = 2,
                 To = 1,
@@ -173,7 +173,7 @@ public sealed class RawNodeFacadeTests
         var node = CreateNode(CreateStorage(voters: [1, 2]));
 
         Assert.ThrowsAny<InvalidOperationException>(
-            () => node.StepFixture(new Message
+            () => node.Step(new Message
             {
                 From = sender,
                 To = 1,

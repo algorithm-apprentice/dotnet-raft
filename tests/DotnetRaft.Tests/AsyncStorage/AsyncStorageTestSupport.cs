@@ -2,8 +2,6 @@ using DotnetRaft.Diagnostics;
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage;
 
-using Google.Protobuf;
-
 using DotnetRawNode = DotnetRaft.RawNode;
 using ProtocolConfChange = DotnetRaft.Protocol.ConfChange;
 
@@ -48,50 +46,18 @@ internal static class AsyncStorageTestSupport
         return (node, storage);
     }
 
-    internal static Message StorageMessage(
-        Ready ready,
-        MessageType type)
+    internal static void PersistAppend(MemoryStorage storage, StorageAppendWork append)
     {
-        return Assert.Single(
-            ready.FixtureMessages(),
-            message => message.Type == type);
-    }
-
-    internal static Message[] PersistAppend(
-        MemoryStorage storage,
-        Message request)
-    {
-        Assert.Equal(
-            MessageType.MsgStorageAppend,
-            request.Type);
-        if (request.Snapshot is not null
-            && request.Snapshot.Metadata.Index != 0)
+        if (append.Snapshot is { } snapshot)
         {
-            storage.ApplySnapshot(request.Snapshot);
+            storage.ApplySnapshot(snapshot);
         }
 
-        storage.Append(request.Entries);
-        if (request.HasTerm
-            || request.HasVote
-            || request.HasCommit)
+        storage.Append(append.Entries);
+        if (append.HardState is { } state)
         {
-            Assert.True(request.HasTerm);
-            Assert.True(request.HasVote);
-            Assert.True(request.HasCommit);
-            storage.SetHardState(
-                new RaftHardState
-                {
-                    Term = request.Term,
-                    Vote = request.Vote,
-                    Commit = request.Commit,
-                });
+            storage.SetHardState(state);
         }
-
-        return
-        [
-            .. request.Responses.Select(
-                response => response.Clone()),
-        ];
     }
 
     internal static Task ProcessReadyAsync(
@@ -102,17 +68,7 @@ internal static class AsyncStorageTestSupport
         // This helper has no network; only use it for singleton batches.
         if (ready.AppendWork is { } append)
         {
-            if (append.Snapshot is { } snapshot && snapshot.Metadata.Index != 0)
-            {
-                storage.ApplySnapshot(snapshot);
-            }
-
-            storage.Append(append.Entries);
-            if (append.HardState is { } state)
-            {
-                storage.SetHardState(state);
-            }
-
+            PersistAppend(storage, append);
             foreach (Message response in append.MessagesAfterPersist)
             {
                 Assert.Equal(node.GetBasicStatus().Id, response.To);

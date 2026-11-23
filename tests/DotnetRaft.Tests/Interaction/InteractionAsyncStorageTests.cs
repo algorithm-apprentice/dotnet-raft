@@ -1,7 +1,5 @@
 using DotnetRaft.Protocol;
 
-using Google.Protobuf;
-
 namespace DotnetRaft.Tests.Interaction;
 
 public sealed class InteractionAsyncStorageTests
@@ -36,7 +34,7 @@ public sealed class InteractionAsyncStorageTests
     }
 
     [Fact]
-    public void ProcessReadyRoutesLocalWorkerMessages()
+    public void ProcessReadyRoutesLocalWorkerWork()
     {
         var environment = new InteractionEnvironment();
         environment.AddNodes(
@@ -263,7 +261,9 @@ public sealed class InteractionAsyncStorageTests
         Assert.Empty(applied);
         Message completion = Assert.Single(environment.QueuedMessages, message => message.Type == MessageType.MsgStorageApplyResp);
         Assert.Equal(oldEntry, Assert.Single(completion.Entries).Index);
-        environment.DeliverMessages(MessageType.MsgStorageApplyResp, new InteractionRecipient(1));
+        Assert.Equal(0, environment.DeliverMessages(MessageType.MsgStorageApplyResp, new InteractionRecipient(1, Drop: true)));
+        Assert.Equal(snapshotIndex, node.RawNode.GetBasicStatus().Applied);
+        Assert.Equal(1, environment.DeliverMessages(MessageType.MsgStorageApplyResp, new InteractionRecipient(1)));
         Assert.Equal(0UL, node.RawNode.Core.Log.ApplyingEntriesSize);
         Assert.Equal(snapshotIndex, node.RawNode.GetBasicStatus().Applied);
         Assert.Equal("replacement", node.GetApplicationSnapshot().Data.ToStringUtf8());
