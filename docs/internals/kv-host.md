@@ -30,7 +30,7 @@ the same host phases in the KV example:
 |---|---|---|
 | Submit | `Program.SubmitIncrement` calls `RawNode.Propose` directly. | [`KvHttpEndpoints.PutAsync`](../../examples/DotnetRaft.KvCluster/KvHttpEndpoints.cs) maps `PUT /kv/{key}` to `PutAsync`. [`RaftClusterHost.MutateAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Requests.cs) registers and awaits a pending result; `SubmitProposalAsync` calls `RaftNode.ProposeAsync`. A follower can forward the proposal. |
 | Save and send | `CounterCluster.ProcessSynchronousReady` stores the memory batch before enqueueing messages. | [`ProcessReadyAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) calls `SqliteStorage.PersistReady` for `raft.db` before `SendMessagesAsync` uses the gRPC transport. Neither operation sets the KV value. |
-| Apply and finish the caller | `CounterReplica.Apply` updates the local counter. | [`ApplyCommittedEntriesAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) groups ordinary entries and calls [`ApplyNormalEntries`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.Apply.cs), which commits the effects, request results, and physical cursor to `application.db` together. Then `pendingProposals.Complete` releases the local waiters so the endpoint can return success. |
+| Apply and finish the caller | [`CounterReplica.Apply`](../../examples/DotnetRaft.Counter/CounterReplica.cs) updates the local counter. | [`ApplyCommittedEntriesAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) groups ordinary entries and calls [`ApplyNormalEntries`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.Apply.cs), which commits the effects, request results, and physical cursor to `application.db` together. Then `pendingProposals.Complete` releases the local waiters so the endpoint can return success. |
 | Acknowledge to Raft | `AcknowledgeReady` calls `Advance` on that batch. | [`RunReadyLoopAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) calls `AdvanceAsync` after `ProcessReadyAsync`. This is not what releases the HTTP waiter. |
 
 [`ThreeNodeClusterReplicatesFollowerProposalAndRead`](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.cs)
@@ -48,7 +48,7 @@ physical cursor if they appear in the log.
 [`RaftClusterHost`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs)
 checks durable results before proposing and the owning registration checks
 again after registering. A result can become durable in that interval. The
-[pending registry](../../examples/DotnetRaft.KvCluster/PendingOperations.cs)
+[pending proposal registry](../../examples/DotnetRaft.KvCluster/PendingProposalRegistry.cs)
 coalesces matching local callers and owns the submission's cancellation:
 one timed-out caller must not cancel work still awaited by another. Apply or
 snapshot completion resolves the current waiter against the durable winner,

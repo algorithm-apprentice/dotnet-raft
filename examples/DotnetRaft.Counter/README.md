@@ -28,7 +28,7 @@ replication. Choosing a node to campaign does not appoint it leader.
 | [`Program.cs`](Program.cs) | Arrange one write and check its result | The counter stays zero on submission and becomes one on application. |
 | [`CounterCluster.cs`](CounterCluster.cs), `ProcessSynchronousReady` | Execute the host contract | Store the batch, enqueue messages, apply committed entries, acknowledge Ready. |
 | `CounterCluster.RunOneRound` | Simulate scheduling | Process each replica's work and then deliver one message. No stage is skipped because an earlier stage made progress. |
-| `CounterReplica.Apply` | Interpret committed commands | Bootstrap and no-op entries advance the index; only `increment` changes `Count`. |
+| [`CounterReplica.cs`](CounterReplica.cs) | Own one replica's node, memory storage, and counter | `Apply` advances the index for bootstrap and no-op entries; only `increment` changes `Count`. |
 | `CounterCluster.DispatchAsyncStorageWork` | Route the alternate storage protocol | Worker requests complete through their responses, never through `Advance`. |
 | [`CounterWriteTrace.cs`](CounterWriteTrace.cs) | Observe the write | Trace callbacks do not drive or mutate the node. |
 

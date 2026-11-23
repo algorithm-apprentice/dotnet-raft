@@ -8,9 +8,14 @@
     "configuration": "Release",
     "mutate": [
       "**/DurableKvModels.cs",
+      "**/DurableKvCommandCodec.cs",
+      "**/KvRequestConflictException.cs",
+      "**/KvPayloadTooLargeException.cs",
       "**/SqliteKeyValueStateMachine.cs",
       "**/DurableHostRecovery.cs",
-      "**/PendingOperations.cs"
+      "**/PendingOperationRegistry.cs",
+      "**/PendingProposalRegistry.cs",
+      "**/PendingReadRegistry.cs"
     ],
     "reporters": [
       "cleartext",
