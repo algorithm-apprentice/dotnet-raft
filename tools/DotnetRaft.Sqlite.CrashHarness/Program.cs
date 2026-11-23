@@ -1,3 +1,5 @@
+using System.Diagnostics;
+
 using DotnetRaft.Protocol;
 using DotnetRaft.Storage.Sqlite;
 
@@ -22,22 +24,32 @@ internal static class Program
             return 2;
         }
 
-        switch (args[0])
+        try
         {
-            case "committed":
-                CommitThenCrash(args[1]);
-                break;
-            case "uncommitted":
-                MutateWithoutCommitThenCrash(
-                    args[1]);
-                break;
-            default:
-                Console.Error.WriteLine(
-                    "unknown crash mode");
-                return 2;
-        }
+            switch (args[0])
+            {
+                case "committed":
+                    CommitThenCrash(args[1]);
+                    break;
+                case "uncommitted":
+                    MutateWithoutCommitThenCrash(
+                        args[1]);
+                    break;
+                default:
+                    Console.Error.WriteLine(
+                        "unknown crash mode");
+                    return 2;
+            }
 
-        return 1;
+            return 1;
+        }
+        finally
+        {
+            // A normal return or exception must not masquerade as an abrupt exit.
+            Console.Error.WriteLine(
+                "CRASH_FIXTURE_UNWOUND");
+            Console.Error.Flush();
+        }
     }
 
     private static void CommitThenCrash(
@@ -75,10 +87,7 @@ internal static class Program
                         "durable"),
             });
         storage.PersistStorageAppend(request);
-        Console.Out.WriteLine("COMMIT_RETURNED");
-        Console.Out.Flush();
-        Environment.FailFast(
-            "Committed crash fixture.");
+        CrashAfterMarker("COMMIT_RETURNED");
     }
 
     private static void MutateWithoutCommitThenCrash(
@@ -121,10 +130,24 @@ internal static class Program
         {
             throw new InvalidOperationException("The crash fixture did not update its metadata row.");
         }
-        Console.Out.WriteLine(
+        CrashAfterMarker(
             "UNCOMMITTED_MUTATION_EXECUTED");
+    }
+
+    private static void CrashAfterMarker(
+        string marker)
+    {
+        Console.Out.WriteLine(marker);
         Console.Out.Flush();
-        Environment.FailFast(
-            "Uncommitted crash fixture.");
+
+        // Bypass Windows Error Reporting and dumps without unwinding the
+        // live SQLite scopes. FailFast can delay exit beyond the test deadline.
+        using Process process =
+            Process.GetCurrentProcess();
+        process.Kill();
+        // Keep the caller's using scopes live if the kill returns asynchronously.
+        process.WaitForExit();
+        throw new InvalidOperationException(
+            "The crash fixture was not terminated.");
     }
 }

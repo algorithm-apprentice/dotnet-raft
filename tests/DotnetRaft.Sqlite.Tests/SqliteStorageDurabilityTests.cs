@@ -899,10 +899,13 @@ public sealed class SqliteStorageDurabilityTests
     }
 
     [Theory]
-    [InlineData("committed")]
-    [InlineData("uncommitted")]
+    [InlineData("committed", false)]
+    [InlineData("uncommitted", false)]
+    [InlineData("committed", true)]
+    [InlineData("uncommitted", true)]
     public async Task AbruptProcessTerminationRecoversAtomically(
-        string mode)
+        string mode,
+        bool enableHostTrace)
     {
         using TemporaryStorageDirectory directory =
             CreateDirectory();
@@ -919,7 +922,8 @@ public sealed class SqliteStorageDurabilityTests
 
         await RunCrashHarness(
             mode,
-            directory.DatabasePath);
+            directory.DatabasePath,
+            enableHostTrace);
 
         using SqliteStorage reopened =
             CreateStorage(directory);
@@ -1073,7 +1077,8 @@ public sealed class SqliteStorageDurabilityTests
 
     private static async Task RunCrashHarness(
         string mode,
-        string databasePath)
+        string databasePath,
+        bool enableHostTrace)
     {
         string assembly =
             typeof(CrashHarnessMarker)
@@ -1088,6 +1093,13 @@ public sealed class SqliteStorageDurabilityTests
         start.ArgumentList.Add(assembly);
         start.ArgumentList.Add(mode);
         start.ArgumentList.Add(databasePath);
+        if (enableHostTrace)
+        {
+            start.Environment["DOTNET_HOST_TRACE"] = "1";
+            start.Environment["DOTNET_HOST_TRACE_VERBOSITY"] = "3";
+            start.Environment.Remove("DOTNET_HOST_TRACEFILE");
+            start.Environment.Remove("COREHOST_TRACEFILE");
+        }
 
         using Process process =
             Process.Start(start)
@@ -1132,10 +1144,20 @@ public sealed class SqliteStorageDurabilityTests
         string standardError = await error;
         string context = $"Crash harness '{mode}', exit={process.ExitCode}\nstdout:\n{standardOutput}\nstderr:\n{standardError}";
         Assert.False(timedOut, $"Crash harness timed out. {context}");
-        Assert.True(process.ExitCode != 0, context);
+        // Process.Kill uses TerminateProcess(-1) on Windows and SIGKILL on Unix.
+        int expectedExitCode = OperatingSystem.IsWindows() ? -1 : 128 + 9;
+        Assert.True(process.ExitCode == expectedExitCode,
+            $"Crash harness did not exit through forced termination (expected exit={expectedExitCode}). {context}");
+        Assert.False(standardError.Contains("CRASH_FIXTURE_UNWOUND", StringComparison.Ordinal),
+            $"Crash harness unwound managed scopes. {context}");
         string marker = mode == "committed"
             ? "COMMIT_RETURNED"
             : "UNCOMMITTED_MUTATION_EXECUTED";
         Assert.True(standardOutput.Contains(marker, StringComparison.Ordinal), context);
+        if (enableHostTrace)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(standardError),
+                $"Crash harness did not emit the requested host diagnostics. {context}");
+        }
     }
 }

@@ -25,10 +25,19 @@ settings, or count an outgoing snapshot as a restore. Inspect only files
 in the smoke's own stopped node directory.
 
 The SQLite crash harness must terminate and reap its child on timeout and
-retain both streams in failure messages. It still tests process exit, not
-device power loss. For the late in-process injection, keep the trigger and
-connection access in the tests; do not make SQL fault injection part of
-the storage API.
+retain both streams in failure messages. The fixture flushes its phase marker
+and forcibly kills its own process while the SQLite scopes are still live.
+Use `Process.Kill`, not `Environment.FailFast`: Windows Error Reporting and
+dump generation can delay exit beyond the deadline. The launcher rejects
+unexpected termination status (`-1` on Windows, `128 + SIGKILL` on Unix) and
+the fixture's top-level managed unwind marker, so graceful disposal and
+rollback cannot substitute for abrupt termination. Ordinary stderr diagnostics
+remain allowed. `AbruptProcessTerminationRecoversAtomically` exercises both
+transaction modes with and without `DOTNET_HOST_TRACE`, proves the requested
+diagnostics were emitted, then reopens and compares the full durable generation.
+It still tests process exit, not device power loss. For the late in-process
+injection, keep the trigger and connection access in the tests; do not make SQL
+fault injection part of the storage API.
 
 ## Make the schedules reliable and reproducible
 
