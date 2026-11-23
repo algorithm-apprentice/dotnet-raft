@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
-using System.Globalization;
-using System.Text.Json.Nodes;
+using System.Text.Json;
+
+using DotnetRaft.Diagnostics;
 
 namespace DotnetRaft;
 
@@ -39,47 +40,6 @@ public sealed class Status
     public IReadOnlyDictionary<ulong, ProgressStatus>
         Progress => _progress;
 
-    public override string ToString()
-    {
-        var summary = new JsonObject
-        {
-            ["id"] = FormatNodeId(Basic.Id),
-            ["term"] = Basic.Term,
-            ["vote"] = FormatNodeId(Basic.Vote),
-            ["commit"] = Basic.Commit,
-            ["lead"] = FormatNodeId(Basic.LeaderId),
-            ["raftState"] = FormatEnum(Basic.Role),
-            ["applied"] = Basic.Applied,
-            ["progress"] = CreateProgressSummary(),
-            ["leadtransferee"] = FormatNodeId(Basic.LeaderTransferee),
-        };
-        return summary.ToJsonString();
-    }
-
-    private JsonObject CreateProgressSummary()
-    {
-        var peers = new JsonObject();
-        foreach ((ulong id, ProgressStatus progress) in _progress)
-        {
-            peers.Add(FormatNodeId(id), new JsonObject
-            {
-                ["match"] = progress.Match,
-                ["next"] = progress.Next,
-                ["state"] = FormatEnum(progress.State),
-            });
-        }
-
-        return peers;
-    }
-
-    private static string FormatNodeId(ulong id) =>
-        id.ToString("x", CultureInfo.InvariantCulture);
-
-    private static string FormatEnum<T>(T value)
-        where T : struct, Enum
-    {
-        return Enum.GetName(value)
-            ?? Convert.ToInt64(value, CultureInfo.InvariantCulture)
-                .ToString(CultureInfo.InvariantCulture);
-    }
+    public override string ToString() =>
+        JsonSerializer.Serialize(StatusSummary.FromStatus(this), StatusJsonContext.Default.StatusSummary);
 }
