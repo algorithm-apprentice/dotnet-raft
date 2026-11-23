@@ -15,6 +15,28 @@ no sockets, timers, database, or threads for the local storage workers.
 not applied the command immediately after proposing it, and checks the
 value and applied index on every replica after processing the work.
 
+## Read the example as a workflow
+
+The lesson is **submission is not commitment, and commitment is not application**.
+Start at `Program.Main`: `InitializeCluster`, `ElectLeader`, `SubmitIncrement`,
+and `VerifyAndPrintReplicas` name the scenario's phases. The optional
+`ObserveCommitBeforeApplication` phase pauses application without pausing
+replication. Choosing a node to campaign does not appoint it leader.
+
+| Source | Responsibility | What to look for |
+|---|---|---|
+| [`Program.cs`](Program.cs) | Arrange one write and check its result | The counter stays zero on submission and becomes one on application. |
+| [`CounterCluster.cs`](CounterCluster.cs), `ProcessSynchronousReady` | Execute the host contract | Store the batch, enqueue messages, apply committed entries, acknowledge Ready. |
+| `CounterCluster.RunOneRound` | Simulate scheduling | Process each replica's work and then deliver one message. No stage is skipped because an earlier stage made progress. |
+| `CounterReplica.Apply` | Interpret committed commands | Bootstrap and no-op entries advance the index; only `increment` changes `Count`. |
+| `CounterCluster.DispatchAsyncStorageWork` | Route the alternate storage protocol | Worker requests complete through their responses, never through `Advance`. |
+| [`CounterWriteTrace.cs`](CounterWriteTrace.cs) | Observe the write | Trace callbacks do not drive or mutate the node. |
+
+`CounterCluster` is the demonstration host, not a central authority in Raft.
+Each replica owns an independent `RawNode`, `MemoryStorage`, and counter.
+`Drain` runs until no enabled stage can progress; it does not itself decide
+that a proposal is committed. All calls are serialized by this one host loop.
+
 ## Ready and Advance
 
 From the repository root, with the .NET 10 SDK:

@@ -36,6 +36,15 @@ public sealed class ClusterOptions
 
     public ValidatedClusterOptions Validate()
     {
+        ValidateIdentityAndListeners();
+        ValidateTimingAndLimits();
+        SortedDictionary<ulong, Uri> peers = ParsePeerMap();
+        ValidateLocalPeer(peers);
+        return CreateValidatedOptions(peers, ResolveDataDirectory());
+    }
+
+    private void ValidateIdentityAndListeners()
+    {
         if (NodeId == 0)
         {
             throw new InvalidOperationException(
@@ -49,30 +58,14 @@ public sealed class ClusterOptions
             throw new InvalidOperationException(
                 "Raft HTTP and gRPC ports must differ.");
         }
+    }
 
-        if (TickIntervalMilliseconds <= 0)
-        {
-            throw new InvalidOperationException(
-                "Raft:TickIntervalMilliseconds must be positive.");
-        }
-
-        if (RequestTimeoutSeconds <= 0)
-        {
-            throw new InvalidOperationException(
-                "Raft:RequestTimeoutSeconds must be positive.");
-        }
-
-        if (TransportTimeoutMilliseconds <= 0)
-        {
-            throw new InvalidOperationException(
-                "Raft:TransportTimeoutMilliseconds must be positive.");
-        }
-
-        if (SnapshotThresholdEntries <= 0)
-        {
-            throw new InvalidOperationException(
-                "Raft:SnapshotThresholdEntries must be positive.");
-        }
+    private void ValidateTimingAndLimits()
+    {
+        ValidatePositive(TickIntervalMilliseconds, nameof(TickIntervalMilliseconds));
+        ValidatePositive(RequestTimeoutSeconds, nameof(RequestTimeoutSeconds));
+        ValidatePositive(TransportTimeoutMilliseconds, nameof(TransportTimeoutMilliseconds));
+        ValidatePositive(SnapshotThresholdEntries, nameof(SnapshotThresholdEntries));
 
         if (MaxTransportMessageBytes
             <= 128 * 1024)
@@ -80,7 +73,10 @@ public sealed class ClusterOptions
             throw new InvalidOperationException(
                 "Raft:MaxTransportMessageBytes must exceed 128 KiB.");
         }
+    }
 
+    private SortedDictionary<ulong, Uri> ParsePeerMap()
+    {
         if (Peers.Count != 3)
         {
             throw new InvalidOperationException(
@@ -90,35 +86,8 @@ public sealed class ClusterOptions
         var peers = new SortedDictionary<ulong, Uri>();
         foreach ((string rawId, string rawUri) in Peers)
         {
-            if (!ulong.TryParse(
-                    rawId,
-                    System.Globalization.NumberStyles.None,
-                    System.Globalization.CultureInfo.InvariantCulture,
-                    out ulong id)
-                || id == 0)
-            {
-                throw new InvalidOperationException(
-                    $"Peer ID '{rawId}' must be a nonzero unsigned integer.");
-            }
-
-            if (!Uri.TryCreate(
-                    rawUri,
-                    UriKind.Absolute,
-                    out Uri? uri)
-                || !string.Equals(
-                    uri.Scheme,
-                    Uri.UriSchemeHttp,
-                    StringComparison.OrdinalIgnoreCase)
-                || !uri.IsLoopback
-                || !string.IsNullOrEmpty(uri.Query)
-                || !string.IsNullOrEmpty(uri.Fragment)
-                || uri.AbsolutePath != "/")
-            {
-                throw new InvalidOperationException(
-                    $"Peer {id} must use a loopback HTTP URI without a path, query, or fragment.");
-            }
-
-            ValidatePort(uri.Port, $"peer {id}");
+            ulong id = ParsePeerId(rawId);
+            Uri uri = ParsePeerAddress(id, rawUri);
             if (!peers.TryAdd(id, uri))
             {
                 throw new InvalidOperationException(
@@ -126,6 +95,36 @@ public sealed class ClusterOptions
             }
         }
 
+        return peers;
+    }
+
+    private static ulong ParsePeerId(string rawId)
+    {
+        if (!ulong.TryParse(rawId, System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture, out ulong id) || id == 0)
+        {
+            throw new InvalidOperationException($"Peer ID '{rawId}' must be a nonzero unsigned integer.");
+        }
+
+        return id;
+    }
+
+    private static Uri ParsePeerAddress(ulong id, string rawUri)
+    {
+        if (!Uri.TryCreate(rawUri, UriKind.Absolute, out Uri? uri)
+            || !string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+            || !uri.IsLoopback || !string.IsNullOrEmpty(uri.Query)
+            || !string.IsNullOrEmpty(uri.Fragment) || uri.AbsolutePath != "/")
+        {
+            throw new InvalidOperationException($"Peer {id} must use a loopback HTTP URI without a path, query, or fragment.");
+        }
+
+        ValidatePort(uri.Port, $"peer {id}");
+        return uri;
+    }
+
+    private void ValidateLocalPeer(SortedDictionary<ulong, Uri> peers)
+    {
         if (!peers.TryGetValue(
                 NodeId,
                 out Uri? localUri))
@@ -149,7 +148,9 @@ public sealed class ClusterOptions
                 "Every peer must use a distinct gRPC port.");
         }
 
-        string dataDirectory = Path.GetFullPath(
+    }
+
+    private string ResolveDataDirectory() => Path.GetFullPath(
             string.IsNullOrWhiteSpace(DataDirectory)
                 ? Path.Combine(
                     Environment.CurrentDirectory,
@@ -157,6 +158,8 @@ public sealed class ClusterOptions
                     $"node-{NodeId}")
                 : DataDirectory);
 
+    private ValidatedClusterOptions CreateValidatedOptions(SortedDictionary<ulong, Uri> peers, string dataDirectory)
+    {
         return new ValidatedClusterOptions(
             NodeId,
             HttpPort,
@@ -172,6 +175,14 @@ public sealed class ClusterOptions
             dataDirectory,
             SnapshotThresholdEntries,
             MaxTransportMessageBytes);
+    }
+
+    private static void ValidatePositive(int value, string setting)
+    {
+        if (value <= 0)
+        {
+            throw new InvalidOperationException($"Raft:{setting} must be positive.");
+        }
     }
 
     private static void ValidatePort(

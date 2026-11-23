@@ -79,18 +79,7 @@ public sealed class PendingProposalRegistry
                     requestId,
                     out Entry? existing))
             {
-                if (!existing.Fingerprint.Equals(
-                        fingerprint))
-                {
-                    throw new KvRequestConflictException(
-                        requestId);
-                }
-
-                existing.Waiters++;
-                return new PendingProposalRegistration(
-                    this,
-                    existing,
-                    isOwner: false);
+                return JoinPendingRequest(existing, fingerprint);
             }
 
             var entry = new Entry(
@@ -105,6 +94,21 @@ public sealed class PendingProposalRegistry
                 isOwner: true);
         }
     }
+
+    // Called while gate is held, so joining and creating registrations remain atomic.
+    private PendingProposalRegistration JoinPendingRequest(Entry entry, ByteString fingerprint)
+    {
+        if (!entry.Fingerprint.Equals(fingerprint))
+        {
+            throw new KvRequestConflictException(entry.RequestId);
+        }
+
+        entry.Waiters++;
+        return new PendingProposalRegistration(this, entry, isOwner: false);
+    }
+
+    private bool IsCurrentRegistration(Entry entry) =>
+        pending.TryGetValue(entry.RequestId, out Entry? current) && ReferenceEquals(current, entry);
 
     public bool Complete(KvApplyResult result)
     {
@@ -169,12 +173,7 @@ public sealed class PendingProposalRegistry
             }
 
             if (entry.Completed
-                || !pending.TryGetValue(
-                    entry.RequestId,
-                    out Entry? current)
-                || !ReferenceEquals(
-                    current,
-                    entry))
+                || !IsCurrentRegistration(entry))
             {
                 return null;
             }
@@ -200,12 +199,7 @@ public sealed class PendingProposalRegistry
             exception);
         lock (gate)
         {
-            if (!pending.TryGetValue(
-                    entry.RequestId,
-                    out Entry? current)
-                || !ReferenceEquals(
-                    current,
-                    entry))
+            if (!IsCurrentRegistration(entry))
             {
                 return;
             }
@@ -231,12 +225,7 @@ public sealed class PendingProposalRegistry
 
             entry.Waiters--;
             if (entry.Waiters == 0
-                && pending.TryGetValue(
-                    entry.RequestId,
-                    out Entry? current)
-                && ReferenceEquals(
-                    current,
-                    entry))
+                && IsCurrentRegistration(entry))
             {
                 pending.Remove(
                     entry.RequestId);
@@ -401,6 +390,15 @@ public sealed class PendingReadRegistry
     public void CompleteThrough(
         ulong physicalApplied)
     {
+        KeyValuePair<Guid, ulong>[] ready = TakeAppliedReads(physicalApplied);
+        foreach (KeyValuePair<Guid, ulong> pair in ready)
+        {
+            Complete(pair.Key, pair.Value);
+        }
+    }
+
+    private KeyValuePair<Guid, ulong>[] TakeAppliedReads(ulong physicalApplied)
+    {
         KeyValuePair<Guid, ulong>[] ready;
         lock (gate)
         {
@@ -418,13 +416,7 @@ public sealed class PendingReadRegistry
             }
         }
 
-        foreach (KeyValuePair<Guid, ulong> pair
-                 in ready)
-        {
-            Complete(
-                pair.Key,
-                pair.Value);
-        }
+        return ready;
     }
 
     public override bool Remove(Guid requestId)

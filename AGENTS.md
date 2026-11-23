@@ -13,6 +13,21 @@
   request identity, and recovery across its two databases. The gRPC envelope
   carries the generated Raft message; it is not a second protocol model.
 
+## Decompose by responsibility, then share identical rules
+
+- Make orchestration read as named steps at one abstraction level. Recursively
+  extract independent operations and predicates until each leaf function has
+  one clear purpose, rather than mixing scheduling, validation, I/O, and
+  application decisions in the same body.
+- After decomposition, search for equivalent helpers and merge redundant
+  implementations when their contracts, invariants, and owner are the same.
+  Similar-looking code with different durability, error, or lifetime semantics
+  is not the same operation.
+- Keep required ordering and atomicity visible in the enclosing workflow.
+  Small helpers must not split a transaction or lock boundary, duplicate a
+  consensus transition, or hide when Ready work is acknowledged. A function's
+  single responsibility does not imply that its I/O is an atomic transaction.
+
 ## Use the right specification
 
 - [Host integration contract](docs/integration/README.md): Ready, persistence,

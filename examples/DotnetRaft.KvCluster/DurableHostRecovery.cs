@@ -70,6 +70,36 @@ public static class DurableHostRecovery
             raftStorage.GetHardState();
         bool raftFresh =
             IsRaftFresh(raftStorage);
+        ValidateDatabasePair(application, raftFresh);
+        if (RestorePendingSnapshot(raftStorage, application))
+        {
+            retained = raftStorage.GetSnapshot();
+            hardState = raftStorage.GetHardState();
+        }
+
+        RestoreRetainedSnapshot(application, retained);
+        ulong applied = application.PhysicalApplied;
+        ValidateReplayStart(raftStorage, retained, raftFresh, applied);
+        membership.ValidateRecoveredConfiguration(applied, application.ConfState);
+        ulong lastIndex = raftStorage.GetLastIndex();
+        ValidateApplicationBound(applied, lastIndex);
+        if (!raftFresh)
+        {
+            hardState = RepairCommitFromApplication(raftStorage, applied, lastIndex);
+        }
+
+        retained = raftStorage.GetSnapshot();
+        if (applied > retained.Metadata.Index)
+        {
+            retained = SnapshotRecoveredApplication(raftStorage, application, retained, hardState, applied, maximumSnapshotBytes);
+        }
+
+        ValidateRecoveryPoint(raftStorage, application, retained, applied);
+        return new DurableRecoveryState(StartNew: raftFresh, Applied: applied);
+    }
+
+    private static void ValidateDatabasePair(SqliteKeyValueStateMachine application, bool raftFresh)
+    {
         if (application.WasCreated
             && !raftFresh)
         {
@@ -83,27 +113,29 @@ public static class DurableHostRecovery
             throw new InvalidDataException(
                 "Application state is nonempty while Raft storage is empty.");
         }
+    }
 
+    private static bool RestorePendingSnapshot(SqliteStorage raftStorage, SqliteKeyValueStateMachine application)
+    {
         Snapshot? pending =
             raftStorage
                 .GetPendingApplicationSnapshot();
-        if (pending is not null)
+        if (pending is null)
         {
-            if (application.WasCreated)
-            {
-                throw new InvalidDataException(
-                    "Pending Raft snapshot cannot restore a recreated application database.");
-            }
-
-            CompletePendingSnapshot(
-                raftStorage,
-                application,
-                pending,
-                recovering: true);
-            retained = raftStorage.GetSnapshot();
-            hardState = raftStorage.GetHardState();
+            return false;
         }
 
+        if (application.WasCreated)
+        {
+            throw new InvalidDataException("Pending Raft snapshot cannot restore a recreated application database.");
+        }
+
+        CompletePendingSnapshot(raftStorage, application, pending, recovering: true);
+        return true;
+    }
+
+    private static void RestoreRetainedSnapshot(SqliteKeyValueStateMachine application, Snapshot retained)
+    {
         if (application.PhysicalApplied
             < retained.Metadata.Index)
         {
@@ -119,8 +151,10 @@ public static class DurableHostRecovery
                 retained.Metadata.ConfState);
         }
 
-        ulong applied =
-            application.PhysicalApplied;
+    }
+
+    private static void ValidateReplayStart(SqliteStorage raftStorage, Snapshot retained, bool raftFresh, ulong applied)
+    {
         if (!raftFresh
             && applied == 0
             && retained.Metadata.Index == 0
@@ -130,70 +164,80 @@ public static class DurableHostRecovery
                 "Application replay from zero is impossible because the Raft log prefix was compacted without a restorable snapshot.");
         }
 
-        membership.ValidateRecoveredConfiguration(
-            applied,
-            application.ConfState);
-        ulong lastIndex =
-            raftStorage.GetLastIndex();
+    }
+
+    private static void ValidateApplicationBound(ulong applied, ulong lastIndex)
+    {
         if (applied > lastIndex)
         {
             throw new InvalidDataException(
                 $"Application index {applied} exceeds Raft last index {lastIndex}.");
         }
 
-        if (!raftFresh)
-        {
-            hardState =
-                raftStorage.GetHardState()
-                ?? throw new InvalidDataException(
-                    "Nonempty Raft storage has no HardState.");
-            if (hardState.Commit < applied)
-            {
-                ulong compacted =
-                    raftStorage.GetFirstIndex() - 1;
-                if (applied < compacted
-                    || applied > lastIndex)
-                {
-                    throw new InvalidDataException(
-                        $"Raft storage does not cover application index {applied}.");
-                }
+    }
 
-                hardState.Commit = applied;
-                raftStorage.SetHardState(
-                    hardState);
+    private static HardState RepairCommitFromApplication(SqliteStorage raftStorage, ulong applied, ulong lastIndex)
+    {
+        HardState hardState = raftStorage.GetHardState()
+            ?? throw new InvalidDataException("Nonempty Raft storage has no HardState.");
+        if (hardState.Commit < applied)
+        {
+            ulong compacted = raftStorage.GetFirstIndex() - 1;
+            if (applied < compacted || applied > lastIndex)
+            {
+                throw new InvalidDataException($"Raft storage does not cover application index {applied}.");
             }
+
+            hardState.Commit = applied;
+            raftStorage.SetHardState(hardState);
         }
 
-        retained = raftStorage.GetSnapshot();
-        if (applied > retained.Metadata.Index)
+        return hardState;
+    }
+
+    private static Snapshot SnapshotRecoveredApplication(
+        SqliteStorage raftStorage,
+        SqliteKeyValueStateMachine application,
+        Snapshot retained,
+        HardState? hardState,
+        ulong applied,
+        int maximumSnapshotBytes)
+    {
+        if (hardState is null || hardState.Commit < applied)
         {
-            if (hardState is null
-                || hardState.Commit < applied)
-            {
-                throw new InvalidDataException(
-                    $"HardState does not cover application index {applied}.");
-            }
-
-            ByteString snapshotData =
-                application.CreateSnapshotData();
-            if (snapshotData.Length
-                <= maximumSnapshotBytes)
-            {
-                raftStorage.CreateSnapshot(
-                    applied,
-                    application.ConfState,
-                    snapshotData);
-                ulong compacted =
-                    raftStorage.GetFirstIndex() - 1;
-                if (compacted < applied)
-                {
-                    raftStorage.Compact(applied);
-                }
-
-                retained = raftStorage.GetSnapshot();
-            }
+            throw new InvalidDataException($"HardState does not cover application index {applied}.");
         }
 
+        ByteString snapshotData = application.CreateSnapshotData();
+        if (snapshotData.Length <= maximumSnapshotBytes)
+        {
+            PublishSnapshotAndCompact(raftStorage, applied, application.ConfState, snapshotData);
+            retained = raftStorage.GetSnapshot();
+        }
+
+        return retained;
+    }
+
+    internal static bool PublishSnapshotAndCompact(
+        SqliteStorage raftStorage, ulong applied, ConfState configuration, ByteString snapshotData)
+    {
+        // Shared by live operation and recovery. The snapshot must be durable
+        // first; a crash between these writes leaves a snapshot plus extra log,
+        // never a deleted prefix without its recovery point.
+        raftStorage.CreateSnapshot(applied, configuration, snapshotData);
+        ulong compacted = raftStorage.GetFirstIndex() - 1;
+        if (compacted >= applied)
+        {
+            return false;
+        }
+
+        raftStorage.Compact(applied);
+        return true;
+    }
+
+    private static void ValidateRecoveryPoint(
+        SqliteStorage raftStorage, SqliteKeyValueStateMachine application, Snapshot retained, ulong applied)
+    {
         ulong retainedPrefix =
             raftStorage.GetFirstIndex() - 1;
         if (retained.Metadata.Index > applied
@@ -206,9 +250,6 @@ public static class DurableHostRecovery
                 "Raft snapshot does not match recovered application state.");
         }
 
-        return new DurableRecoveryState(
-            StartNew: raftFresh,
-            Applied: applied);
     }
 
     internal static void CompletePendingSnapshot(
@@ -233,21 +274,30 @@ public static class DurableHostRecovery
         // repair commit; snapshot metadata cannot supply term or vote.
         if (recovering)
         {
-            ulong lastTerm = raftStorage.GetTerm(raftStorage.GetLastIndex());
-            ulong requiredTerm = Math.Max(metadata.Term, lastTerm);
-            if (hardState.Term < requiredTerm)
-            {
-                throw new InvalidDataException(
-                    $"HardState term {hardState.Term} is below retained term {requiredTerm}.");
-            }
+            ValidateSnapshotTermCoverage(raftStorage, metadata, hardState);
         }
 
+        RepairSnapshotCommit(raftStorage, metadata, hardState);
+        raftStorage.AcknowledgeApplicationSnapshot(metadata.Index);
+    }
+
+    private static void ValidateSnapshotTermCoverage(SqliteStorage raftStorage, SnapshotMetadata metadata, HardState hardState)
+    {
+        ulong lastTerm = raftStorage.GetTerm(raftStorage.GetLastIndex());
+        ulong requiredTerm = Math.Max(metadata.Term, lastTerm);
+        if (hardState.Term < requiredTerm)
+        {
+            throw new InvalidDataException($"HardState term {hardState.Term} is below retained term {requiredTerm}.");
+        }
+    }
+
+    private static void RepairSnapshotCommit(SqliteStorage raftStorage, SnapshotMetadata metadata, HardState hardState)
+    {
         if (hardState.Commit < metadata.Index)
         {
             hardState.Commit = metadata.Index;
             raftStorage.SetHardState(hardState);
         }
 
-        raftStorage.AcknowledgeApplicationSnapshot(metadata.Index);
     }
 }

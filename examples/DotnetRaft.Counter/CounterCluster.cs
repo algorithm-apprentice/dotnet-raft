@@ -20,43 +20,7 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
     {
         for (var round = 0; round < MaxRounds; round++)
         {
-            var didWork = false;
-            foreach (CounterReplica replica in Replicas)
-            {
-                if (replica.Node.HasReady())
-                {
-                    ProcessReady(replica);
-                    didWork = true;
-                }
-
-                if (replica.AppendWork.TryDequeue(out Message? append))
-                {
-                    ProcessAppend(replica, append);
-                    didWork = true;
-                }
-
-                if (runApplyWorkers && replica.ApplyWork.TryDequeue(out Message? apply))
-                {
-                    replica.Apply(apply.Entries);
-                    trace?.Applied(replica, apply.Entries);
-                    EnqueueDelivery(apply.Responses);
-                    didWork = true;
-                }
-            }
-
-            if (_delivery.TryDequeue(out Message? message))
-            {
-                CounterReplica destination = Replicas.Single(replica => replica.Id == message.To);
-                destination.Node.Step(message);
-                if (message.Type == MessageType.MsgStorageApplyResp)
-                {
-                    trace?.AcknowledgedApplication(destination, message.Entries, nameof(MessageType.MsgStorageApplyResp));
-                }
-
-                didWork = true;
-            }
-
-            if (!didWork)
+            if (!RunOneRound(runApplyWorkers))
             {
                 return;
             }
@@ -65,40 +29,132 @@ internal sealed class CounterCluster(bool asyncStorage, CounterWriteTrace? trace
         throw new InvalidOperationException("The example cluster did not become idle.");
     }
 
+    private bool RunOneRound(bool runApplyWorkers)
+    {
+        var didWork = false;
+        foreach (CounterReplica replica in Replicas)
+        {
+            // Execute every enabled stage, even if an earlier stage made progress.
+            bool readied = TryProcessReady(replica);
+            bool appended = TryRunAppendWorker(replica);
+            bool applied = runApplyWorkers && TryRunApplyWorker(replica);
+            didWork = didWork || readied || appended || applied;
+        }
+
+        bool delivered = TryDeliverMessage();
+        return didWork || delivered;
+    }
+
+    private bool TryProcessReady(CounterReplica replica)
+    {
+        if (!replica.Node.HasReady())
+        {
+            return false;
+        }
+
+        ProcessReady(replica);
+        return true;
+    }
+
+    private bool TryRunAppendWorker(CounterReplica replica)
+    {
+        if (!replica.AppendWork.TryDequeue(out Message? request))
+        {
+            return false;
+        }
+
+        ProcessAppend(replica, request);
+        return true;
+    }
+
+    private bool TryRunApplyWorker(CounterReplica replica)
+    {
+        if (!replica.ApplyWork.TryDequeue(out Message? request))
+        {
+            return false;
+        }
+
+        ApplyCommittedEntries(replica, request.Entries);
+        EnqueueDelivery(request.Responses);
+        return true;
+    }
+
+    private bool TryDeliverMessage()
+    {
+        if (!_delivery.TryDequeue(out Message? message))
+        {
+            return false;
+        }
+
+        CounterReplica destination = Replicas.Single(replica => replica.Id == message.To);
+        destination.Node.Step(message);
+        if (message.Type == MessageType.MsgStorageApplyResp)
+        {
+            trace?.AcknowledgedApplication(destination, message.Entries, nameof(MessageType.MsgStorageApplyResp));
+        }
+
+        return true;
+    }
+
     private void ProcessReady(CounterReplica replica)
     {
         Ready ready = replica.Node.Ready();
         if (asyncStorage)
         {
-            // Ready's persistence/application fields are diagnostic in this mode.
-            foreach (Message message in ready.Messages)
-            {
-                switch (message.To)
-                {
-                    case RaftLocalMessageTargets.AppendThread:
-                        replica.AppendWork.Enqueue(message);
-                        break;
-                    case RaftLocalMessageTargets.ApplyThread:
-                        replica.ApplyWork.Enqueue(message);
-                        trace?.ReceivedApplicationWork(replica.Id, message.Entries, nameof(MessageType.MsgStorageApply));
-                        break;
-                    default:
-                        _delivery.Enqueue(message);
-                        break;
-                }
-            }
-
+            DispatchAsyncStorageWork(replica, ready.Messages);
             return;
         }
 
+        ProcessSynchronousReady(replica, ready);
+    }
+
+    private void ProcessSynchronousReady(CounterReplica replica, Ready ready)
+    {
         trace?.ReceivedApplicationWork(replica.Id, ready.CommittedEntries, "Ready.CommittedEntries");
+        StoreReadyBatch(replica, ready);
+        EnqueueDelivery(ready.Messages);
+        ApplyCommittedEntries(replica, ready.CommittedEntries);
+        AcknowledgeReady(replica, ready);
+    }
+
+    private void StoreReadyBatch(CounterReplica replica, Ready ready)
+    {
         replica.Persist(ready.Snapshot, ready.Entries, ready.HardState);
         trace?.Stored(replica.Id, ready.Entries, ready.HardState, nameof(Ready));
-        EnqueueDelivery(ready.Messages);
-        replica.Apply(ready.CommittedEntries);
-        trace?.Applied(replica, ready.CommittedEntries);
+    }
+
+    private void ApplyCommittedEntries(CounterReplica replica, IReadOnlyList<Entry> entries)
+    {
+        replica.Apply(entries);
+        trace?.Applied(replica, entries);
+    }
+
+    private void AcknowledgeReady(CounterReplica replica, Ready ready)
+    {
         replica.Node.Advance(ready);
         trace?.AcknowledgedApplication(replica, ready.CommittedEntries, nameof(RawNode.Advance));
+    }
+
+    private void DispatchAsyncStorageWork(CounterReplica replica, IEnumerable<Message> messages)
+    {
+        // In this protocol, the Ready fields are diagnostic. Workers complete
+        // the messages below and release responses; they never call Advance.
+        foreach (Message message in messages)
+        {
+            switch (message.To)
+            {
+                case RaftLocalMessageTargets.AppendThread:
+                    replica.AppendWork.Enqueue(message);
+                    break;
+                case RaftLocalMessageTargets.ApplyThread:
+                    replica.ApplyWork.Enqueue(message);
+                    trace?.ReceivedApplicationWork(replica.Id, message.Entries, nameof(MessageType.MsgStorageApply));
+                    break;
+                default:
+                    _delivery.Enqueue(message);
+                    break;
+            }
+        }
     }
 
     private void EnqueueDelivery(IEnumerable<Message> messages)

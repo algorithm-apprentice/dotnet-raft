@@ -32,6 +32,18 @@ public sealed partial class GrpcRaftMessageTransport
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(message);
+        PeerClient peer = GetPeerClient(message);
+        RaftEnvelope? envelope = EncodeEnvelope(message);
+        if (envelope is null)
+        {
+            return RaftSendResult.Unavailable;
+        }
+
+        return await SendToPeerAsync(peer, envelope, message, cancellationToken).ConfigureAwait(false);
+    }
+
+    private PeerClient GetPeerClient(Message message)
+    {
         if (!options.Peers.TryGetValue(
                 message.To,
                 out Uri? address)
@@ -41,11 +53,15 @@ public sealed partial class GrpcRaftMessageTransport
                 $"Message target {message.To} is not a configured remote peer.");
         }
 
-        PeerClient peer = clients.GetOrAdd(
+        return clients.GetOrAdd(
             message.To,
             _ => new PeerClient(
                 address,
                 options.MaxTransportMessageBytes));
+    }
+
+    private RaftEnvelope? EncodeEnvelope(Message message)
+    {
         ByteString payload =
             message.ToByteString();
         if (payload.Length
@@ -58,13 +74,18 @@ public sealed partial class GrpcRaftMessageTransport
                 message.To,
                 payload.Length,
                 options.MaxTransportMessageBytes);
-            return RaftSendResult.Unavailable;
+            return null;
         }
 
-        var envelope = new RaftEnvelope
+        return new RaftEnvelope
         {
             Payload = payload,
         };
+    }
+
+    private async ValueTask<RaftSendResult> SendToPeerAsync(
+        PeerClient peer, RaftEnvelope envelope, Message message, CancellationToken cancellationToken)
+    {
         DateTime deadline =
             DateTime.UtcNow + options.TransportTimeout;
 

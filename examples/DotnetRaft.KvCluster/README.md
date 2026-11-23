@@ -14,7 +14,7 @@ This is an educational three-process host for `DotnetRaft`. It demonstrates:
 This host uses `RaftNode` for concurrent calls and the default Ready/Advance
 storage protocol. Start with the [replicated counter](../DotnetRaft.Counter/README.md)
 if you want to see the host loop without gRPC and SQLite. For this example,
-start reading at `ProcessReadyAsync` in [`RaftClusterHost`](RaftClusterHost.cs):
+start reading at `ProcessReadyAsync` in [`RaftClusterHost.Ready.cs`](RaftClusterHost.Ready.cs):
 Raft provides ordered committed entries and read barriers, while this host
 owns transport, the application database, and the client's success response.
 The [fresh-write walkthrough](../../docs/internals/kv-host.md#follow-a-fresh-kv-write)
@@ -29,6 +29,29 @@ sharding, or deployment automation.
 Both listeners bind to loopback only. Raft message validation rejects malformed
 protocol input but does not authenticate `Message.From` or authorize clients.
 Do not expose this host outside a trusted local teaching environment.
+
+## Read the host as a workflow
+
+The lesson is **Raft describes effects; the host performs them and decides when
+the client's durable result exists**. Follow one PUT rather than starting with
+SQL or the scheduling details:
+
+| Source | Responsibility | Entry points |
+|---|---|---|
+| [`Program.cs`](Program.cs), [`KvHostSetup.cs`](KvHostSetup.cs) | Compose the process | Read options, configure separate HTTP/gRPC listeners, register one shared Raft host. |
+| [`KvHttpEndpoints.cs`](KvHttpEndpoints.cs) | Accept business requests | Validate inputs and map results/errors; do not execute Raft or write the KV database here. |
+| [`RaftClusterHost.Requests.cs`](RaftClusterHost.Requests.cs) | Correlate a request with its result | `MutateAsync` checks durable deduplication, registers a waiter, and waits for application. `ReadAsync` waits for a confirmed and locally applied read index. |
+| [`RaftClusterHost.Ready.cs`](RaftClusterHost.Ready.cs) | Execute Raft work | `ProcessReadyAsync` persists, sends, restores snapshots, applies entries, and releases read waiters. `RunReadyLoopAsync` acknowledges afterward. |
+| [`SqliteKeyValueStateMachine.Apply.cs`](SqliteKeyValueStateMachine.Apply.cs) | Publish business effects | Mutations, request results, and the physical cursor commit in the same transaction. Batches never cross configuration entries. |
+| [`SqliteKeyValueStateMachine.Snapshots.cs`](SqliteKeyValueStateMachine.Snapshots.cs) | Capture/restore one application prefix | Snapshot data, index, configuration, and deduplication records remain consistent. Restore publishes atomically. |
+| [`SqliteKeyValueStateMachine.Schema.cs`](SqliteKeyValueStateMachine.Schema.cs) | Open and validate the application store | Check the exact schema, local node binding, configuration, and cursor bounds. |
+| [`DurableHostRecovery.cs`](DurableHostRecovery.cs) | Reconcile the two stores | Validate their pairing, restore pending state, verify log coverage, repair only commit when justified, then validate the recovery point. |
+| [`RaftClusterHost.cs`](RaftClusterHost.cs) | Own node lifetime and snapshot policy | Construct the recovered node, supervise loops, stop the owner, and publish snapshots before compaction. |
+
+The partial host and state-machine files are parts of the **same owners**, not
+independent components sharing uncoordinated state. Their locks, transaction
+boundaries, and acknowledgement ordering are unchanged. Tick and inbound RPC
+processing stay independent of the single Ready consumer.
 
 ## Run three nodes
 

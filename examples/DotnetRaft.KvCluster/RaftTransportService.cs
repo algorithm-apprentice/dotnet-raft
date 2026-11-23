@@ -26,6 +26,14 @@ public sealed class RaftTransportService
         RaftEnvelope request,
         ServerCallContext context)
     {
+        EnsureRaftListener(context);
+        Message message = DecodePayload(request.Payload);
+        await DeliverMessageAsync(message, context.CancellationToken).ConfigureAwait(false);
+        return new Empty();
+    }
+
+    private void EnsureRaftListener(ServerCallContext context)
+    {
         if (context.GetHttpContext()
                 .Connection.LocalPort
             != options.GrpcPort)
@@ -35,30 +43,34 @@ public sealed class RaftTransportService
                     StatusCode.PermissionDenied,
                     "Raft transport is not available on this listener."));
         }
+    }
 
-        if (request.Payload.IsEmpty)
+    private static Message DecodePayload(ByteString payload)
+    {
+        if (payload.IsEmpty)
         {
             throw InvalidArgument(
                 "Raft envelope payload must be nonempty.");
         }
 
-        Message message;
         try
         {
-            message = Message.Parser.ParseFrom(
-                request.Payload);
+            return Message.Parser.ParseFrom(payload);
         }
         catch (InvalidProtocolBufferException exception)
         {
             throw InvalidArgument(
                 $"Raft payload is malformed: {exception.Message}");
         }
+    }
 
+    private async Task DeliverMessageAsync(Message message, CancellationToken cancellationToken)
+    {
         try
         {
             await receiver.ReceiveAsync(
                     message,
-                    context.CancellationToken)
+                    cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (ArgumentException exception)
@@ -73,8 +85,6 @@ public sealed class RaftTransportService
         {
             throw Unavailable(exception.Message);
         }
-
-        return new Empty();
     }
 
     private static RpcException InvalidArgument(

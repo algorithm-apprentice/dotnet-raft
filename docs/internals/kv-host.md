@@ -28,10 +28,10 @@ the same host phases in the KV example:
 
 | Phase | Counter | Durable KV host |
 |---|---|---|
-| Submit | `Program` calls `RawNode.Propose` directly. | [`Program` maps `PUT /kv/{key}`](../../examples/DotnetRaft.KvCluster/Program.cs#L85) to `PutAsync`. [`RaftClusterHost.MutateAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L511) registers and awaits a pending result; [`SubmitProposalAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L656) calls `RaftNode.ProposeAsync`. A follower can forward the proposal. |
-| Save and send | `CounterCluster.ProcessReady` writes to memory and enqueues peer messages. | [`ProcessReadyAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L375) calls `SqliteStorage.PersistReady` for `raft.db` before using the gRPC transport. Neither operation sets the KV value. |
-| Apply and finish the caller | `CounterReplica.Apply` updates the local counter. | [`ApplyCommittedEntriesAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L425) calls [`ApplyNormalEntries`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.cs#L172), which commits the effects, request results, and physical cursor to `application.db` together. Then `pendingProposals.Complete` releases the local waiters so the endpoint can return success. |
-| Acknowledge to Raft | `ProcessReady` calls `Advance` on that batch. | [`RunReadyLoopAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.cs#L354) calls `AdvanceAsync` after `ProcessReadyAsync`. This is not what releases the HTTP waiter. |
+| Submit | `Program.SubmitIncrement` calls `RawNode.Propose` directly. | [`KvHttpEndpoints.PutAsync`](../../examples/DotnetRaft.KvCluster/KvHttpEndpoints.cs) maps `PUT /kv/{key}` to `PutAsync`. [`RaftClusterHost.MutateAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Requests.cs) registers and awaits a pending result; `SubmitProposalAsync` calls `RaftNode.ProposeAsync`. A follower can forward the proposal. |
+| Save and send | `CounterCluster.ProcessSynchronousReady` stores the memory batch before enqueueing messages. | [`ProcessReadyAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) calls `SqliteStorage.PersistReady` for `raft.db` before `SendMessagesAsync` uses the gRPC transport. Neither operation sets the KV value. |
+| Apply and finish the caller | `CounterReplica.Apply` updates the local counter. | [`ApplyCommittedEntriesAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) groups ordinary entries and calls [`ApplyNormalEntries`](../../examples/DotnetRaft.KvCluster/SqliteKeyValueStateMachine.Apply.cs), which commits the effects, request results, and physical cursor to `application.db` together. Then `pendingProposals.Complete` releases the local waiters so the endpoint can return success. |
+| Acknowledge to Raft | `AcknowledgeReady` calls `Advance` on that batch. | [`RunReadyLoopAsync`](../../examples/DotnetRaft.KvCluster/RaftClusterHost.Ready.cs) calls `AdvanceAsync` after `ProcessReadyAsync`. This is not what releases the HTTP waiter. |
 
 [`ThreeNodeClusterReplicatesFollowerProposalAndRead`](../../tests/DotnetRaft.Tests/Examples/KvClusterIntegrationTests.cs)
 exercises this path without starting a gRPC server. The next section covers
@@ -143,6 +143,12 @@ reconciles a configuration mismatch or takes a snapshot once the configured
 entry threshold is reached. It does not compact into an undeliverable
 snapshot. The [runbook](../../examples/DotnetRaft.KvCluster/README.md#snapshot-policy)
 owns the size settings and retry interval.
+
+Live snapshot publication and recovery share `PublishSnapshotAndCompact` in
+`DurableHostRecovery`: durably publish the physical prefix before removing its
+log. The writes need not be one transaction; a crash between them retains the
+snapshot and the extra prefix. The existing snapshot/reopen component tests
+and real-process smoke verify the recovery boundary in both call paths.
 
 ## Testing
 

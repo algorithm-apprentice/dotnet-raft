@@ -5,9 +5,6 @@ using DotnetRaft.Storage.Sqlite;
 
 using Google.Protobuf;
 
-using ProtocolConfChange =
-    DotnetRaft.Protocol.ConfChange;
-
 namespace DotnetRaft.Examples.KvCluster;
 
 public sealed partial class RaftClusterHost
@@ -69,23 +66,7 @@ public sealed partial class RaftClusterHost
                 stateMachine,
                 fixedMembership,
                 MaximumPayloadBytes);
-        var config = new RaftConfig
-        {
-            Id = options.NodeId,
-            ElectionTick = 10,
-            HeartbeatTick = 1,
-            Storage = storage,
-            PreVote = true,
-            CheckQuorum = true,
-            Applied = recovery.Applied,
-            MaxSizePerMessage = (ulong)MaximumPayloadBytes,
-        };
-        node = recovery.StartNew
-            ? RaftNode.Start(
-                config,
-                peerIds.Select(
-                    id => new Peer(id)))
-            : RaftNode.Restart(config);
+        node = CreateNode(recovery);
         lastSnapshotAttemptIndex =
             recovery.Applied;
         if (recovery.Applied >= 3)
@@ -98,6 +79,24 @@ public sealed partial class RaftClusterHost
 
     private int MaximumPayloadBytes =>
         options.MaxTransportMessageBytes - TransportEnvelopeReserve;
+
+    private RaftNode CreateNode(DurableRecoveryState recovery)
+    {
+        var config = new RaftConfig
+        {
+            Id = options.NodeId,
+            ElectionTick = 10,
+            HeartbeatTick = 1,
+            Storage = storage,
+            PreVote = true,
+            CheckQuorum = true,
+            Applied = recovery.Applied,
+            MaxSizePerMessage = (ulong)MaximumPayloadBytes,
+        };
+        return recovery.StartNew
+            ? RaftNode.Start(config, peerIds.Select(id => new Peer(id)))
+            : RaftNode.Restart(config);
+    }
 
     public async ValueTask ReceiveAsync(
         Message message,
@@ -124,132 +123,6 @@ public sealed partial class RaftClusterHost
             .ConfigureAwait(false);
     }
 
-    public async Task<ProposalResponse> PutAsync(
-        string key,
-        string value,
-        Guid? requestId,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        ArgumentNullException.ThrowIfNull(value);
-        return await MutateAsync(
-                new KvCommand(
-                    requestId ?? Guid.NewGuid(),
-                    KvCommandType.Set,
-                    key,
-                    value),
-                cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    public Task<ProposalResponse> PutAsync(
-        string key,
-        string value,
-        CancellationToken cancellationToken)
-    {
-        return PutAsync(
-            key,
-            value,
-            requestId: null,
-            cancellationToken);
-    }
-
-    public async Task<ProposalResponse> DeleteAsync(
-        string key,
-        Guid? requestId,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        return await MutateAsync(
-                new KvCommand(
-                    requestId ?? Guid.NewGuid(),
-                    KvCommandType.Delete,
-                    key,
-                    null),
-                cancellationToken)
-            .ConfigureAwait(false);
-    }
-
-    public async Task<ReadResponse> ReadAsync(
-        string key,
-        CancellationToken cancellationToken)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(key);
-        await WaitUntilReadyAsync(
-                cancellationToken)
-            .ConfigureAwait(false);
-        Guid requestId = Guid.NewGuid();
-        Task<ulong> barrier =
-            pendingReads.Register(requestId);
-        using CancellationTokenSource timeout =
-            CreateRequestTimeout(cancellationToken);
-        try
-        {
-            await node.ReadIndexAsync(
-                    requestId.ToByteArray(),
-                    timeout.Token)
-                .ConfigureAwait(false);
-            ulong index = await barrier.WaitAsync(
-                    timeout.Token)
-                .ConfigureAwait(false);
-            KeyValueReadResult result =
-                stateMachine.ReadAtLeast(
-                    key,
-                    index);
-            return new ReadResponse(
-                options.NodeId,
-                result.Found,
-                result.Value,
-                index,
-                result.PhysicalApplied,
-                Linearizable: true);
-        }
-        catch (OperationCanceledException)
-            when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                $"Read {requestId} did not complete within {options.RequestTimeout}.");
-        }
-        finally
-        {
-            pendingReads.Remove(requestId);
-        }
-    }
-
-    public ReadResponse ReadLocal(string key)
-    {
-        EnsureReady();
-        KeyValueReadResult result =
-            stateMachine.ReadLocal(key);
-        return new ReadResponse(
-            NodeId: options.NodeId,
-            Found: result.Found,
-            Value: result.Value,
-            RequiredIndex: result.PhysicalApplied,
-            PhysicalApplied:
-                result.PhysicalApplied,
-            Linearizable: false);
-    }
-
-    public async Task<ClusterStatusResponse> GetStatusAsync(
-        CancellationToken cancellationToken)
-    {
-        await WaitUntilReadyAsync(
-                cancellationToken)
-            .ConfigureAwait(false);
-        Status status = await node.GetStatusAsync(
-                cancellationToken)
-            .ConfigureAwait(false);
-        return new ClusterStatusResponse(
-            options.NodeId,
-            status.Basic.Role,
-            status.Basic.Term,
-            status.Basic.LeaderId,
-            status.Basic.Commit,
-            status.Basic.Applied,
-            stateMachine.PhysicalApplied);
-    }
-
     protected override async Task ExecuteAsync(
         CancellationToken stoppingToken)
     {
@@ -269,17 +142,7 @@ public sealed partial class RaftClusterHost
 
         try
         {
-            Task first = await Task.WhenAny(
-                    readyLoop,
-                    tickLoop,
-                    completion)
-                .ConfigureAwait(false);
-            await first.ConfigureAwait(false);
-            if (!stoppingToken.IsCancellationRequested)
-            {
-                throw new InvalidOperationException(
-                    "A Raft host loop stopped unexpectedly.");
-            }
+            await WatchHostLoopsAsync(readyLoop, tickLoop, completion, stoppingToken).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
             when (stoppingToken.IsCancellationRequested)
@@ -298,36 +161,57 @@ public sealed partial class RaftClusterHost
                         tickLoop)
                     .ConfigureAwait(false);
             failure ??= loopFailure;
-            try
-            {
-                await node.StopAsync()
-                    .ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                failure ??= exception;
-            }
+            Exception? nodeFailure = await StopAndDisposeNodeAsync(stoppingToken).ConfigureAwait(false);
+            failure ??= nodeFailure;
+        }
 
-            try
+        FinishHostLifetime(failure, stoppingToken);
+    }
+
+    private static async Task WatchHostLoopsAsync(
+        Task readyLoop, Task tickLoop, Task completion, CancellationToken stoppingToken)
+    {
+        Task first = await Task.WhenAny(readyLoop, tickLoop, completion).ConfigureAwait(false);
+        await first.ConfigureAwait(false);
+        if (!stoppingToken.IsCancellationRequested)
+        {
+            throw new InvalidOperationException("A Raft host loop stopped unexpectedly.");
+        }
+    }
+
+    private async Task<Exception?> StopAndDisposeNodeAsync(CancellationToken stoppingToken)
+    {
+        Exception? failure = null;
+        try
+        {
+            await node.StopAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+
+        try
+        {
+            await node.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (Exception exception)
+        {
+            failure ??= exception;
+        }
+        finally
+        {
+            if (!stoppingToken.IsCancellationRequested)
             {
-                await node.DisposeAsync()
-                    .ConfigureAwait(false);
-            }
-            catch (Exception exception)
-            {
-                failure ??= exception;
-            }
-            finally
-            {
-                if (!stoppingToken
-                    .IsCancellationRequested)
-                {
-                    applicationLifetime
-                        .StopApplication();
-                }
+                applicationLifetime.StopApplication();
             }
         }
 
+        return failure;
+    }
+
+    private void FinishHostLifetime(Exception? failure, CancellationToken stoppingToken)
+    {
         if (failure is not null)
         {
             startupReady.TrySetException(failure);
@@ -338,259 +222,6 @@ public sealed partial class RaftClusterHost
 
         startupReady.TrySetCanceled(
             stoppingToken);
-    }
-
-    private async Task RunTickLoopAsync(
-        CancellationToken cancellationToken)
-    {
-        while (await tickSource.WaitForNextTickAsync(
-                   cancellationToken)
-               .ConfigureAwait(false))
-        {
-            node.Tick();
-        }
-    }
-
-    private async Task RunReadyLoopAsync(
-        CancellationToken cancellationToken)
-    {
-        while (true)
-        {
-            Ready ready =
-                await node.WaitForReadyAsync(
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            await ProcessReadyAsync(
-                    ready,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            await node.AdvanceAsync(
-                    cancellationToken)
-                .ConfigureAwait(false);
-            MaybeCreateSnapshot();
-            TryCompleteStartup();
-        }
-    }
-
-    private async Task ProcessReadyAsync(
-        Ready ready,
-        CancellationToken cancellationToken)
-    {
-        storage.PersistReady(ready);
-
-        foreach (Message message in ready.Messages)
-        {
-            RaftSendResult result =
-                await transport.SendAsync(
-                        message,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            if (message.Type == MessageType.MsgSnap)
-            {
-                await node.ReportSnapshotAsync(
-                        message.To,
-                        result == RaftSendResult.Delivered
-                            ? SnapshotStatus.Success
-                            : SnapshotStatus.Failure,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            else if (result == RaftSendResult.Unavailable)
-            {
-                await node.ReportUnreachableAsync(
-                        message.To,
-                        cancellationToken)
-                    .ConfigureAwait(false);
-            }
-        }
-
-        if (ready.Snapshot is not null)
-        {
-            DurableHostRecovery.CompletePendingSnapshot(
-                storage, stateMachine, ready.Snapshot, recovering: false);
-            LogIncomingSnapshotRestored(logger, ready.Snapshot.Metadata.Index);
-            CompletePendingProposalsFromDurableState();
-        }
-
-        await ApplyCommittedEntriesAsync(ready.CommittedEntries, cancellationToken).ConfigureAwait(false);
-
-        foreach (ReadState readState in ready.ReadStates)
-        {
-            CompleteRead(readState);
-        }
-
-        pendingReads.CompleteThrough(
-            stateMachine.PhysicalApplied);
-    }
-
-    private async Task ApplyCommittedEntriesAsync(
-        IReadOnlyList<Entry> entries,
-        CancellationToken cancellationToken)
-    {
-        int next = 0;
-        while (next < entries.Count)
-        {
-            if (!IsOrdinaryApplicationEntry(entries[next]))
-            {
-                await ApplyConfigurationEntryAsync(entries[next], cancellationToken).ConfigureAwait(false);
-                next++;
-                continue;
-            }
-
-            int start = next++;
-            while (next < entries.Count && next - start < MaxApplicationBatchEntries
-                && IsOrdinaryApplicationEntry(entries[next]))
-            {
-                next++;
-            }
-
-            // No result escapes until the application transaction publishes
-            // the whole prefix. Never group across an unapplied config entry.
-            foreach (KvApplyResult result in stateMachine.ApplyNormalEntries(entries, start, next))
-            {
-                pendingProposals.Complete(result);
-            }
-        }
-    }
-
-    private bool IsOrdinaryApplicationEntry(Entry entry) =>
-        entry.Type == EntryType.EntryNormal && !fixedMembership.IsBootstrapIndex(entry.Index);
-
-    private async Task ApplyConfigurationEntryAsync(Entry entry, CancellationToken cancellationToken)
-    {
-        if (fixedMembership.IsBootstrapIndex(
-                entry.Index))
-        {
-            ProtocolConfChange bootstrap =
-                fixedMembership
-                    .ValidateBootstrapEntry(entry);
-            _ = await node.ApplyConfChangeAsync(
-                    bootstrap,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            stateMachine.ApplyConfiguration(
-                entry.Index,
-                fixedMembership
-                    .ExpectedConfState(
-                        entry.Index));
-            return;
-        }
-
-        switch (entry.Type)
-        {
-            case EntryType.EntryConfChange:
-            case EntryType.EntryConfChangeV2:
-                stateMachine.AdvanceNoOp(
-                    entry.Index);
-                return;
-            default:
-                throw new InvalidDataException(
-                    $"Unknown committed entry type {entry.Type}.");
-        }
-    }
-
-    private void CompleteRead(ReadState readState)
-    {
-        if (readState.RequestContext.Length !=
-            16)
-        {
-            LogUnknownReadContext(
-                logger,
-                readState.Index,
-                readState.RequestContext.Length);
-            return;
-        }
-
-        var requestId = new Guid(
-            readState.RequestContext.Span);
-        pendingReads.CompleteOrDefer(
-            requestId,
-            readState.Index,
-            stateMachine.PhysicalApplied);
-    }
-
-    private async Task<ProposalResponse> MutateAsync(
-        KvCommand command,
-        CancellationToken cancellationToken)
-    {
-        await WaitUntilReadyAsync(
-                cancellationToken)
-            .ConfigureAwait(false);
-        byte[] payload = DurableKvCommandCodec.Encode(command);
-        ByteString fingerprint = DurableKvCommandCodec.Fingerprint(payload);
-        KvApplyResult? existing = stateMachine.ResolveAppliedRequest(
-            command.RequestId,
-            fingerprint);
-        if (existing is not null)
-        {
-            return CreateProposalResponse(command, existing);
-        }
-
-        PendingProposalRegistry.PendingProposalRegistration registration;
-        try
-        {
-            registration = pendingProposals.Register(command.RequestId, fingerprint);
-        }
-        catch (KvRequestConflictException)
-        {
-            // A durable result wins over a conflict with another waiter.
-            existing = stateMachine.ResolveAppliedRequest(
-                command.RequestId,
-                fingerprint);
-            if (existing is null)
-            {
-                throw;
-            }
-
-            return CreateProposalResponse(command, existing);
-        }
-
-        using PendingProposalRegistry
-            .PendingProposalRegistration pending = registration;
-        using CancellationTokenSource timeout =
-            CreateRequestTimeout(cancellationToken);
-        try
-        {
-            if (pending.IsOwner
-                && pending.BeginSubmission() is { } submission)
-            {
-                _ = SubmitProposalAsync(
-                    command.RequestId,
-                    fingerprint,
-                    payload,
-                    submission);
-            }
-
-            KvApplyResult result =
-                await pending.Task.WaitAsync(
-                        timeout.Token)
-                    .ConfigureAwait(false);
-            return CreateProposalResponse(command, result);
-        }
-        catch (OperationCanceledException)
-            when (!cancellationToken.IsCancellationRequested)
-        {
-            throw new TimeoutException(
-                $"Proposal {command.RequestId} did not apply within {options.RequestTimeout}.");
-        }
-    }
-
-    private ProposalResponse CreateProposalResponse(
-        KvCommand command,
-        KvApplyResult result)
-    {
-        if (result.Conflict)
-        {
-            throw new KvRequestConflictException(command.RequestId);
-        }
-
-        return new ProposalResponse(
-            options.NodeId,
-            command.RequestId,
-            command.Type,
-            result.ResultIndex,
-            result.PhysicalApplied,
-            result.Duplicate);
     }
 
     private void MaybeCreateSnapshot()
@@ -611,25 +242,12 @@ public sealed partial class RaftClusterHost
 
         ConfState configuration =
             stateMachine.ConfState;
-        bool configurationMismatch =
-            !current.Metadata.ConfState.Equals(
-                configuration);
-        ulong distance =
-            applied - current.Metadata.Index;
-        if (!configurationMismatch
-            && distance
-                < (ulong)options
-                    .SnapshotThresholdEntries)
+        if (!IsSnapshotDue(current, applied, configuration))
         {
             return;
         }
 
-        if (lastSnapshotAttemptIndex
-                > current.Metadata.Index
-            && applied
-                - lastSnapshotAttemptIndex
-                < (ulong)options
-                    .SnapshotThresholdEntries)
+        if (!CanRetrySnapshot(current, applied))
         {
             return;
         }
@@ -642,66 +260,28 @@ public sealed partial class RaftClusterHost
             return;
         }
 
-        storage.CreateSnapshot(
-            applied,
-            configuration,
-            snapshotData);
-        ulong compacted =
-            storage.GetFirstIndex() - 1;
-        if (compacted < applied)
+        PublishSnapshot(applied, configuration, snapshotData);
+    }
+
+    private bool IsSnapshotDue(Snapshot current, ulong applied, ConfState configuration)
+    {
+        bool configurationMismatch = !current.Metadata.ConfState.Equals(configuration);
+        ulong distance = applied - current.Metadata.Index;
+        return configurationMismatch || distance >= (ulong)options.SnapshotThresholdEntries;
+    }
+
+    private bool CanRetrySnapshot(Snapshot current, ulong applied)
+    {
+        return !(lastSnapshotAttemptIndex > current.Metadata.Index
+            && applied - lastSnapshotAttemptIndex < (ulong)options.SnapshotThresholdEntries);
+    }
+
+    private void PublishSnapshot(ulong applied, ConfState configuration, ByteString snapshotData)
+    {
+        if (DurableHostRecovery.PublishSnapshotAndCompact(storage, applied, configuration, snapshotData))
         {
-            storage.Compact(applied);
             LogSnapshotCompacted(logger, applied);
         }
-    }
-
-    private async Task SubmitProposalAsync(
-        Guid requestId,
-        ByteString fingerprint,
-        byte[] payload,
-        PendingProposalRegistry
-            .PendingProposalSubmission submission)
-    {
-        try
-        {
-            // An earlier attempt may have completed between the initial
-            // lookup and registration. Check while the waiter is registered.
-            KvApplyResult? applied =
-                stateMachine.ResolveAppliedRequest(requestId, fingerprint);
-            if (applied is not null)
-            {
-                pendingProposals.Complete(applied);
-                return;
-            }
-
-            if (payload.Length > MaximumPayloadBytes)
-            {
-                throw new KvPayloadTooLargeException(
-                    payload.Length,
-                    MaximumPayloadBytes);
-            }
-
-            await node.ProposeAsync(
-                    payload,
-                    submission.CancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-            when (submission.CancellationToken
-                .IsCancellationRequested)
-        {
-        }
-        catch (Exception exception)
-        {
-            submission.Fail(exception);
-        }
-    }
-
-    private void
-        CompletePendingProposalsFromDurableState()
-    {
-        pendingProposals.CompleteResolved(
-            stateMachine.ResolveAppliedRequest);
     }
 
     private void TryCompleteStartup()
@@ -745,18 +325,6 @@ public sealed partial class RaftClusterHost
             throw new InvalidOperationException(
                 "The durable Raft host is still recovering.");
         }
-    }
-
-    private CancellationTokenSource CreateRequestTimeout(
-        CancellationToken cancellationToken)
-    {
-        CancellationTokenSource timeout =
-            CancellationTokenSource
-                .CreateLinkedTokenSource(
-                    cancellationToken);
-        timeout.CancelAfter(
-            options.RequestTimeout);
-        return timeout;
     }
 
     private static async Task<Exception?>
