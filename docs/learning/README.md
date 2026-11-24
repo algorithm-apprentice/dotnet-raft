@@ -8,11 +8,12 @@ to a real service.
 
 ## Start here
 
-1. Run the [replicated counter](../../examples/DotnetRaft.Counter/README.md) in
-   both modes. Observe that a proposal is not a commit, and a commit is not
-   application. Use the [single-write trace](../../examples/DotnetRaft.Counter/README.md#trace-one-write)
-   and [source walkthrough](../internals/README.md#follow-a-write) to compare
-   which code is Raft and which code belongs to the host.
+1. Use the [architecture and source guide](../internals/README.md) to locate
+   the consensus, storage, and host boundaries. Run the
+   [Counter write trace](../../examples/DotnetRaft.Counter/README.md#trace-one-write)
+   and [follow the write in the source](../internals/README.md#follow-a-write).
+   Start with Ready/Advance, then repeat with async storage to see why a
+   proposal is not a commit and a commit is not application.
 2. Work through the [implementation deep dives](#implementation-deep-dives)
    in order. Predict each example on paper before stepping through the code.
 3. Run the [manual KV laboratory](#manual-laboratory) and use the

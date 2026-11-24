@@ -9,7 +9,7 @@ development history.
 | **Run** | [Examples](../examples/README.md) | A three-voter counter, then a restartable gRPC KV cluster. |
 | **Learn** | [Raft learning path](learning/README.md) | Worked examples from elections to recovery and a client-history lab. |
 | **Integrate** | [Host integration](integration/README.md) | Choose the node API and storage protocol, then start, drive, and recover a service. |
-| **Understand** | [Implementation map](internals/README.md) | Follow a request across code owners and understand the safety constraints they enforce. |
+| **Read the code** | [Software architecture and source guide](internals/README.md) | Map project dependencies and runtime ownership, then trace one write from proposal through application. |
 | **Maintain** | [Maintainer guide](maintaining/README.md) | Find the tests, record a decision, and verify compatibility or performance. |
 
 ### Three places to look for a rule

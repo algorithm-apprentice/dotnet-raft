@@ -1,6 +1,6 @@
 # The architecture guide has moved
 
-Use the [implementation map](internals/README.md) for the current C# system.
+Use the [software architecture and source guide](internals/README.md) for the current C# system.
 
 | Older section | Current guide |
 |---|---|

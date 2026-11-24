@@ -27,7 +27,8 @@ to see which acknowledgement advances the commit index.
 | Run a cluster and observe replication or failover | [Runnable examples](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/examples/README.md) |
 | Learn why Raft works | [Learning path](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/learning/README.md) |
 | Embed a node in a service | [Host integration](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/integration/README.md) |
-| Understand the code or make a change | [Implementation map](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/internals/README.md) and [maintainer guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/maintaining/README.md) |
+| Read the C# code | [Software architecture and source guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/internals/README.md) |
+| Change and verify the project | [Maintainer guide](https://github.com/algorithm-apprentice/dotnet-raft/blob/main/docs/maintaining/README.md) |
 
 ## Install
 
